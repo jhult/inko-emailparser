@@ -1,0 +1,45 @@
+From: sender@example.com
+To: recipient@example.com
+Subject: Nested Multipart Structure
+Date: Mon, 21 Jan 2026 10:00:00 +0000
+Message-ID: <nested789@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=outer_boundary
+
+--outer_boundary
+Content-Type: multipart/alternative; boundary=inner_text_html
+
+--inner_text_html
+Content-Type: text/plain; charset=UTF-8
+
+Plain text body here.
+--inner_text_html
+Content-Type: text/html; charset=UTF-8
+
+<html><body>HTML body here</body></html>
+--inner_text_html--
+--outer_boundary
+Content-Type: multipart/related; boundary=related_images
+
+--related_images
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+<html><body><img src=3D"cid:image1@example.com" alt=3D"Embedded Image"></body></html>
+--related_images
+Content-Type: image/png
+Content-ID: <image1@example.com>
+Content-Disposition: inline; filename="image1.png"
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==
+--related_images--
+--outer_boundary
+Content-Type: application/pdf; name="document.pdf"
+Content-Disposition: attachment; filename="document.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjUKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSL0ZpbHRlci9GbGF0ZURl
+Y29kZT4+CnN0cmVhbQp4nDPz5XATAAAEQ2Z2AAAQaWF1dGhvcml6ZWQKZW5kc3RyZWFtCmVuZG9i
+ago=
+--outer_boundary--

@@ -1,0 +1,337 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# ==============================================================================
+# String Validation Module
+# ==============================================================================
+#
+# This module provides reusable string validation functions for email parsing.
+# It implements validators for MIME types, boundaries, quoted strings, and other
+# email-related string formats per RFC specifications.
+#
+# ## Purpose
+#
+# Email parsing requires extensive string validation to ensure RFC compliance
+# and prevent security issues. This module centralizes validation logic for:
+# - MIME types and subtypes (e.g., "text/plain", "image/jpeg")
+# - Boundary strings for multipart messages
+# - Quoted strings and angle-bracketed strings
+# - Printable ASCII validation
+#
+# ## Architecture
+#
+# The module provides predicate functions that return Bool indicating whether
+# a string meets specific criteria:
+#
+# - **is_quoted_string**: Checks for double-quote enclosure
+# - **is_angle_bracketed**: Checks for angle bracket enclosure
+# - **is_printable_ascii_string**: Validates all characters are printable ASCII
+# - **is_valid_mime_subtype**: Validates MIME subtype per RFC 2045
+# - **is_valid_mime_type**: Validates complete MIME type (type/subtype)
+# - **is_valid_boundary**: Validates MIME boundary string per RFC 2046
+#
+# ## Design Decisions
+#
+# ### Byte-level Validation
+#
+# Validators operate at byte level (checking each character) because:
+# - Email headers are ASCII-based by definition
+# - Allows early rejection of invalid input
+# - Avoids Unicode processing overhead for pure ASCII checks
+# - Matches the character-by-character parsing approach in main parser
+#
+# ### Rejection over Sanitization
+#
+# Validators return Bool (valid/invalid) rather than sanitized strings because:
+# - Invalid input should be rejected, not silently fixed
+# - Prevents ambiguous interpretation of malformed data
+# - Maintains clear security boundary (fail-closed)
+# - Allows caller to decide how to handle invalid data
+
+#
+# ### MIME Special Characters
+#
+# MIME "tspecials" are explicitly rejected because:
+# - RFC 2045 defines these as delimiter characters
+# - Allowing them would break MIME parsing
+# - List includes: ()<>[];:@\\,/\"
+#
+# ## Module Interactions
+#
+# This module is used by:
+# - **emailparser**: Main parser uses validators for:
+#   - Boundary validation in multipart parsing
+#   - Quoted string detection in header parsing
+#   - MIME type validation
+#
+# This module imports:
+# - **emailparser.ascii**: Character constants and predicates for validation
+#
+# ## Public vs Private API
+#
+# ### Public API
+#
+# All functions are public and intended for use throughout the emailparser
+# package:
+# - `is_quoted_string`: Check for "string" format
+# - `is_angle_bracketed`: Check for <string> format
+# - `is_printable_ascii_string`: Check for printable ASCII only
+# - `is_valid_mime_subtype`: Validate MIME subtype (e.g., "plain")
+# - `is_valid_mime_type`: Validate MIME type (e.g., "text/plain")
+# - `is_valid_boundary`: Validate MIME boundary string
+#
+# ### Private API
+#
+# None - all functions are public.
+#
+# ## RFC Compliance
+#
+# This module implements:
+# - **RFC 2045 section 5.1**: Syntax of the Content-Type Header
+# - **RFC 2046 section 5.1.1**: Multipart Media Type (boundary specification)
+# - **ASCII (ANSI X3.4-1986)**: Printable character range (33-126)
+#
+# ### MIME Type Validation
+#
+# From RFC 2045:
+# ```
+# type :=       "application" / "audio" / "image" / "image" /
+#               "message" / "multipart" / "text" / "video" / x-token
+# subtype :=    token ; see RFC 2045 section 5
+# token :=      1*<any (US-ASCII) CHAR except SPACE, CTLs, or tspecials>
+# tspecials :=  "(" / ")" / "<" / ">" / "@" /
+#               "," / ";" / ":" / "\" / <">
+#               "/" / "[" / "]" / "?" / "="
+# ```
+#
+# ### Boundary Validation
+#
+# From RFC 2046:
+# ```
+# boundary := 0*69<bchars> bcharspace
+# bchars := bchar-nospace / bchar-space
+# bchar-nospace := DIGIT / ALPHA / "'" / "(" / ")" /
+#                  "+" / "_" / "," / "-" / "." /
+#                  "/" / ":" / "=" / "?"
+# bchar-space := " "
+# bcharspace := bchar-nospace 1*" "
+# ```
+#
+# Key constraints:
+# - Maximum length: 70 characters
+# - Must not end with space (space is only allowed as interior character)
+# - Only specific characters allowed (alphanumeric + defined special chars)
+#
+# ### Notable Limitations
+#
+# - Does not validate against registered IANA MIME types (any valid format accepted)
+# - Does not support obsolete MIME type syntax
+# - Boundary validator does not check for uniqueness (caller's responsibility)
+#
+# ## Security Considerations
+#
+# ### Boundary String Security
+#
+# Boundary validation prevents:
+# - Injection attacks via special characters
+# - Header smuggling via newlines or control characters
+# - Parser confusion via overly long boundaries
+#
+# ### MIME Type Security
+#
+# MIME type validation prevents:
+# - Content type confusion via malformed types
+# - Parameter injection via semicolons or equals signs
+# - Header parsing via angle brackets or parentheses
+#
+# ## Usage Example
+#
+# ```inko
+# import emailparser.validation (
+#   is_valid_mime_type,
+#   is_valid_boundary,
+#   is_quoted_string,
+# )
+#
+# # Validate MIME type
+# if is_valid_mime_type("text/plain") {
+#   # Valid MIME type
+# }
+#
+# if is_valid_mime_type("text/plain; charset=utf-8") == false {
+#   # Invalid: includes parameters
+# }
+#
+# # Validate boundary
+# if is_valid_boundary("boundary123") {
+#   # Valid boundary string
+# }
+#
+# if is_valid_boundary("boundary\n") == false {
+#   # Invalid: contains newline
+# }
+#
+# # Check for quoted string
+# if is_quoted_string('"hello world"') {
+#   # String is quoted
+# }
+# ```
+
+import emailparser.ascii (
+  ASCII_APOSTROPHE, ASCII_AT, ASCII_BACKSLASH, ASCII_COLON, ASCII_COMMA,
+  ASCII_DEL, ASCII_DOT, ASCII_DQUOTE, ASCII_EQUALS, ASCII_GREATER_THAN,
+  ASCII_HYPHEN, ASCII_LEFT_BRACE, ASCII_LESS_THAN, ASCII_LPAREN, ASCII_PLUS,
+  ASCII_QUESTION, ASCII_RIGHT_BRACE, ASCII_RPAREN, ASCII_SEMICOLON, ASCII_SLASH,
+  ASCII_SPACE, ASCII_UNDERSCORE, is_alnum, is_control_char, is_printable_ascii,
+)
+import emailparser.limits (MAX_BOUNDARY_LENGTH)
+
+# ========== String Validation Helpers ==========
+
+# Check if a string is enclosed in double quotes
+fn pub is_quoted_string(s: String) -> Bool {
+  s.size >= 2 and s.starts_with?('"') and s.ends_with?('"')
+}
+
+# Check if a string is enclosed in angle brackets
+fn pub is_angle_bracketed(s: String) -> Bool {
+  s.size >= 2 and s.starts_with?('<') and s.ends_with?('>')
+}
+
+# Check if a string contains only printable ASCII characters
+fn pub is_printable_ascii_string(s: String) -> Bool {
+  if s.empty? { return false }
+
+  let mut i = 0
+
+  while i < s.size {
+    match s.get(i) {
+      case Ok(byte) -> {
+        if !is_printable_ascii(byte) { return false }
+
+        i = i + 1
+      }
+      case Error(_) -> return false
+    }
+  }
+
+  true
+}
+
+# Check if a string is a valid MIME subtype (e.g., "plain", "html")
+# RFC 2045: subtype = token (1*<any US-ASCII CHAR except SPACE, CTLs, or tspecials>)
+fn pub is_valid_mime_subtype(subtype: String) -> Bool {
+  if subtype.empty? { return false }
+
+  let mut i = 0
+
+  while i < subtype.size {
+    match subtype.get(i) {
+      case Ok(byte) -> {
+        # Reject control characters, spaces, and MIME special characters
+        if is_control_char(byte) or byte == ASCII_SPACE { return false }
+
+        # MIME tspecials: ()<>[];:@\\,/\"
+        if
+          byte == ASCII_LPAREN
+            or byte == ASCII_RPAREN
+            or byte == ASCII_LESS_THAN
+            or byte == ASCII_GREATER_THAN
+            or byte == ASCII_LEFT_BRACE
+            or byte == ASCII_RIGHT_BRACE
+            or byte == ASCII_SEMICOLON
+            or byte == ASCII_COLON
+            or byte == ASCII_AT
+            or byte == ASCII_BACKSLASH
+            or byte == ASCII_COMMA
+            or byte == ASCII_SLASH
+            or byte == ASCII_DQUOTE
+        {
+          return false
+        }
+
+        i = i + 1
+      }
+      case Error(_) -> return false
+    }
+  }
+
+  true
+}
+
+# Check if a string is a valid MIME type (e.g., "text/plain")
+# This validates just the type/subtype part, NOT parameters
+fn pub is_valid_mime_type(content_type: String) -> Bool {
+  if content_type.empty? { return false }
+
+  let slash_pos = content_type.index_of('/', 0)
+
+  match slash_pos {
+    case Some(pos) -> {
+      let type_part = content_type.substring(0, pos)
+      let subtype_part = content_type.substring(pos + 1, content_type.size)
+
+      # Validate type and subtype (both must be valid tokens)
+      is_valid_mime_subtype(type_part) and is_valid_mime_subtype(subtype_part)
+    }
+    case None -> false
+  }
+}
+
+# Check if a string is a valid boundary string
+# RFC 2046: boundary = 0*69<bchars> bcharspace
+# bchars = ALPHA / DIGIT / "'" / "(" / ")" / "+" / "_" / "," / "-" / "." / "/" / ":" / "=" / "?"
+
+fn pub is_valid_boundary(boundary: String) -> Bool {
+  # RFC 2046 Section 5.1.1: boundary must be 1-70 characters
+  # RFC 2046 Section 5.1.1: boundary must be 1-70 characters
+  if boundary.empty? or boundary.size > MAX_BOUNDARY_LENGTH { return false }
+
+  # RFC 2046 specifies boundaries should consist of:
+  # - Alphanumeric characters (a-z, A-Z, 0-9)
+  # - Limited set of special characters: ' ( ) + _ , - . / : = ?
+  # - Spaces (allowed throughout for compatibility with real-world emails)
+  # But NOT control characters, brackets, semicolons, backslashes, quotes
+
+  let mut i = 0
+  let mut has_non_space = false
+
+  while i < boundary.size {
+    match boundary.get(i) {
+      case Ok(byte) -> {
+        # Reject control characters (including newlines, tabs, null, DEL)
+        if is_control_char(byte) or byte == ASCII_DEL { return false }
+
+        # Allow alphanumeric characters
+        let is_valid = is_alnum(byte)
+
+        # Allow limited special characters from RFC 2046
+          or byte == ASCII_APOSTROPHE
+          or byte == ASCII_LPAREN
+          or byte == ASCII_RPAREN
+          or byte == ASCII_PLUS
+          or byte == ASCII_UNDERSCORE
+          or byte == ASCII_COMMA
+          or byte == ASCII_HYPHEN
+          or byte == ASCII_DOT
+          or byte == ASCII_SLASH
+          or byte == ASCII_COLON
+          or byte == ASCII_EQUALS
+          or byte == ASCII_QUESTION
+          or byte == ASCII_SPACE
+
+        if !is_valid { return false }
+
+        # Track if we have at least one non-space character
+        if byte != ASCII_SPACE { has_non_space = true }
+
+        i = i + 1
+      }
+      case Error(_) -> return false
+    }
+  }
+
+  # Boundary must contain at least one non-space character
+  has_non_space
+}

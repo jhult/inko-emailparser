@@ -1,0 +1,33 @@
+From: sender@example.com
+To: recipient@example.com
+Subject: Email with Special Characters in Filename
+Date: Tue, 22 Jan 2026 14:00:00 +0000
+Message-ID: <special101@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=bnd
+
+--bnd
+Content-Type: text/plain; charset=UTF-8
+
+Please find attached files with special characters.
+--bnd
+Content-Type: application/pdf; name*=UTF-8''document%20with%20spaces.pdf
+Content-Disposition: attachment; filename*=UTF-8''document%20with%20spaces.pdf
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjUKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSL0ZpbHRlci9GbGF0ZURl
+Y29kZT4+CnN0cmVhbQp4nDPz5XATAAAEQ2Z2AAAQaWF1dGhvcml6ZWQKZW5kc3RyZWFtCmVuZG9i
+ago=
+--bnd
+Content-Type: text/plain; name*=UTF-8''%C3%A9%20document%20with%20%C3%A9.txt
+Content-Disposition: attachment; filename*=UTF-8''%C3%A9%20document%20with%20%C3%A9.txt
+Content-Transfer-Encoding: base64
+
+RmlsZSB3aXRoIG5vbi1BU0NJIGNoYXJhY3RlcnM=
+--bnd
+Content-Type: application/octet-stream; name*=UTF-8''%D1%84%D0%B0%D0%B9%D0%BB.bin
+Content-Disposition: attachment; filename*=UTF-8''%D1%84%D0%B0%D0%B9%D0%BB.bin
+Content-Transfer-Encoding: base64
+
+SGVsbG8gV29ybGQ=
+--bnd--

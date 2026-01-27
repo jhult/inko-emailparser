@@ -1,0 +1,308 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# ==============================================================================
+# RFC 5322 Date Formatting Module
+# ==============================================================================
+#
+# This module provides RFC 5322 compliant date formatting for email headers.
+# It converts Inko DateTime values into properly formatted date strings suitable
+# for use in the Date header field of email messages.
+#
+# ## Purpose
+#
+# Email messages require dates in a specific format defined by RFC 5322. This
+# module handles the conversion from Inko's DateTime representation to the
+# standardized string format: "Fri, 08 Jan 2026 12:34:56 +0000"
+#
+# ## Architecture
+#
+# The module centers on the EmailDateFormatter type which:
+# - Stores timezone configuration
+# - Provides formatting methods for current time and arbitrary DateTime values
+# - Validates timezone format (±HHMM or HHMM)
+# - Formats individual date components (weekday, month, timezone offset)
+#
+# Helper functions provide convenient access to common formatting scenarios:
+# - format_email_date: Format current time
+# - format_email_date_datetime: Format specific DateTime
+# - format_email_date_with_tz: Format with custom timezone
+#
+# ## Design Decisions
+#
+# ### Timezone Format
+#
+# RFC 5322 specifies timezone as ±HHMM (4 digits with sign). The module:
+# - Accepts both "+0000" and "0000" formats (adds + if missing)
+# - Validates that hours and minutes are valid digits
+# - Defaults to "+0000" (UTC) for invalid inputs
+#
+# Note: The format does NOT include a colon (±HH:MM), which differs from ISO 8601.
+#
+# ### Component Formatting
+#
+# Each date component is formatted individually:
+# - Weekday: 3-letter abbreviation (Mon, Tue, Wed, Thu, Fri, Sat, Sun)
+# - Month: 3-letter abbreviation (Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec)
+# - Day: Zero-padded 2-digit number (01-31)
+# - Year: 4-digit number
+# - Time: HH:MM:SS with zero-padding
+# - Timezone: ±HHMM format
+#
+# ### Validation Strategy
+#
+# Timezone validation is defensive:
+# - Checks for correct length (4 or 5 characters)
+# - Verifies first character is + or -
+# - Ensures remaining characters are digits
+# - Falls back to UTC (+0000) on any error
+#
+# ## Module Interactions
+#
+# This module is imported by:
+# - **emailparser**: Not currently used by main parser (for date generation)
+# - Applications may import this module to format dates for outgoing emails
+#
+# This module imports:
+# - **emailparser.ascii**: ASCII constants for digit and sign validation
+# - **std.time**: DateTime type from Inko standard library
+#
+# ## Public vs Private API
+#
+# ### Public API
+#
+# All functions and types are public:
+# - `EmailDateFormatter`: Main formatter type
+# - `EmailDateFormatter.new`: Create formatter with UTC timezone
+# - `EmailDateFormatter.with_timezone`: Create formatter with custom timezone
+# - `EmailDateFormatter.format_now`: Format current time
+# - `EmailDateFormatter.format_datetime`: Format specific DateTime
+# - Helper functions: format_email_date, format_email_date_datetime, format_email_date_with_tz
+#
+# ### Private API
+#
+# None - all functions are public.
+#
+# ## RFC Compliance
+#
+# This module implements:
+# - **RFC 5322 section 3.3**: Date and Time Specification
+# - **RFC 5322 section 3.3.1**: Date and Time Format
+#
+# ### Format Specification
+#
+# From RFC 5322:
+# ```
+# date-time       =   [ day-of-week "," ] date time [CFWS]
+# day-of-week     =   ([FWS] day-name) / obs-day-of-week
+# day-name        =   "Mon" / "Tue" / "Wed" / "Thu" / "Fri" / "Sat" / "Sun"
+# date            =   day month year
+# day             =   ([FWS] 1*2DIGIT FWS) / obs-day
+# month           =   "Jan" / "Feb" / "Mar" / "Apr" / "May" / "Jun" /
+#                    "Jul" / "Aug" / "Sep" / "Oct" / "Nov" / "Dec"
+# year            =   (FWS 4*DIGIT FWS) / obs-year
+# time            =   time-of-day zone
+# time-of-day     =   hour ":" minute [ ":" second ]
+# hour            =   2DIGIT / obs-hour
+# minute          =   2DIGIT / obs-minute
+# second          =   2DIGIT / obs-second
+# zone            =   (FWS ( "+" / "-" ) 4DIGIT) / obs-zone
+# ```
+#
+# ### Notable Limitations
+#
+# - Does not support obsolete date formats (pre-RFC 5322)
+# - Does not include comments or folding white space
+# - Timezone validation is strict (4 digits required)
+#
+# ## Usage Example
+#
+# ```inko
+# import emailparser.date (EmailDateFormatter)
+#
+# # Format current time as email date
+# let formatter = EmailDateFormatter.new
+# let date_string = formatter.format_now
+# # Result: "Wed, 15 Jan 2026 14:23:45 +0000"
+#
+# # Format with custom timezone
+# let formatter_tz = EmailDateFormatter.with_timezone("-0500")
+# let date_string_tz = formatter_tz.format_now
+# # Result: "Wed, 15 Jan 2026 09:23:45 -0500"
+# ```
+
+import emailparser.ascii (
+  ASCII_DIGIT_0, ASCII_DIGIT_9, ASCII_HYPHEN, ASCII_PLUS,
+)
+import std.time (DateTime)
+
+# Date formatter for email headers
+type pub EmailDateFormatter {
+  let pub @timezone: String
+}
+
+impl EmailDateFormatter {
+  fn pub static new -> EmailDateFormatter {
+    EmailDateFormatter(timezone: '0000')
+  }
+
+  fn pub static with_timezone(tz: String) -> EmailDateFormatter {
+    EmailDateFormatter(timezone: tz)
+  }
+
+  # Format current time as RFC 5322 date
+  # Format: Fri, 08 Jan 2026 12:34:56 +0000
+  fn pub format_now -> String {
+    self.format_datetime(DateTime.local)
+  }
+
+  # Format a DateTime as RFC 5322 date
+  fn pub format_datetime(date: DateTime) -> String {
+    let weekday = self.format_weekday(date.day_of_week)
+    let month = self.format_month(date.month)
+    let day = if date.day < 10 { '0${date.day}' } else { date.day.to_string }
+    let year = date.year.to_string
+    let hour = if date.hour < 10 {
+      '0${date.hour}'
+    } else {
+      date.hour.to_string
+    }
+    let minute = if date.minute < 10 {
+      '0${date.minute}'
+    } else {
+      date.minute.to_string
+    }
+    let second = if date.second < 10 {
+      '0${date.second}'
+    } else {
+      date.second.to_string
+    }
+
+    # Format timezone as ±HHMM
+    let tz = self.format_timezone_offset
+
+    '${weekday}, ${day} ${month} ${year} ${hour}:${minute}:${second} ${tz}'
+  }
+
+  # Format weekday name
+  fn pub format_weekday(weekday: Int) -> String {
+    match weekday {
+      case 1 -> 'Mon'
+      case 2 -> 'Tue'
+      case 3 -> 'Wed'
+      case 4 -> 'Thu'
+      case 5 -> 'Fri'
+      case 6 -> 'Sat'
+      case 7 -> 'Sun'
+      case _ -> 'Mon'
+    }
+  }
+
+  # Format month name
+  fn pub format_month(month: Int) -> String {
+    match month {
+      case 1 -> 'Jan'
+      case 2 -> 'Feb'
+      case 3 -> 'Mar'
+      case 4 -> 'Apr'
+      case 5 -> 'May'
+      case 6 -> 'Jun'
+      case 7 -> 'Jul'
+      case 8 -> 'Aug'
+      case 9 -> 'Sep'
+      case 10 -> 'Oct'
+      case 11 -> 'Nov'
+      case 12 -> 'Dec'
+      case _ -> 'Jan'
+    }
+  }
+
+  # Format timezone offset
+  fn pub format_timezone_offset -> String {
+    # Parse timezone string like "+0000" or "-0500"
+    # Validate timezone format: ±HHMM
+    # Returns format: ±HHMM (RFC 5322 format without colon)
+    if @timezone.size == 5 {
+      match @timezone.get(0) {
+        case Ok(first_byte) -> {
+          # First char must be + or -
+          if first_byte != ASCII_PLUS and first_byte != ASCII_HYPHEN {
+            return '+0000'
+          }
+
+          # Validate remaining 4 chars are digits
+          let mut valid = true
+          let mut i = 1
+
+          while i < 5 {
+            match @timezone.get(i) {
+              case Ok(b) -> {
+                if b < ASCII_DIGIT_0 or b > ASCII_DIGIT_9 {
+                  valid = false
+                  break
+                }
+
+                i = i + 1
+              }
+              case Error(_) -> {
+                valid = false
+                break
+              }
+            }
+          }
+
+          if valid { @timezone.to_string } else { '+0000' }
+        }
+        case Error(_) -> '+0000'
+      }
+    } else if @timezone.size == 4 {
+      # Validate all 4 chars are digits, then add + prefix
+      let mut valid = true
+      let mut i = 0
+
+      while i < 4 {
+        match @timezone.get(i) {
+          case Ok(b) -> {
+            if b < ASCII_DIGIT_0 or b > ASCII_DIGIT_9 {
+              valid = false
+              break
+            }
+
+            i = i + 1
+          }
+          case Error(_) -> {
+            valid = false
+            break
+          }
+        }
+      }
+
+      if valid { '+${@timezone}' } else { '+0000' }
+    } else {
+      # Invalid timezone
+      '+0000'
+    }
+  }
+}
+
+# Format current time as RFC 5322 date string
+fn pub format_email_date -> String {
+  let formatter = EmailDateFormatter.new
+
+  formatter.format_now
+}
+
+# Format a DateTime as RFC 5322 date string
+fn pub format_email_date_datetime(date: DateTime) -> String {
+  let formatter = EmailDateFormatter.new
+
+  formatter.format_datetime(date)
+}
+
+# Format with custom timezone
+fn pub format_email_date_with_tz(date: DateTime, timezone: String) -> String {
+  let formatter = EmailDateFormatter.with_timezone(timezone)
+
+  formatter.format_datetime(date)
+}

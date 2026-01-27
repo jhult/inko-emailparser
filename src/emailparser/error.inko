@@ -1,0 +1,549 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Centralized error types for email parser
+#
+# Provides a type-safe error handling system with specific error variants
+# for common failure cases when parsing RFC 5322 email messages.
+
+# Unified error type for all email parsing operations
+#
+# Using Inko's enum type for compile-time exhaustiveness checking and
+# type-safe pattern matching.
+type pub enum Error {
+  # Size and limit errors
+  case EmailSizeTooLarge(Int, Int, Option[Int], Option[Int], Option[String])
+  case AttachmentSizeTooLarge(
+    Int,
+    Int,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
+  case TooManyHeaders(Int, Int, Option[Int], Option[Int], Option[String])
+  case MultipartDepthExceeded(
+    Int,
+    Int,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
+
+  # Header validation errors
+  case InvalidHeaderFieldName(String, Option[Int], Option[Int], Option[String])
+  case MalformedHeader(String, Option[Int], Option[Int], Option[String])
+  case DuplicateHeader(String, Option[Int], Option[Int], Option[String])
+  case HeaderWithoutColon(Option[Int], Option[Int], Option[String])
+  case InvalidEmailFormat(String, Option[Int], Option[Int], Option[String])
+  case HeaderValueTooLarge(Int, Int, Option[Int], Option[Int], Option[String])
+
+  # Boundary and multipart errors
+  case BoundaryNotFound(Option[Int], Option[Int], Option[String])
+  case InvalidBoundary(String, Option[Int], Option[Int], Option[String])
+  case MultipartWithoutParts(Option[Int], Option[Int], Option[String])
+  case NoBodyInPart(Option[Int], Option[Int], Option[String])
+
+  # Generic parsing errors
+  case ParseError(String, Option[Int], Option[Int], Option[String])
+
+  # Decoding errors
+  case DecodingFailed(String, String, Option[Int], Option[Int], Option[String])
+  case DecodedSizeTooLarge(
+    Int,
+    Int,
+    String,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
+
+  # Required header validation errors (strict mode)
+  case MissingRequiredHeader(String, Option[Int], Option[Int], Option[String])
+  case EmptyRequiredHeader(String, Option[Int], Option[Int], Option[String])
+
+  # Size limit errors
+  case EmailSizeExceeded(Int, Int, Option[Int], Option[Int])
+
+  # Content-Type validation errors
+  case InvalidContentType(String, Option[Int], Option[Int], Option[String])
+}
+
+impl Error {
+  # Convert error to human-readable message with context
+  fn pub to_message -> String {
+    match self {
+      case EmailSizeTooLarge(size, max_size, line, pos, frag) -> {
+        let mut result = 'Email size exceeds maximum allowed size: '
+          + size.to_string
+          + ' bytes (max: '
+          + max_size.to_string
+          + ' bytes)'
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case AttachmentSizeTooLarge(size, max_size, line, pos, frag) -> {
+        let mut result = 'Attachment size exceeds maximum allowed size: '
+          + size.to_string
+          + ' bytes (max: '
+          + max_size.to_string
+          + ' bytes)'
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case TooManyHeaders(count, max_count, line, pos, frag) -> {
+        let mut result = 'Maximum number of headers exceeded: '
+          + count.to_string
+          + ' (max: '
+          + max_count.to_string
+          + ')'
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case MultipartDepthExceeded(depth, max_depth, line, pos, frag) -> {
+        let mut result = 'Maximum multipart nesting depth exceeded: '
+          + depth.to_string
+          + ' (max: '
+          + max_depth.to_string
+          + ')'
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case InvalidHeaderFieldName(name, line, pos, frag) -> {
+        let mut result = 'Invalid header field name: ' + name
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case MalformedHeader(reason, line, pos, frag) -> {
+        let mut result = 'Malformed header: ' + reason
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case DuplicateHeader(name, line, pos, frag) -> {
+        let mut result = 'Duplicate header detected: ' + name
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case HeaderWithoutColon(line, pos, frag) -> {
+        let mut result = 'Invalid header format: no colon found'
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case InvalidEmailFormat(reason, line, pos, frag) -> {
+        let mut result = 'Invalid email format: ' + reason
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case HeaderValueTooLarge(size, max_size, line, pos, frag) -> {
+        let mut result = 'Header value exceeds maximum allowed size: '
+          + size.to_string
+          + ' bytes (max: '
+          + max_size.to_string
+          + ' bytes)'
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case BoundaryNotFound(line, pos, frag) -> {
+        let mut result = 'Boundary marker not found in message body'
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case InvalidBoundary(reason, line, pos, frag) -> {
+        let mut result = 'Invalid boundary string: ' + reason
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case MultipartWithoutParts(line, pos, frag) -> {
+        let mut result = 'Multipart message has no body parts'
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case NoBodyInPart(line, pos, frag) -> {
+        let mut result = 'No body found in multipart part'
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case ParseError(message, line, pos, frag) -> {
+        let mut result = message
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case DecodingFailed(encoding, reason, line, pos, frag) -> {
+        let mut result = 'Failed to decode ' + encoding + ' content: ' + reason
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case DecodedSizeTooLarge(size, max_size, encoding, line, pos, frag) -> {
+        let mut result = 'Decoded '
+          + encoding
+          + ' content exceeds maximum size: '
+          + size.to_string
+          + ' bytes (max: '
+          + max_size.to_string
+          + ' bytes)'
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case MissingRequiredHeader(header_name, line, pos, frag) -> {
+        let mut result = 'Missing required header: ' + header_name
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case EmptyRequiredHeader(header_name, line, pos, frag) -> {
+        let mut result = 'Required header is empty: ' + header_name
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+      case EmailSizeExceeded(max_size, actual_size, line, pos) -> {
+        let mut result = 'Email size '
+          + actual_size.to_string
+          + ' exceeds maximum '
+          + max_size.to_string
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        result
+      }
+      case InvalidContentType(reason, line, pos, frag) -> {
+        let mut result = 'Invalid Content-Type: ' + reason
+
+        match line {
+          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+          case None -> {}
+        }
+
+        match pos {
+          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+          case None -> {}
+        }
+
+        match frag {
+          case Some(f) -> result = result + ' ["' + f + '"]'
+          case None -> {}
+        }
+
+        result
+      }
+    }
+  }
+
+  # Get the error variant name (for backward compatibility)
+  fn pub variant -> String {
+    match self {
+      case EmailSizeTooLarge(_, _, _, _, _) -> 'EmailSizeTooLarge'
+      case AttachmentSizeTooLarge(_, _, _, _, _) -> 'AttachmentSizeTooLarge'
+      case TooManyHeaders(_, _, _, _, _) -> 'TooManyHeaders'
+      case MultipartDepthExceeded(_, _, _, _, _) -> 'MultipartDepthExceeded'
+      case InvalidHeaderFieldName(_, _, _, _) -> 'InvalidHeaderFieldName'
+      case MalformedHeader(_, _, _, _) -> 'MalformedHeader'
+      case DuplicateHeader(_, _, _, _) -> 'DuplicateHeader'
+      case HeaderWithoutColon(_, _, _) -> 'HeaderWithoutColon'
+      case InvalidEmailFormat(_, _, _, _) -> 'InvalidEmailFormat'
+      case HeaderValueTooLarge(_, _, _, _, _) -> 'HeaderValueTooLarge'
+      case BoundaryNotFound(_, _, _) -> 'BoundaryNotFound'
+      case InvalidBoundary(_, _, _, _) -> 'InvalidBoundary'
+      case MultipartWithoutParts(_, _, _) -> 'MultipartWithoutParts'
+      case NoBodyInPart(_, _, _) -> 'NoBodyInPart'
+      case ParseError(_, _, _, _) -> 'ParseError'
+      case DecodingFailed(_, _, _, _, _) -> 'DecodingFailed'
+      case DecodedSizeTooLarge(_, _, _, _, _, _) -> 'DecodedSizeTooLarge'
+      case MissingRequiredHeader(_, _, _, _) -> 'MissingRequiredHeader'
+      case EmptyRequiredHeader(_, _, _, _) -> 'EmptyRequiredHeader'
+      case EmailSizeExceeded(_, _, _, _) -> 'EmailSizeExceeded'
+      case InvalidContentType(_, _, _, _) -> 'InvalidContentType'
+    }
+  }
+}

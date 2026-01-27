@@ -1,0 +1,458 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Tests for RFC 5322 Message-ID generation and validation
+
+import emailparser.message_id (
+  MessageIdGenerator, generate_message_id, generate_message_id_with_host,
+  generate_message_id_with_prefix,
+)
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  t.test('generator_creation', fn (t) {
+    let custom_generator = MessageIdGenerator.new('example.com')
+
+    t.equal(custom_generator.hostname, 'example.com')
+
+    let default_generator = MessageIdGenerator.default
+
+    t.equal(default_generator.hostname, 'localhost')
+  })
+
+  t.test('generate_basic', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+    let message_id = generator.generate
+
+    t.true(message_id.starts_with?('<'))
+    t.true(message_id.ends_with?('>'))
+
+    match message_id.index_of('@', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match message_id.index_of('example.com', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match message_id.index_of('.', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+  })
+
+  t.test('message_id_format', fn (t) {
+    let generator = MessageIdGenerator.new('test.com')
+    let message_id = generator.generate
+
+    # Remove < and > from the ends
+    let content = message_id.substring(1, message_id.size - 1)
+    let parts = content.split('@').map(fn (s) { s.to_string }).to_array
+
+    t.equal(parts.size, 2)
+
+    let local_part = parts.get(0).or_panic
+    let domain_part = parts.get(1).or_panic
+
+    t.equal(domain_part, 'test.com')
+
+    let local_parts = local_part.split('.').map(fn (s) { s.to_string }).to_array
+
+    t.equal(local_parts.size, 2)
+  })
+
+  t.test('generate_with_hostname', fn (t) {
+    let message_id = generate_message_id_with_host('mail.example.com')
+
+    match message_id.index_of('mail.example.com', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    t.true(message_id.starts_with?('<'))
+    t.true(message_id.ends_with?('>'))
+  })
+
+  t.test('generate_default', fn (t) {
+    let message_id = generate_message_id
+
+    match message_id.index_of('localhost', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    t.true(message_id.starts_with?('<'))
+    t.true(message_id.ends_with?('>'))
+  })
+
+  t.test('generate_with_prefix', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+    let message_id = generator.generate_with_prefix('user')
+
+    match message_id.index_of('user', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match message_id.index_of('example.com', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    # Remove < and > from the ends
+    let content = message_id.substring(1, message_id.size - 1)
+    let parts = content.split('@').map(fn (s) { s.to_string }).to_array
+    let local_part = parts.get(0).or_panic
+
+    let local_parts = local_part.split('.').map(fn (s) { s.to_string }).to_array
+
+    t.equal(local_parts.size, 3)
+    t.equal(local_parts.get(0).or_panic, 'user')
+  })
+
+  t.test('is_valid_valid', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    let generated = generator.generate
+
+    t.true(generator.is_valid(generated))
+
+    t.true(generator.is_valid('<test@example.com>'))
+    t.true(generator.is_valid('<user123@mail.host.com>'))
+    t.true(generator.is_valid('<a.b.c@example.org>'))
+    t.true(generator.is_valid('<1234567890.abc@example.com>'))
+  })
+
+  t.test('is_valid_invalid', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    t.false(generator.is_valid('test@example.com'))
+    t.false(generator.is_valid('test@example.com>'))
+    t.false(generator.is_valid('<test@example.com'))
+    t.false(generator.is_valid('<testexample.com>'))
+    t.false(generator.is_valid('<>'))
+    t.false(generator.is_valid('<@>'))
+    t.false(generator.is_valid('<@example.com>'))
+    t.false(generator.is_valid('<test@>'))
+    t.false(generator.is_valid('<a>'))
+    t.false(generator.is_valid(''))
+  })
+
+  t.test('local_part', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    t.equal(
+      generator.local_part('<timestamp.random@example.com>'),
+      'timestamp.random',
+    )
+
+    t.equal(generator.local_part('<test@example.com>'), 'test')
+
+    t.equal(
+      generator.local_part('<user.123.abc@mail.example.org>'),
+      'user.123.abc',
+    )
+
+    t.equal(generator.local_part('<a.b.c.d@example.com>'), 'a.b.c.d')
+  })
+
+  t.test('local_part_edge_cases', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    t.equal(generator.local_part('<noat>'), 'noat')
+    t.equal(generator.local_part('<@example.com>'), '')
+    t.equal(generator.local_part('test@example.com'), 'test')
+  })
+
+  t.test('domain_part', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    t.equal(
+      generator.domain_part('<timestamp.random@example.com>'),
+      'example.com',
+    )
+
+    t.equal(
+      generator.domain_part('<test@mail.example.com>'),
+      'mail.example.com',
+    )
+
+    t.equal(
+      generator.domain_part('<user@mail.server.example.org>'),
+      'mail.server.example.org',
+    )
+  })
+
+  t.test('domain_part_edge_cases', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    t.equal(generator.domain_part('<noat>'), '')
+    t.equal(generator.domain_part('<test@>'), '')
+    t.equal(generator.domain_part('test@example.com'), 'example.com')
+  })
+
+  t.test('message_id_uniqueness', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    let id1 = generator.generate
+    let id2 = generator.generate
+    let id3 = generator.generate
+
+    t.not_equal(id1, id2)
+    t.not_equal(id2, id3)
+    t.not_equal(id1, id3)
+  })
+
+  t.test('different_hostnames', fn (t) {
+    let gen1 = MessageIdGenerator.new('host1.com')
+    let gen2 = MessageIdGenerator.new('host2.com')
+
+    let id1 = gen1.generate
+    let id2 = gen2.generate
+
+    match id1.index_of('host1.com', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match id2.index_of('host2.com', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match id1.index_of('host2.com', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match id2.index_of('host1.com', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+  })
+
+  t.test('generate_message_id_with_prefix', fn (t) {
+    let message_id = generate_message_id_with_prefix('msg')
+
+    match message_id.index_of('msg', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match message_id.index_of('localhost', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    t.true(message_id.starts_with?('<'))
+    t.true(message_id.ends_with?('>'))
+  })
+
+  t.test('prefix_special_characters', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    let id1 = generator.generate_with_prefix('user.name')
+
+    match id1.index_of('user.name', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    let id2 = generator.generate_with_prefix('msg123')
+
+    match id2.index_of('msg123', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    let id3 = generator.generate_with_prefix('user.123.test')
+
+    match id3.index_of('user.123.test', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+  })
+
+  t.test('message_id_size', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+    let message_id = generator.generate
+
+    t.true(message_id.size > 20)
+    t.true(message_id.size < 200)
+  })
+
+  t.test('validation_brackets', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    t.false(generator.is_valid('<>'))
+    t.false(generator.is_valid('<test'))
+    t.false(generator.is_valid('test>'))
+  })
+
+  t.test('validation_at_position', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    t.false(generator.is_valid('<@test>'))
+    t.false(generator.is_valid('<test@>'))
+    t.false(generator.is_valid('<test@test@example.com>'))
+  })
+
+  t.test('whitespace', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    let message_id = generator.generate
+
+    t.equal(message_id.trim, message_id)
+
+    t.false(generator.is_valid(' <test@example.com>'))
+    t.false(generator.is_valid('<test@example.com> '))
+  })
+
+  t.test('domain_case', fn (t) {
+    let generator = MessageIdGenerator.new('Example.COM')
+
+    let message_id = generator.generate
+
+    match message_id.index_of('Example.COM', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    t.true(generator.is_valid('<test@Example.COM>'))
+    t.true(generator.is_valid('<test@example.com>'))
+  })
+
+  t.test('numeric_local_parts', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    t.true(generator.is_valid('<123456789@example.com>'))
+    t.true(generator.is_valid('<2024.01.08@example.com>'))
+    t.true(generator.is_valid('<1.2.3.4.5@example.com>'))
+  })
+
+  t.test('underscore_local_part', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    t.true(generator.is_valid('<user_name@example.com>'))
+    t.true(generator.is_valid('<test_123@example.com>'))
+    t.true(generator.is_valid('<a_b_c@example.com>'))
+  })
+
+  t.test('hyphen_domain', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    t.true(generator.is_valid('<test@mail-server.example.com>'))
+    t.true(generator.is_valid('<user@my-host.org>'))
+  })
+
+  t.test('very_long_message_id', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    # Create a long local part manually
+    let long_local = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    let long_id = '<${long_local}@example.com>'
+
+    t.true(generator.is_valid(long_id))
+  })
+
+  t.test('minimum_valid', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    t.true(generator.is_valid('<a@b.c>'))
+    t.true(generator.is_valid('<ab@cd.ef>'))
+  })
+
+  t.test('invalid_characters_local_part', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    # Invalid characters in local part (spaces, control chars, etc)
+    t.false(generator.is_valid('<test user@example.com>'))
+    t.false(generator.is_valid('<test\ntest@example.com>'))
+    t.false(generator.is_valid('<test@test@example.com>'))
+    t.false(generator.is_valid('<test\rttest@example.com>'))
+    t.false(generator.is_valid('<test\0test@example.com>'))
+  })
+
+  t.test('invalid_characters_domain_part', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    # Invalid characters in domain
+    t.false(generator.is_valid('<test@ex ample.com>'))
+    t.false(generator.is_valid('<test@ex\tample.com>'))
+    t.false(generator.is_valid('<test@ex!ample.com>'))
+    t.false(generator.is_valid('<test@ex_ample.com>'))
+  })
+
+  t.test('atext_special_characters', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    # RFC 5322 atext special characters allowed in local part
+    t.true(generator.is_valid('<test!user@example.com>'))
+    t.true(generator.is_valid('<test#user@example.com>'))
+    t.true(generator.is_valid('<test$user@example.com>'))
+    t.true(generator.is_valid('<test%user@example.com>'))
+    t.true(generator.is_valid('<test\'user@example.com>'))
+    t.true(generator.is_valid('<test*user@example.com>'))
+    t.true(generator.is_valid('<test+user@example.com>'))
+    t.true(generator.is_valid('<test/user@example.com>'))
+    t.true(generator.is_valid('<test=user@example.com>'))
+    t.true(generator.is_valid('<test?user@example.com>'))
+    t.true(generator.is_valid('<test^user@example.com>'))
+    t.true(generator.is_valid('<test`user@example.com>'))
+    t.true(generator.is_valid('<test{user@example.com>'))
+    t.true(generator.is_valid('<test|user@example.com>'))
+    t.true(generator.is_valid('<test}user@example.com>'))
+    t.true(generator.is_valid('<test~user@example.com>'))
+  })
+
+  t.test('dot_placement_rules', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    # Cannot start or end with dot in local part
+    t.false(generator.is_valid('<.test@example.com>'))
+    t.false(generator.is_valid('<test.@example.com>'))
+
+    # Cannot start or end with dot in domain
+    t.false(generator.is_valid('<test@.example.com>'))
+    t.false(generator.is_valid('<test@example.com.>'))
+
+    # Cannot have consecutive dots
+    t.false(generator.is_valid('<test..test@example.com>'))
+    t.false(generator.is_valid('<test@example..com>'))
+  })
+
+  t.test('hyphen_placement_rules', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    # Cannot start or end with hyphen in domain
+    t.false(generator.is_valid('<test@-example.com>'))
+    t.false(generator.is_valid('<test@example.com->'))
+  })
+
+  t.test('length_limits', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    # Local part > 64 chars should be invalid
+    let too_long_local = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+    t.false(generator.is_valid('<${too_long_local}@example.com>'))
+
+    # Local part = 64 chars should be valid
+    let max_local = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+    t.true(generator.is_valid('<${max_local}@example.com>'))
+
+    # Domain > 255 chars should be invalid
+    let too_long_domain = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+    t.false(generator.is_valid('<test@${too_long_domain}>'))
+
+    # Domain = 255 chars should be valid
+    let max_domain = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+    t.true(generator.is_valid('<test@${max_domain}>'))
+  })
+}

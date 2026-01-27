@@ -1,0 +1,294 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Tests for validation functions
+
+import emailparser.validation (
+  is_angle_bracketed, is_printable_ascii_string, is_quoted_string,
+  is_valid_boundary, is_valid_mime_subtype, is_valid_mime_type,
+)
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  t.test('is_quoted_string_valid', fn (t) {
+    t.true(is_quoted_string('"hello"'))
+    t.true(is_quoted_string('"hello world"'))
+    t.true(is_quoted_string('""'))
+  })
+
+  t.test('is_quoted_string_invalid', fn (t) {
+    t.false(is_quoted_string('hello'))
+    t.false(is_quoted_string('"hello'))
+    t.false(is_quoted_string('hello"'))
+    t.false(is_quoted_string(''))
+    t.false(is_quoted_string("'hello'"))
+  })
+
+  t.test('is_quoted_string_empty', fn (t) {
+    t.false(is_quoted_string(''))
+    t.true(is_quoted_string('""'))
+  })
+
+  t.test('is_quoted_string_with_spaces', fn (t) {
+    t.true(is_quoted_string('"hello world"'))
+  })
+
+  t.test('is_angle_bracketed_valid', fn (t) {
+    t.true(is_angle_bracketed('<test>'))
+    t.true(is_angle_bracketed('<hello world>'))
+    t.true(is_angle_bracketed('<>'))
+  })
+
+  t.test('is_angle_bracketed_invalid', fn (t) {
+    t.false(is_angle_bracketed('test'))
+    t.false(is_angle_bracketed('<test'))
+    t.false(is_angle_bracketed('test>'))
+    t.false(is_angle_bracketed(''))
+  })
+
+  t.test('is_angle_bracketed_empty', fn (t) {
+    t.false(is_angle_bracketed(''))
+    t.true(is_angle_bracketed('<>'))
+  })
+
+  t.test('is_angle_bracketed_nested', fn (t) {
+    t.true(is_angle_bracketed('<test<inner>>'))
+  })
+
+  t.test('is_printable_ascii_string_valid', fn (t) {
+    t.true(is_printable_ascii_string('hello'))
+    t.false(is_printable_ascii_string('Hello World!'))
+    t.true(is_printable_ascii_string('ABC123'))
+  })
+
+  t.test('is_printable_ascii_string_invalid', fn (t) {
+    t.false(is_printable_ascii_string(''))
+    t.false(is_printable_ascii_string('hello\nworld'))
+    t.false(is_printable_ascii_string('hello\tworld'))
+  })
+
+  t.test('is_printable_ascii_string_special', fn (t) {
+    t.true(is_printable_ascii_string('!@#$%^&*()'))
+    t.false(is_printable_ascii_string('Hello, World!'))
+  })
+
+  t.test('is_printable_ascii_string_extended_ascii', fn (t) {
+    t.false(is_printable_ascii_string('Café'))
+  })
+
+  t.test('is_printable_ascii_string_space', fn (t) {
+    t.false(is_printable_ascii_string('hello world'))
+  })
+
+  t.test('is_valid_mime_subtype_valid', fn (t) {
+    t.true(is_valid_mime_subtype('plain'))
+    t.true(is_valid_mime_subtype('html'))
+    t.true(is_valid_mime_subtype('xml'))
+    t.true(is_valid_mime_subtype('jpeg'))
+    t.true(is_valid_mime_subtype('png'))
+  })
+
+  t.test('is_valid_mime_subtype_with_hyphen', fn (t) {
+    t.true(is_valid_mime_subtype('x-html'))
+    t.true(is_valid_mime_subtype('vnd+xml'))
+  })
+
+  t.test('is_valid_mime_subtype_invalid', fn (t) {
+    t.false(is_valid_mime_subtype(''))
+    t.false(is_valid_mime_subtype('text/plain'))
+    t.false(is_valid_mime_subtype('plain text'))
+  })
+
+  t.test('is_valid_mime_subtype_special_chars', fn (t) {
+    t.false(is_valid_mime_subtype('plain/text'))
+    t.false(is_valid_mime_subtype('plain;text'))
+    t.false(is_valid_mime_subtype('plain(text)'))
+    t.false(is_valid_mime_subtype('plain<text>'))
+    t.false(is_valid_mime_subtype('plain{text}'))
+  })
+
+  t.test('is_valid_mime_subtype_control_chars', fn (t) {
+    t.false(is_valid_mime_subtype('plain\n'))
+    t.false(is_valid_mime_subtype('plain\t'))
+    t.false(is_valid_mime_subtype('plain\r'))
+  })
+
+  t.test('is_valid_mime_subtype_numeric', fn (t) {
+    t.true(is_valid_mime_subtype('3gpp'))
+  })
+
+  t.test('is_valid_mime_subtype_plus', fn (t) {
+    t.true(is_valid_mime_subtype('vnd.adobe.pdf+xml'))
+  })
+
+  t.test('is_valid_mime_type_valid', fn (t) {
+    t.true(is_valid_mime_type('text/plain'))
+    t.true(is_valid_mime_type('text/html'))
+    t.true(is_valid_mime_type('application/json'))
+    t.true(is_valid_mime_type('image/jpeg'))
+    t.true(is_valid_mime_type('multipart/mixed'))
+  })
+
+  t.test('is_valid_mime_type_invalid', fn (t) {
+    t.false(is_valid_mime_type(''))
+    t.false(is_valid_mime_type('text'))
+    t.false(is_valid_mime_type('plain'))
+    t.false(is_valid_mime_type('text/plain/html'))
+  })
+
+  t.test('is_valid_mime_type_with_params', fn (t) {
+    t.false(is_valid_mime_type('text/plain; charset=utf-8'))
+    t.false(is_valid_mime_type('application/json; version=1'))
+  })
+
+  t.test('is_valid_mime_type_x_token', fn (t) {
+    t.true(is_valid_mime_type('application/x-test'))
+    t.true(is_valid_mime_type('text/x-custom'))
+  })
+
+  t.test('is_valid_mime_type_vendor', fn (t) {
+    t.true(is_valid_mime_type('application/vnd.ms-excel'))
+    t.true(
+      is_valid_mime_type(
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ),
+    )
+  })
+
+  t.test('is_valid_mime_type_empty_parts', fn (t) {
+    t.false(is_valid_mime_type('/plain'))
+    t.false(is_valid_mime_type('text/'))
+  })
+
+  t.test('is_valid_boundary_simple', fn (t) {
+    t.true(is_valid_boundary('boundary123'))
+    t.true(is_valid_boundary('abc'))
+    t.true(is_valid_boundary('ABC'))
+  })
+
+  t.test('is_valid_boundary_with_special', fn (t) {
+    t.true(is_valid_boundary("bound'ary"))
+    t.true(is_valid_boundary('bound(ary)'))
+    t.true(is_valid_boundary('bound+ary'))
+    t.true(is_valid_boundary('bound_ary'))
+    t.true(is_valid_boundary('bound,ary'))
+    t.true(is_valid_boundary('bound-ary'))
+    t.true(is_valid_boundary('bound.ary'))
+    t.true(is_valid_boundary('bound/ary'))
+    t.true(is_valid_boundary('bound:ary'))
+    t.true(is_valid_boundary('bound=ary'))
+    t.true(is_valid_boundary('bound?ary'))
+  })
+
+  t.test('is_valid_boundary_empty', fn (t) { t.false(is_valid_boundary('')) })
+
+  t.test('is_valid_boundary_whitespace_only', fn (t) {
+    t.false(is_valid_boundary('   '))
+    t.false(is_valid_boundary('\t\t\t'))
+    t.false(is_valid_boundary(' \t '))
+    t.false(is_valid_boundary('  \n  '))
+  })
+
+  t.test('is_valid_boundary_too_long', fn (t) {
+    let long = 'a'.repeat(71)
+
+    t.false(is_valid_boundary(long))
+  })
+
+  t.test('is_valid_boundary_max_length', fn (t) {
+    let max = 'a'.repeat(70)
+
+    t.true(is_valid_boundary(max))
+  })
+
+  t.test('is_valid_boundary_invalid_chars', fn (t) {
+    t.true(is_valid_boundary('bound ary'))
+    t.false(is_valid_boundary('bound<ary>'))
+    t.false(is_valid_boundary('bound@ary'))
+    t.false(is_valid_boundary('bound$ary'))
+    t.false(is_valid_boundary('bound%ary'))
+    t.false(is_valid_boundary('bound*ary'))
+    t.false(is_valid_boundary('bound&ary'))
+    t.false(is_valid_boundary('bound;ary'))
+    t.false(is_valid_boundary('bound\\ary'))
+    t.false(is_valid_boundary('bound"ary'))
+  })
+
+  t.test('is_valid_boundary_newlines', fn (t) {
+    t.false(is_valid_boundary('bound\nary'))
+    t.false(is_valid_boundary('bound\rary'))
+    t.false(is_valid_boundary('bound\r\nary'))
+  })
+
+  t.test('is_valid_boundary_tabs', fn (t) {
+    t.false(is_valid_boundary('bound\tary'))
+  })
+
+  t.test('is_valid_boundary_control_chars', fn (t) {
+    t.false(is_valid_boundary('bound\0ary'))
+  })
+
+  t.test('is_valid_boundary_only_special', fn (t) {
+    t.true(is_valid_boundary("'+_,-./:=?"))
+  })
+
+  t.test('is_valid_boundary_numeric', fn (t) {
+    t.true(is_valid_boundary('123456789'))
+  })
+
+  t.test('is_valid_boundary_mixed', fn (t) {
+    t.true(is_valid_boundary('boundary_123-test.test'))
+  })
+
+  t.test('is_valid_boundary_brackets', fn (t) {
+    t.true(is_valid_boundary('bound(ary)'))
+  })
+
+  t.test('is_valid_boundary_square_brackets', fn (t) {
+    t.false(is_valid_boundary('bound[ary]'))
+  })
+
+  t.test('is_valid_boundary_curly_braces', fn (t) {
+    t.false(is_valid_boundary('bound{ary}'))
+  })
+
+  # Content-Type validation tests
+  t.test('is_valid_mime_type_valid', fn (t) {
+    t.true(is_valid_mime_type('text/plain'))
+    t.true(is_valid_mime_type('text/html'))
+    t.true(is_valid_mime_type('application/json'))
+    t.true(is_valid_mime_type('image/jpeg'))
+    t.true(is_valid_mime_type('multipart/alternative'))
+    t.true(is_valid_mime_type('multipart/mixed'))
+    t.true(is_valid_mime_type('message/rfc822'))
+    t.true(is_valid_mime_type('video/mp4'))
+    t.true(is_valid_mime_type('audio/mpeg'))
+  })
+
+  t.test('is_valid_mime_type_invalid_no_subtype', fn (t) {
+    t.false(is_valid_mime_type('text'))
+    t.false(is_valid_mime_type('application'))
+    t.false(is_valid_mime_type('image'))
+    t.false(is_valid_mime_type('multipart'))
+  })
+
+  t.test('is_valid_mime_type_invalid_no_type', fn (t) {
+    t.false(is_valid_mime_type('/plain'))
+    t.false(is_valid_mime_type('/html'))
+    t.false(is_valid_mime_type('/json'))
+  })
+
+  t.test('is_valid_mime_type_invalid_empty', fn (t) {
+    t.false(is_valid_mime_type(''))
+    t.false(is_valid_mime_type('text/'))
+    t.false(is_valid_mime_type('/plain'))
+  })
+
+  t.test('is_valid_mime_type_invalid_special_chars', fn (t) {
+    t.false(is_valid_mime_type('text/plain;'))
+    t.false(is_valid_mime_type('text/plain '))
+    t.false(is_valid_mime_type('text/Plain text'))
+    t.false(is_valid_mime_type('text/plain@binary'))
+  })
+}

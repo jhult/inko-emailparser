@@ -1,0 +1,29 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [trunk]
+  pull_request:
+    branches: [trunk]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check-and-test:
+    name: Check and Test
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/inko-lang/inko:latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Check Formatting and Run Tests
+        run: |
+          inko --version
+          inko fmt --check
+          inko test

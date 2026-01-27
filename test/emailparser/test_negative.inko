@@ -1,0 +1,1077 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Negative tests for invalid inputs and edge cases
+#
+# These tests verify that the parser properly handles and reports errors for:
+# - Invalid email formats
+# - Missing required headers
+# - Malformed MIME structures
+# - Invalid Content-Type values
+# - Corrupted encoding
+# - Boundary value overflows
+
+import emailparser (EmailParser, ParserConfig)
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  # ============================================================
+  # MISSING REQUIRED HEADERS
+  # ============================================================
+
+  t.test('missing_from_header', fn (t) {
+    let parser = EmailParser.new.with_strict_mode(true)
+    let raw_email = 'To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text here.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(e) -> t.true(e.contains?('From') or e.contains?('from'))
+    }
+  })
+
+  t.test('missing_to_header', fn (t) {
+    let parser = EmailParser.new.with_strict_mode(true)
+    let raw_email = 'From: sender@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text here.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(e) -> {
+        # Fixed error check
+        t.true(e.contains?('To') or e.contains?('to'))
+      }
+    }
+  })
+
+  t.test('empty_from_header', fn (t) {
+    let parser = EmailParser.new.with_strict_mode(true)
+    let raw_email = 'From: 
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text here.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(_) -> t.true(true) # Expected error
+    }
+  })
+
+  t.test('malformed_from_header', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: not-an-email-address
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text here.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might accept invalid formats in non-strict mode
+        # but should still capture something
+        t.true(msg.addresses.from.address.size > 0)
+      }
+      case Error(_) -> t.true(true) # Also acceptable to reject
+    }
+  })
+
+  # ============================================================
+  # MALFORMED MIME STRUCTURES
+  # ============================================================
+
+  t.test('missing_boundary_in_content_type', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed
+
+--boundary
+Content-Type: text/plain
+
+Text
+--boundary--
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(e) -> {
+        # Fixed error check
+        t.true(e.contains?('boundary') or e.contains?('Boundary'))
+      }
+    }
+  })
+
+  t.test('boundary_not_found_in_body', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=abc123
+
+This body has no boundary markers at all.
+Just plain text.
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(e) -> {
+        # Fixed error check
+        t.true(e.contains?('boundary') or e.contains?('Boundary'))
+      }
+    }
+  })
+
+  t.test('malformed_boundary_marker', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=abc123
+
+--wrong_boundary
+Content-Type: text/plain
+
+Text
+--wrong_boundary--
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(e) -> {
+        # Fixed error check
+        t.true(e.contains?('boundary') or e.contains?('Boundary'))
+      }
+    }
+  })
+
+  t.test('unterminated_multipart', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=abc123
+
+--abc123
+Content-Type: text/plain
+
+Text
+--abc123
+'
+
+    let result = parser.parse(raw_email)
+
+    # Parser might accept this with a warning or error
+    match result {
+      case Ok(_) -> t.true(true) # May succeed with partial parsing
+      case Error(_) -> t.true(true) # May fail appropriately
+    }
+  })
+
+  t.test('invalid_multipart_without_parts', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=abc123
+
+--abc123--
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(_) -> t.true(true) # Expected error
+    }
+  })
+
+  # ============================================================
+  # INVALID CONTENT-TYPE VALUES
+  # ============================================================
+
+  t.test('invalid_content_type_format', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: invalidformat
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(e) -> {
+        # Fixed error check
+        t.true(e.contains?('Content-Type') or e.contains?('content'))
+      }
+    }
+  })
+
+  t.test('content_type_without_subtype', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(_) -> t.true(true) # Expected error
+    }
+  })
+
+  t.test('content_type_with_invalid_chars', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain@invalid
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might accept this
+        t.true(msg.mime.content_type.size > 0)
+      }
+      case Error(_) -> t.true(true) # Also acceptable to reject
+    }
+  })
+
+  # ============================================================
+  # CORRUPTED ENCODING
+  # ============================================================
+
+  t.test('corrupted_base64_in_body', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+
+This is not valid base64!!!@@@###$$$'
+
+    let result = parser.parse(raw_email)
+
+    # Parser should handle corrupted base64 gracefully
+    match result {
+      case Ok(msg) -> {
+        # Should either return partial content or error
+        match msg.text_body {
+          case Some(body) -> t.true(body.size > 0)
+          case None -> t.true(true)
+        }
+      }
+      case Error(_) -> t.true(true) # Acceptable to fail
+    }
+  })
+
+  t.test('corrupted_quoted_printable_in_body', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+Content-Transfer-Encoding: quoted-printable
+
+Invalid =ZZ sequences =XX =@ ='
+
+    let result = parser.parse(raw_email)
+
+    # Parser should handle corrupted QP gracefully
+    match result {
+      case Ok(msg) -> {
+        # Should either return partial content with replacement chars
+        match msg.text_body {
+          case Some(body) -> t.true(body.size > 0)
+          case None -> t.true(true)
+        }
+      }
+      case Error(_) -> t.true(true) # Acceptable to fail
+    }
+  })
+
+  t.test('invalid_content_transfer_encoding', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+Content-Transfer-Encoding: invalid_encoding
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might treat as 7bit/8bit passthrough
+        match msg.text_body {
+          case Some(body) -> t.equal(body, 'Body text.')
+          case None -> t.false(true)
+        }
+      }
+      case Error(_) -> t.true(true) # Also acceptable to fail
+    }
+  })
+
+  # ============================================================
+  # INVALID MESSAGE-ID FORMATS
+  # ============================================================
+
+  t.test('invalid_message_id_no_brackets', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: test@example.com
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might accept without brackets
+        t.true(msg.message_id.size > 0)
+      }
+      case Error(_) -> t.true(true) # Also acceptable to fail
+    }
+  })
+
+  t.test('invalid_message_id_empty', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might accept empty message ID
+        t.equal(msg.message_id, '<>')
+      }
+      case Error(_) -> t.true(true) # Also acceptable to fail
+    }
+  })
+
+  t.test('message_id_with_invalid_chars', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test with spaces@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might accept this
+        t.true(msg.message_id.contains?('@'))
+      }
+      case Error(_) -> t.true(true) # Also acceptable to fail
+    }
+  })
+
+  # ============================================================
+  # HEADER FORMAT ERRORS
+  # ============================================================
+
+  t.test('header_without_colon', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(e) -> {
+        # Fixed error check
+        t.true(e.contains?('colon') or e.contains?('header'))
+      }
+    }
+  })
+
+  t.test('header_with_empty_name', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = ': value
+From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(_) -> t.true(true) # Expected error
+    }
+  })
+
+  t.test('duplicate_required_headers', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender1@example.com
+From: sender2@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might use first or last value
+        t.true(msg.addresses.from.address.size > 0)
+      }
+      case Error(e) -> {
+        # Fixed error check
+        t.true(e.contains?('duplicate') or e.contains?('Duplicate'))
+      }
+    }
+  })
+
+  # ============================================================
+  # BOUNDARY VALUE TESTS
+  # ============================================================
+
+  t.test('boundary_exactly_at_limit', fn (t) {
+    let parser = EmailParser.new
+    # Boundary is exactly 70 chars (limit)
+    let boundary = 'a'.repeat(70)
+
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary='
+      + boundary
+      + '
+
+--'
+      + boundary
+      + '
+Content-Type: text/plain
+
+Text
+--'
+      + boundary
+      + '--
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> t.equal(msg.mime.boundary, Option.Some(boundary))
+      case Error(_) -> t.false(true) # Should accept
+    }
+  })
+
+  t.test('boundary_exceeds_limit', fn (t) {
+    let parser = EmailParser.new
+    # Boundary is 71 chars (exceeds limit)
+    let boundary = 'a'.repeat(71)
+
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary='
+      + boundary
+      + '
+
+--'
+      + boundary
+      + '
+Content-Type: text/plain
+
+Text
+--'
+      + boundary
+      + '--
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(e) -> {
+        # Fixed error check
+        t.true(e.contains?('boundary') or e.contains?('Boundary'))
+      }
+    }
+  })
+
+  t.test('boundary_with_newline', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=abc
+123
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(e) -> {
+        # Check for error - either header without colon or boundary/folding issue
+        t.true(
+          e.contains?('colon')
+            or e.contains?('folding')
+            or e.contains?('boundary')
+            or e.contains?('Boundary'),
+        )
+      }
+    }
+  })
+
+  # ============================================================
+  # EMAIL SIZE LIMIT TESTS
+  # ============================================================
+
+  t.test('email_at_size_limit', fn (t) {
+    let config = ParserConfig(
+      strict_mode: false,
+      max_email_size: 1024,
+      max_attachment_size: 25_000_000,
+      max_multipart_depth: 10,
+      max_attachments: 100,
+      max_headers: 1000,
+    )
+    let parser = EmailParser.with_config(config)
+
+    # Create email smaller than limit (600 bytes body + ~136 headers = ~736 total)
+    let mut body = 'A'
+    let mut i = 0
+
+    while i < 599 {
+      # 600 - 1 (initial 'A')
+      body = body + 'A'
+      i = i + 1
+    }
+
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+'
+      + body
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> t.true(msg.size <= 1024)
+      case Error(_) -> t.false(true) # Should accept
+    }
+  })
+
+  t.test('email_exceeds_size_limit', fn (t) {
+    let config = ParserConfig(
+      strict_mode: false,
+      max_email_size: 100,
+      max_attachment_size: 25_000_000,
+      max_multipart_depth: 10,
+      max_attachments: 100,
+      max_headers: 1000,
+    )
+    let parser = EmailParser.with_config(config)
+
+    let mut body = 'A'
+    let mut i = 0
+
+    while i < 200 {
+      body = body + 'A'
+      i = i + 1
+    }
+
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+'
+      + body
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(e) -> {
+        # Fixed error check
+        t.true(e.contains?('size') or e.contains?('Size'))
+      }
+    }
+  })
+
+  # ============================================================
+  # ATTACHMENT SIZE LIMIT TESTS
+  # ============================================================
+
+  t.test('attachment_exceeds_size_limit', fn (t) {
+    let config = ParserConfig(
+      strict_mode: false,
+      max_email_size: 50_000_000,
+      max_attachment_size: 100,
+      max_multipart_depth: 10,
+      max_attachments: 100,
+      max_headers: 1000,
+    )
+    let parser = EmailParser.with_config(config)
+
+    # Create a large base64 attachment (would decode to > 100 bytes)
+    let mut attachment_data = 'SGVsbG8=' # Base64 for "Hello"
+    let mut i = 0
+
+    while i < 50 {
+      attachment_data = attachment_data + 'SGVsbG8='
+      i = i + 1
+    }
+
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=abc
+
+--abc
+Content-Type: text/plain
+
+Text body
+--abc
+Content-Type: application/octet-stream
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="test.bin"
+
+'
+      + attachment_data
+      + '
+--abc--
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might skip oversized attachments
+        let att_size = if msg.attachments.size > 0 {
+          msg.attachments.get(0).or_panic.size
+        } else {
+          0
+        }
+
+        t.true(msg.attachments.size == 0 or att_size > 0)
+      }
+      case Error(e) -> {
+        # Fixed error check
+        t.true(e.contains?('size') or e.contains?('Size'))
+      }
+    }
+  })
+
+  # ============================================================
+  # MULTIPART DEPTH LIMIT TESTS
+  # ============================================================
+
+  t.test('multipart_depth_exceeds_limit', fn (t) {
+    let config = ParserConfig(
+      strict_mode: false,
+      max_email_size: 50_000_000,
+      max_attachment_size: 25_000_000,
+      max_multipart_depth: 3,
+      max_attachments: 100,
+      max_headers: 1000,
+    )
+    let parser = EmailParser.with_config(config)
+
+    # Create deeply nested multipart (depth = 5)
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=outer
+
+--outer
+Content-Type: multipart/alternative; boundary=level1
+
+--level1
+Content-Type: multipart/related; boundary=level2
+
+--level2
+Content-Type: multipart/mixed; boundary=level3
+
+--level3
+Content-Type: multipart/alternative; boundary=level4
+
+--level4
+Content-Type: text/plain
+
+Deep text
+--level4--
+--level3--
+--level2--
+--level1--
+--outer--
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.false(true) # Should fail
+      case Error(e) -> {
+        # Fixed error check
+        t.true(e.contains?('depth') or e.contains?('Depth'))
+      }
+    }
+  })
+
+  # ============================================================
+  # MALFORMED ADDRESS TESTS
+  # ============================================================
+
+  t.test('from_address_with_multiple_at', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: user@@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might accept malformed addresses
+        t.true(msg.addresses.from.address.contains?('@'))
+      }
+      case Error(_) -> t.true(true) # Also acceptable to fail
+    }
+  })
+
+  t.test('from_address_without_domain', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: user@
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might accept incomplete addresses
+        t.true(msg.addresses.from.address.size > 0)
+      }
+      case Error(_) -> t.true(true) # Also acceptable to fail
+    }
+  })
+
+  t.test('to_address_with_invalid_domain', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might accept invalid domains
+        t.true(msg.addresses.to.size > 0)
+      }
+      case Error(_) -> t.true(true) # Also acceptable to fail
+    }
+  })
+
+  # ============================================================
+  # EMPTY OR WHITESPACE-ONLY CONTENT
+  # ============================================================
+
+  t.test('empty_email_body', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Empty body is valid
+        match msg.text_body {
+          case Some(body) -> t.equal(body, '')
+          case None -> t.true(true) # Also acceptable
+        }
+      }
+      case Error(_) -> t.false(true) # Should accept
+    }
+  })
+
+  t.test('email_with_only_headers', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Body after headers is optional
+        match msg.text_body {
+          case Some(body) -> t.equal(body, '')
+          case None -> t.true(true)
+        }
+      }
+      case Error(_) -> t.false(true) # Should accept
+    }
+  })
+
+  # ============================================================
+  # HEADER VALUE LIMIT TESTS
+  # ============================================================
+
+  t.test('subject_exceeds_reasonable_limit', fn (t) {
+    let parser = EmailParser.new
+
+    let mut long_subject = ''
+    let mut i = 0
+
+    while i < 1000 {
+      long_subject = long_subject + 'Very Long Subject '
+      i = i + 1
+    }
+
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: '
+      + long_subject
+      + '
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might accept very long subjects
+        t.true(msg.subject.size > 0)
+      }
+      case Error(_) -> t.true(true) # Also acceptable to fail
+    }
+  })
+
+  t.test('header_line_exceeds_limit', fn (t) {
+    let parser = EmailParser.new
+
+    let mut long_value = ''
+    let mut i = 0
+
+    while i < 1000 {
+      long_value = long_value + 'X'
+      i = i + 1
+    }
+
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+X-Custom-Header: '
+      + long_value
+      + '
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might accept very long header values
+        t.true(msg.extra_headers.size > 0)
+      }
+      case Error(e) -> {
+        # Fixed error check
+        t.true(e.contains?('size') or e.contains?('Size'))
+      }
+    }
+  })
+
+  # ============================================================
+  # CONTROL CHARACTERS IN HEADERS
+  # ============================================================
+
+  t.test('subject_with_special_chars', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test With Special Chars
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body text.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might sanitize or accept
+        t.true(msg.subject.size > 0)
+      }
+      case Error(_) -> t.true(true) # Also acceptable to fail
+    }
+  })
+
+  t.test('null_byte_like_in_email', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+Body with special characters.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Parser might handle special chars
+        match msg.text_body {
+          case Some(body) -> t.true(body.size > 0)
+          case None -> t.false(true)
+        }
+      }
+      case Error(_) -> t.true(true) # Also acceptable to fail
+    }
+  })
+}

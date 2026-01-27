@@ -1,0 +1,18 @@
+From: =?UTF-8?B?QW5kcsOpIE1hcnRpbmV6?= <andre.martinez@ejemplo.es>
+To: =?UTF-8?B?Sm9zw6kgR2FyY8OtYQ==?= <jose.garcia@ejemplo.es>
+Subject: Internationalized Email Addresses (EAI)
+Date: Sun, 20 Jan 2026 12:30:00 +0000
+Message-ID: <eai456@ejemplo.es>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+Este es un correo electr=C3=B3nico con direcciones internacionalizadas.
+
+From: =?UTF-8?B?QW5kcsOpIE1hcnRpbmV6?=
+To: =?UTF-8?B?Sm9zw6kgR2FyY8OtYQ==?=
+
+Los nombres est=C3=A1n codificados en RFC 2047.
+
+Saludos,
+Andr=C3=A9

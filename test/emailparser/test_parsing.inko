@@ -1,0 +1,231 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Tests for parsing functions in emailparser module
+
+import emailparser (EmailParser)
+import emailparser.decoder (decode_quoted_printable)
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  t.test('decode_quoted_printable_simple', fn (t) {
+    let decoded = decode_quoted_printable('Hello=20World')
+
+    t.equal(decoded, 'Hello World')
+  })
+
+  t.test('decode_quoted_printable_hex', fn (t) {
+    let decoded = decode_quoted_printable('Caf=C3=A9')
+
+    t.equal(decoded, 'Café')
+  })
+
+  t.test('decode_quoted_printable_special', fn (t) {
+    let decoded = decode_quoted_printable('=3D=20=21')
+
+    t.equal(decoded, '= !')
+  })
+
+  t.test('decode_quoted_printable_empty', fn (t) {
+    let decoded = decode_quoted_printable('')
+
+    t.equal(decoded, '')
+  })
+
+  t.test('decode_quoted_printable_no_encoding', fn (t) {
+    let decoded = decode_quoted_printable('Plain text')
+
+    t.equal(decoded, 'Plain text')
+  })
+
+  t.test('decode_quoted_printable_soft_line_break', fn (t) {
+    let decoded = decode_quoted_printable('Line one=\r\nLine two')
+
+    t.equal(decoded, 'Line one=\r\nLine two')
+  })
+
+  t.test('decode_quoted_printable_multiline', fn (t) {
+    let decoded = decode_quoted_printable('Line 1=0ALine 2=0ALine 3')
+
+    t.equal(decoded, 'Line 1\nLine 2\nLine 3')
+  })
+
+  t.test('decode_quoted_printable_equals_sign', fn (t) {
+    let decoded = decode_quoted_printable('a=3Db')
+
+    t.equal(decoded, 'a=b')
+  })
+
+  t.test('decode_quoted_printable_invalid_hex', fn (t) {
+    let decoded = decode_quoted_printable('=XX')
+
+    t.true(decoded.starts_with?('='))
+  })
+
+  t.test('decode_quoted_printable_truncated', fn (t) {
+    let decoded = decode_quoted_printable('=')
+
+    t.equal(decoded, '=')
+  })
+
+  t.test('decode_quoted_printable_hex_only', fn (t) {
+    let decoded = decode_quoted_printable('a=3D')
+
+    t.equal(decoded, 'a=')
+  })
+
+  t.test('decode_quoted_printable_unicode', fn (t) {
+    let decoded = decode_quoted_printable('=E2=9C=93')
+
+    t.true(decoded.size > 0)
+  })
+
+  t.test('decode_quoted_printable_mixed', fn (t) {
+    let decoded = decode_quoted_printable('Hello =E2=9C=93 World=20!')
+
+    t.true(decoded.contains?('World !'))
+  })
+
+  t.test('decode_quoted_printable_tabs', fn (t) {
+    let decoded = decode_quoted_printable('Tab=09Here')
+
+    t.equal(decoded, 'Tab\tHere')
+  })
+
+  t.test('decode_quoted_printable_space', fn (t) {
+    let decoded = decode_quoted_printable('Space=20here')
+
+    t.equal(decoded, 'Space here')
+  })
+
+  t.test('decode_quoted_printable_percent', fn (t) {
+    let decoded = decode_quoted_printable('=25')
+
+    t.equal(decoded, '%')
+  })
+
+  t.test('decode_quoted_printable_ampersand', fn (t) {
+    let decoded = decode_quoted_printable('=26')
+
+    t.equal(decoded, '&')
+  })
+
+  t.test('decode_quoted_printable_plus', fn (t) {
+    let decoded = decode_quoted_printable('=2B')
+
+    t.equal(decoded, '+')
+  })
+
+  t.test('parse_message_ids_single', fn (t) {
+    let ids = EmailParser.new.parse_message_ids('<test@example.com>')
+
+    t.equal(ids.size, 1)
+    t.equal(ids.get(0).or_panic, 'test@example.com')
+  })
+
+  t.test('parse_message_ids_multiple', fn (t) {
+    let ids = EmailParser.new.parse_message_ids(
+      '<12345@example.com> <67890@example.com>',
+    )
+
+    t.equal(ids.size, 2)
+    t.equal(ids.get(0).or_panic, '12345@example.com')
+    t.equal(ids.get(1).or_panic, '67890@example.com')
+  })
+
+  t.test('parse_message_ids_empty', fn (t) {
+    let ids = EmailParser.new.parse_message_ids('')
+
+    t.equal(ids.size, 0)
+  })
+
+  t.test('parse_message_ids_no_brackets', fn (t) {
+    let ids = EmailParser.new.parse_message_ids('test@example.com')
+
+    t.equal(ids.size, 0)
+  })
+
+  t.test('parse_message_ids_whitespace', fn (t) {
+    let ids = EmailParser.new.parse_message_ids(
+      ' <one@example.com> <two@example.com> ',
+    )
+
+    t.equal(ids.size, 2)
+    t.equal(ids.get(0).or_panic, 'one@example.com')
+    t.equal(ids.get(1).or_panic, 'two@example.com')
+  })
+
+  t.test('parse_message_ids_unmatched_brackets', fn (t) {
+    let ids = EmailParser.new.parse_message_ids('<test@example.com')
+
+    t.equal(ids.size, 0)
+  })
+
+  t.test('parse_message_ids_empty_brackets', fn (t) {
+    let ids = EmailParser.new.parse_message_ids('<>')
+
+    t.equal(ids.size, 0)
+  })
+
+  t.test('parse_message_ids_complex', fn (t) {
+    let ids = EmailParser.new.parse_message_ids(
+      '<abc.123@example.com> <def.456@test.org>',
+    )
+
+    t.equal(ids.size, 2)
+  })
+
+  t.test('parse_message_ids_nested_brackets', fn (t) {
+    let ids = EmailParser.new.parse_message_ids(
+      '<test<inner>@example.com> <normal@example.com>',
+    )
+
+    t.equal(ids.size, 2)
+  })
+
+  t.test('parse_message_ids_with_text', fn (t) {
+    let ids = EmailParser.new.parse_message_ids(
+      'text before <test@example.com> text after',
+    )
+
+    t.equal(ids.size, 1)
+    t.equal(ids.get(0).or_panic, 'test@example.com')
+  })
+
+  t.test('parse_message_ids_trim', fn (t) {
+    let ids = EmailParser.new.parse_message_ids(' < test@example.com > ')
+
+    t.equal(ids.size, 1)
+    t.equal(ids.get(0).or_panic, 'test@example.com')
+  })
+
+  t.test('parse_message_ids_long', fn (t) {
+    let ids = EmailParser.new.parse_message_ids(
+      '<very.long.message.id@server.example.com>',
+    )
+
+    t.equal(ids.size, 1)
+    t.true(ids.get(0).or_panic.contains?('@'))
+  })
+
+  t.test('parse_message_ids_underscore', fn (t) {
+    let ids = EmailParser.new.parse_message_ids('<test_123@example.com>')
+
+    t.equal(ids.size, 1)
+  })
+
+  t.test('parse_message_ids_hyphen', fn (t) {
+    let ids = EmailParser.new.parse_message_ids('<test-123@example.com>')
+
+    t.equal(ids.size, 1)
+  })
+
+  t.test('parse_message_ids_multiple_spaces', fn (t) {
+    let ids = EmailParser.new.parse_message_ids(
+      '  <one@example.com>  <two@example.com>  ',
+    )
+
+    t.equal(ids.size, 2)
+  })
+}

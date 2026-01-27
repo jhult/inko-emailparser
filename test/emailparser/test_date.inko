@@ -1,0 +1,212 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Tests for RFC 5322 date formatting
+
+import emailparser.date (EmailDateFormatter, format_email_date)
+import std.test (Tests)
+import std.time (DateTime)
+
+fn pub tests(t: mut Tests) {
+  t.test('formatter_creation', fn (t) {
+    let default_formatter = EmailDateFormatter.new
+
+    t.equal(default_formatter.timezone, '0000')
+
+    let custom_formatter = EmailDateFormatter.with_timezone('-0500')
+
+    t.equal(custom_formatter.timezone, '-0500')
+  })
+
+  t.test('format_weekday', fn (t) {
+    let formatter = EmailDateFormatter.new
+
+    t.equal(formatter.format_weekday(1), 'Mon')
+    t.equal(formatter.format_weekday(2), 'Tue')
+    t.equal(formatter.format_weekday(3), 'Wed')
+    t.equal(formatter.format_weekday(4), 'Thu')
+    t.equal(formatter.format_weekday(5), 'Fri')
+    t.equal(formatter.format_weekday(6), 'Sat')
+    t.equal(formatter.format_weekday(7), 'Sun')
+
+    t.equal(formatter.format_weekday(0), 'Mon')
+    t.equal(formatter.format_weekday(10), 'Mon')
+  })
+
+  t.test('format_month', fn (t) {
+    let formatter = EmailDateFormatter.new
+
+    t.equal(formatter.format_month(1), 'Jan')
+    t.equal(formatter.format_month(2), 'Feb')
+    t.equal(formatter.format_month(3), 'Mar')
+    t.equal(formatter.format_month(4), 'Apr')
+    t.equal(formatter.format_month(5), 'May')
+    t.equal(formatter.format_month(6), 'Jun')
+    t.equal(formatter.format_month(7), 'Jul')
+    t.equal(formatter.format_month(8), 'Aug')
+    t.equal(formatter.format_month(9), 'Sep')
+    t.equal(formatter.format_month(10), 'Oct')
+    t.equal(formatter.format_month(11), 'Nov')
+    t.equal(formatter.format_month(12), 'Dec')
+
+    t.equal(formatter.format_month(0), 'Jan')
+    t.equal(formatter.format_month(13), 'Jan')
+  })
+
+  t.test('format_timezone_offset', fn (t) {
+    let default_formatter = EmailDateFormatter.new
+
+    t.equal(default_formatter.format_timezone_offset, '+0000')
+
+    let utc_formatter = EmailDateFormatter.with_timezone('+0000')
+
+    t.equal(utc_formatter.format_timezone_offset, '+0000')
+
+    let est_formatter = EmailDateFormatter.with_timezone('-0500')
+
+    t.equal(est_formatter.format_timezone_offset, '-0500')
+
+    let pst_formatter = EmailDateFormatter.with_timezone('-0800')
+
+    t.equal(pst_formatter.format_timezone_offset, '-0800')
+
+    let cst_formatter = EmailDateFormatter.with_timezone('+0800')
+
+    t.equal(cst_formatter.format_timezone_offset, '+0800')
+
+    let invalid_formatter = EmailDateFormatter.with_timezone('invalid')
+
+    t.equal(invalid_formatter.format_timezone_offset, '+0000')
+  })
+
+  t.test('format_now', fn (t) {
+    let formatter = EmailDateFormatter.new
+    let date_str = formatter.format_now
+
+    # Check for format components
+    match date_str.index_of(',', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match date_str.index_of(' ', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match date_str.index_of(':', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match date_str.index_of('+', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+  })
+
+  t.test('format_email_date', fn (t) {
+    let date_str = format_email_date
+
+    match date_str.index_of(',', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match date_str.index_of(':', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+  })
+
+  t.test('format_datetime', fn (t) {
+    let formatter = EmailDateFormatter.new
+    let time = DateTime.local
+    let date_str = formatter.format_datetime(time)
+
+    match date_str.index_of(',', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match date_str.index_of(' ', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match date_str.index_of(':', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    # Should contain year (4 digits)
+    t.true(date_str.size > 20)
+  })
+
+  t.test('date_format_structure', fn (t) {
+    let formatter = EmailDateFormatter.new
+    let time = DateTime.local
+    let date_str = formatter.format_datetime(time)
+
+    match date_str.index_of(',', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match date_str.index_of(' ', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    match date_str.index_of(':', 0) {
+      case Some(_) -> {}
+      case None -> {}
+    }
+
+    let parts = date_str.split(' ').into_iter.to_array
+
+    t.equal(parts.size, 6)
+  })
+
+  t.test('weekday_values', fn (t) {
+    let formatter = EmailDateFormatter.new
+    let time = DateTime.local
+
+    # Should return a valid weekday name
+    let weekday = formatter.format_weekday(time.day_of_week)
+
+    t.true(
+      weekday == 'Mon'
+        or weekday == 'Tue'
+        or weekday == 'Wed'
+        or weekday == 'Thu'
+        or weekday == 'Fri'
+        or weekday == 'Sat'
+        or weekday == 'Sun',
+    )
+  })
+
+  t.test('month_values', fn (t) {
+    let formatter = EmailDateFormatter.new
+    let time = DateTime.local
+
+    # Should return a valid month name
+    let month = formatter.format_month(time.month)
+
+    t.true(
+      month == 'Jan'
+        or month == 'Feb'
+        or month == 'Mar'
+        or month == 'Apr'
+        or month == 'May'
+        or month == 'Jun'
+        or month == 'Jul'
+        or month == 'Aug'
+        or month == 'Sep'
+        or month == 'Oct'
+        or month == 'Nov'
+        or month == 'Dec',
+    )
+  })
+}

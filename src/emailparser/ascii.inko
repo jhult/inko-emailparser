@@ -1,0 +1,261 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# ==============================================================================
+# ASCII Character Constants and Validation Module
+# ==============================================================================
+#
+# This module provides centralized ASCII character constants and validation
+# functions used throughout the email parser. It serves as a foundational
+# utility module imported by all other emailparser submodules.
+#
+# ## Purpose
+#
+# Email parsing requires extensive byte-level validation against ASCII standards.
+# This module centralizes:
+# - ASCII character code constants (e.g., ASCII_SPACE = 32)
+# - Character classification functions (is_digit, is_alpha, is_alnum, etc.)
+# - Email-specific character validation (is_email_local_special, is_domain_char)
+# - Size limits and encoding constants
+#
+# ## Architecture
+#
+# The module is organized into three sections:
+#
+# 1. **Character Constants**: Numeric constants for ASCII character codes (0-127)
+#    - Digits, uppercase, lowercase
+#    - Punctuation and symbols
+#    - Special characters (replacement, brackets, etc.)
+#
+# 2. **Validation Functions**: Predicate functions testing byte values
+#    - General: is_digit, is_alpha, is_alnum
+#    - Email-specific: is_email_local_special, is_domain_char
+#    - Printable/Control: is_printable_ascii, is_control_char
+#
+# 3. **Constants**: Size limits and encoding-related values
+#    - MAX_FILENAME_SIZE: Maximum filename length (255)
+#    - BASE64_CHUNK_SIZE, BASE64_DECODED_SIZE: Base64 encoding ratios
+#
+# ## Design Decisions
+#
+# ### Constants over Magic Numbers
+#
+# All ASCII character codes are defined as named constants rather than using
+# magic numbers (e.g., ASCII_SPACE instead of 32) because:
+# - Improves code readability and maintainability
+# - Prevents errors from transposed numbers
+# - Makes character comparisons self-documenting
+#
+# ### Byte-level Validation
+#
+# Functions operate on Int (byte values) rather than String because:
+# - Email parsing operates on raw bytes during header processing
+# - Avoids allocation overhead of String for single-character checks
+# - Matches Inko's byte-level string access model
+#
+# ### Email-Special Characters
+#
+# The is_email_local_special function implements RFC 5322 "atext" characters
+# allowed in email local parts. This includes many characters not typically
+# found in other contexts (e.g., !, $, *, ^, `).
+#
+# ## Module Interactions
+#
+# This module is imported by:
+# - **emailparser**: Main parser uses ASCII constants for byte comparisons
+# - **emailparser.date**: Date formatter uses digit and sign constants
+# - **emailparser.message_id**: Message-ID validator uses bracket constants
+# - **emailparser.validation**: Validation functions use character predicates
+#
+# This module has no dependencies on other emailparser modules.
+#
+# ## Public vs Private API
+#
+# ### Public API
+#
+# All constants and functions are public and intended for use throughout
+# the emailparser package:
+# - Character constants: ASCII_SPACE, ASCII_COLON, etc.
+# - Validation functions: is_digit, is_alpha, is_alnum, etc.
+# - Size constants: MAX_FILENAME_SIZE, BASE64_CHUNK_SIZE, etc.
+#
+# ### Private API
+#
+# None - all functions and constants are public.
+#
+# ## RFC Compliance
+#
+# This module implements:
+# - **ASCII (ANSI X3.4-1986)**: 7-bit character encoding
+# - **RFC 5322 section 3.2.3**: Atext specification for email addresses
+# - **RFC 2045**: MIME special characters for validation
+#
+# ### Character Ranges
+#
+# - Digits: 48-57 (0-9)
+# - Uppercase: 65-90 (A-Z)
+# - Lowercase: 97-122 (a-z)
+# - Printable ASCII: 33-126 (! through ~)
+# - Control characters: 0-31 and 127
+#
+# ## Usage Example
+#
+# ```inko
+# import emailparser.ascii (is_alnum, is_domain_char, ASCII_AT)
+#
+# # Validate a character in an email address
+# if byte == ASCII_AT {
+#   # Found @ separator
+# }
+#
+# # Check if character is valid in domain
+# if is_domain_char(byte) {
+#   # Valid domain character
+# }
+# ```
+
+# Digits
+let pub ASCII_DIGIT_0 = 48 # 0
+let pub ASCII_DIGIT_9 = 57 # 9
+
+# Uppercase letters
+let pub ASCII_UPPERCASE_A = 65 # A
+let pub ASCII_UPPERCASE_Z = 90 # Z
+
+# Lowercase letters
+let pub ASCII_LOWERCASE_A = 97 # a
+let pub ASCII_LOWERCASE_Z = 122 # z
+
+# Common punctuation and symbols
+let pub ASCII_SPACE = 32 # (space)
+let pub ASCII_EXCLAMATION = 33 # !
+let pub ASCII_DQUOTE = 34 # "
+let pub ASCII_HASH = 35 # #
+let pub ASCII_DOLLAR = 36 # $
+let pub ASCII_PERCENT = 37 # %
+let pub ASCII_AMPERSAND = 38 # &
+let pub ASCII_APOSTROPHE = 39 # '
+let pub ASCII_LPAREN = 40 # (
+let pub ASCII_RPAREN = 41 # )
+let pub ASCII_ASTERISK = 42 # *
+let pub ASCII_PLUS = 43 # +
+let pub ASCII_COMMA = 44 # ,
+let pub ASCII_HYPHEN = 45 # -
+let pub ASCII_DOT = 46 # .
+let pub ASCII_SLASH = 47 # /
+
+# Control characters
+let pub ASCII_HT = 9 # Horizontal tab (\t)
+let pub ASCII_LF = 10 # Line feed (\n)
+let pub ASCII_CR = 13 # Carriage return (\r)
+let pub ASCII_DEL = 127 # Delete (DEL) control character
+
+# Additional characters
+let pub ASCII_COLON = 58 # :
+let pub ASCII_SEMICOLON = 59 # ;
+let pub ASCII_LESS_THAN = 60 # <
+let pub ASCII_EQUALS = 61 # =
+let pub ASCII_GREATER_THAN = 62 # >
+let pub ASCII_QUESTION = 63 # ?
+let pub ASCII_AT = 64 # @
+
+# Special characters for error handling and replacement
+# Unicode replacement character U+FFFD (�) - UTF-8 encoded as [239, 191, 189]
+# Used as replacement char for decoding errors instead of '?' (ASCII 63)
+# which could be confused with actual content in the original message
+let pub UNICODE_REPLACEMENT_CHAR_UTF8 = [239, 191, 189] # U+FFFD in UTF-8
+let pub ASCII_REPLACEMENT_CHAR = 63 # ? (legacy, deprecated - use UNICODE_REPLACEMENT_CHAR_UTF8)
+
+# Brackets and braces
+let pub ASCII_LEFT_BRACKET = 91 # [
+let pub ASCII_BACKSLASH = 92 # \
+let pub ASCII_RIGHT_BRACKET = 93 # ]
+let pub ASCII_CARET = 94 # ^
+let pub ASCII_BACKTICK = 96 # `
+let pub ASCII_LEFT_BRACE = 123 # {
+let pub ASCII_PIPE = 124 # |
+let pub ASCII_RIGHT_BRACE = 125 # }
+let pub ASCII_TILDE = 126 # ~
+
+# Additional character for email addresses
+let pub ASCII_UNDERSCORE = 95 # _
+
+# ========== Character Validation Helpers ==========
+
+# Check if a byte is a digit (0-9)
+fn pub is_digit(byte: Int) -> Bool {
+  byte >= ASCII_DIGIT_0 and byte <= ASCII_DIGIT_9
+}
+
+# Check if a byte is an uppercase letter (A-Z)
+fn pub is_uppercase(byte: Int) -> Bool {
+  byte >= ASCII_UPPERCASE_A and byte <= ASCII_UPPERCASE_Z
+}
+
+# Check if a byte is a lowercase letter (a-z)
+fn pub is_lowercase(byte: Int) -> Bool {
+  byte >= ASCII_LOWERCASE_A and byte <= ASCII_LOWERCASE_Z
+}
+
+# Check if a byte is an alphabetic character (A-Z or a-z)
+fn pub is_alpha(byte: Int) -> Bool {
+  is_uppercase(byte) or is_lowercase(byte)
+}
+
+# Check if a byte is alphanumeric (0-9, A-Z, a-z)
+fn pub is_alnum(byte: Int) -> Bool {
+  is_digit(byte) or is_alpha(byte)
+}
+
+# Check if a byte is a valid email local part special character
+# RFC 5322: atext includes alphanumeric and these special chars
+fn pub is_email_local_special(byte: Int) -> Bool {
+  byte == ASCII_HYPHEN
+    or byte == ASCII_DOT
+    or byte == ASCII_UNDERSCORE
+    or byte == ASCII_PLUS
+    or byte == ASCII_EXCLAMATION
+    or byte == ASCII_HASH
+    or byte == ASCII_DOLLAR
+    or byte == ASCII_PERCENT
+    or byte == ASCII_AMPERSAND
+    or byte == ASCII_APOSTROPHE
+    or byte == ASCII_ASTERISK
+    or byte == ASCII_SLASH
+    or byte == ASCII_EQUALS
+    or byte == ASCII_QUESTION
+    or byte == ASCII_CARET
+    or byte == ASCII_BACKTICK
+    or byte == ASCII_LEFT_BRACE
+    or byte == ASCII_RIGHT_BRACE
+    or byte == ASCII_PIPE
+    or byte == ASCII_TILDE
+}
+
+# Check if a byte is a valid domain character (alphanumeric, dot, or hyphen)
+fn pub is_domain_char(byte: Int) -> Bool {
+  is_alnum(byte) or byte == ASCII_DOT or byte == ASCII_HYPHEN
+}
+
+# Check if a byte is a printable ASCII character (33-126)
+fn pub is_printable_ascii(byte: Int) -> Bool {
+  byte >= ASCII_EXCLAMATION and byte <= ASCII_TILDE
+}
+
+# Check if a byte is a control character (0-31)
+fn pub is_control_char(byte: Int) -> Bool {
+  byte < 32
+}
+
+# ========== Size and Limit Constants ==========
+
+# Base64 encoding constants
+let pub BASE64_CHUNK_SIZE = 4 # Input characters per base64 chunk
+let pub BASE64_DECODED_SIZE = 3 # Output bytes per base64 chunk
+
+# Quoted-printable encoding constants
+# QP uses 3 characters (=XX) per encoded byte, worst case is all bytes encoded
+# Conservative estimate: assume 75% of bytes are encoded (typical for binary)
+let pub QP_DECODED_RATIO = 3 # Worst case: 3 chars per decoded byte
+let pub QP_SAFETY_FACTOR = 4 # Conservative estimate: 4 chars per decoded byte (75% encoded)

@@ -1,0 +1,173 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# ==============================================================================
+# Email Attachments Module
+# ==============================================================================
+#
+# This module provides the EmailAttachment type for representing MIME email
+# attachments extracted from multipart messages.
+#
+# ## Purpose
+#
+# Email attachments are binary or text files included within email messages,
+# typically transmitted as MIME parts within multipart messages. This module
+# encapsulates attachment data and metadata in a structured format suitable
+# for application use.
+#
+# ## Architecture
+#
+# The EmailAttachment type stores:
+# - **content_type**: MIME media type (e.g., "image/jpeg", "application/pdf")
+# - **filename**: Optional filename from Content-Disposition header
+# - **content_disposition**: Disposition type ("attachment" or "inline")
+# - **content_id**: Optional Content-ID for inline images referenced in HTML
+# - **size**: Attachment size in bytes
+# - **content**: Raw attachment data as ByteArray
+#
+# ## Design Decisions
+#
+# ### ByteArray vs String
+#
+# Attachment content is stored as ByteArray rather than String because:
+# - Attachments are often binary data (images, PDFs, etc.)
+# - ByteArray avoids UTF-8 validation issues
+# - Preserves exact original bytes for integrity
+#
+# ### Filename Handling
+#
+# Filenames are optional (Option[String]) because:
+# - Inline images often lack filenames
+# - RFC 2183 specifies filename as optional in Content-Disposition
+# - Some email clients omit filenames intentionally
+#
+# ### Content ID Support
+#
+# The content_id field enables HTML email functionality:
+# - Inline images are referenced via cid: URLs in HTML
+# - Content-ID maps these references to actual attachment data
+# - Follows RFC 2045 section 7 (Content-ID header)
+#
+# ## Module Interactions
+#
+# This module is used by:
+# - **emailparser**: Main parser extracts attachments and creates EmailAttachment
+#   instances via the from_decoded_part constructor
+#
+# This module has no dependencies on other emailparser modules.
+#
+# ## Public vs Private API
+#
+# ### Public API
+#
+# The entire module is public:
+# - `EmailAttachment`: Main type for attachment representation
+# - `EmailAttachment.new`: Constructor for manual attachment creation
+# - `EmailAttachment.from_decoded_part`: Convenience constructor for parsed parts
+# - Query methods: has_filename?, is_inline?, is_attachment?, is_image?
+# - Utility methods: filename_or
+#
+# ### Private API
+#
+# None - all functions and types are public.
+#
+# ## RFC Compliance
+#
+# This module implements:
+# - **RFC 2183**: Content-Disposition header (attachment/inline)
+# - **RFC 2045**: MIME Content-ID and Content-Type headers
+# - **RFC 2046**: MIME media types and structure
+#
+# ### Security Considerations
+#
+# Filenames are sanitized at creation time (in the main parser) to prevent:
+# - Path traversal attacks (.. sequences)
+# - Control character injection
+# - Excessively long filenames (>255 chars)
+
+import std.bytes (ByteArray)
+import std.option (Option)
+
+# Email attachment representation
+type pub EmailAttachment {
+  let pub @content_type: String
+  let pub @filename: Option[String]
+  let pub @content_disposition: String
+  let pub @content_id: Option[String]
+  let pub @size: Int
+  let pub @content: ByteArray
+}
+
+impl EmailAttachment {
+  # Create a new EmailAttachment with the specified properties
+  #
+  # This constructor centralizes attachment creation and ensures
+  # consistent data handling across the parser.
+  fn pub static new(
+    content_type: String,
+    filename: Option[String],
+    content_disposition: String,
+    content_id: Option[String],
+    size: Int,
+    content: ByteArray,
+  ) -> EmailAttachment {
+    EmailAttachment(
+      content_type: content_type,
+      filename: filename,
+      content_disposition: content_disposition,
+      content_id: content_id,
+      size: size,
+      content: content,
+    )
+  }
+
+  # Create an attachment from decoded multipart part data
+  #
+  # Convenience constructor for the common case of creating an
+  # attachment from parsed multipart content.
+  fn pub static from_decoded_part(
+    content_type: String,
+    filename: Option[String],
+    content_disposition: String,
+    content_id: Option[String],
+    decoded_body: String,
+  ) -> EmailAttachment {
+    EmailAttachment.new(
+      content_type: content_type,
+      filename: filename,
+      content_disposition: content_disposition,
+      content_id: content_id,
+      size: decoded_body.size,
+      content: decoded_body.to_byte_array,
+    )
+  }
+
+  # Check if this attachment has a filename
+  fn pub has_filename? -> Bool {
+    @filename.some?
+  }
+
+  # Check if this attachment is inline (for HTML email images)
+  fn pub is_inline? -> Bool {
+    @content_disposition == 'inline'
+  }
+
+  # Check if this attachment is a regular attachment
+  fn pub is_attachment? -> Bool {
+    @content_disposition == 'attachment'
+  }
+
+  # Check if this is an image attachment
+  fn pub is_image? -> Bool {
+    @content_type.starts_with?('image/')
+  }
+
+  # Get the filename or a default placeholder if none exists
+  fn pub filename_or(default: String) -> String {
+    match @filename {
+      case Some(name) -> name
+      case None -> default
+    }
+  }
+}

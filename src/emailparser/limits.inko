@@ -1,0 +1,219 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# ==============================================================================
+# Limits Module - Centralized System Constraints
+# ==============================================================================
+#
+# This module centralizes all magic numbers and system limits used throughout
+# the email parser. It provides a single source of truth for:
+# - Size limits (email size, attachment size, filename size)
+# - Count limits (number of attachments, headers, message IDs)
+# - Structural limits (multipart depth, boundary length)
+# - Iteration limits (to prevent DoS attacks)
+#
+# ## Purpose
+#
+# Centralizing limits makes it easy to:
+# - Find all system constraints in one place
+# - Change limits consistently across the codebase
+# - Understand system boundaries and security constraints
+# - Audit all limits for compliance or performance reasons
+#
+# ## Architecture
+#
+# All constants are public and organized by category:
+# 1. **Size Limits**: Maximum sizes for emails, attachments, filenames
+# 2. **Count Limits**: Maximum counts for attachments, headers, message IDs
+# 3. **Structural Limits**: Maximum depth, boundary length, etc.
+# 4. **Iteration Limits**: Maximum iterations for parsing loops
+#
+# ## Design Decisions
+#
+# ### Centralized over Distributed
+#
+# All limits are defined here rather than scattered across multiple files:
+# - Single source of truth
+# - Easier to maintain and audit
+# - Consistent enforcement across the codebase
+# - Self-documenting system constraints
+#
+# ### Documentation with Rationales
+#
+# Each constant includes comments explaining:
+# - Why the limit exists
+# - RFC references (if applicable)
+# - Real-world usage patterns
+# - Security implications (DoS prevention)
+# - Performance considerations
+#
+# ## Module Interactions
+#
+# This module is imported by:
+# - **emailparser**: Uses all limits for parsing configuration
+# - **emailparser.validation**: Uses MAX_BOUNDARY_LENGTH
+# - **emailparser.message_id**: Uses MAX_DOMAIN_SIZE
+# - **emailparser.header**: Uses MAX_FILENAME_SIZE
+#
+# This module has no dependencies on other emailparser modules.
+#
+# ## Public API
+#
+# All constants are public and intended for use throughout the emailparser
+# package. Functions are not provided as these are compile-time constants.
+#
+# ## RFC Compliance
+#
+# Many limits are based on RFC specifications:
+# - RFC 5322: Email message format
+# - RFC 2045/2046: MIME specifications
+# - RFC 1035: DNS domain name limits
+
+# ========== Size Limits ==========
+
+# Maximum email size in bytes (50 MB)
+#
+# Rationale:
+# - Gmail limits: 25 MB for attachments, ~50 MB total message size
+# - DoS prevention: prevents memory exhaustion from oversized emails
+# - Base64 expansion: 33% overhead for attachments means a 50 MB limit
+#   accommodates ~37.5 MB of actual content after encoding
+# - Performance: larger emails significantly increase processing time
+# - Most legitimate emails are < 10 MB
+#
+# RFC reference: RFC 5322 does not specify a maximum size
+let pub MAX_EMAIL_SIZE = 50_000_000
+
+# Maximum attachment size in bytes (25 MB)
+#
+# Rationale:
+# - Gmail attachment limit: 25 MB
+# - Outlook/O365 attachment limit: 20-150 MB depending on plan
+# - DoS prevention: prevents memory exhaustion from large attachments
+# - Storage efficiency: limits disk usage for parsed emails
+# - Base64 overhead: accounts for 33% encoding expansion
+#
+# RFC reference: RFC 2045 section 6.8 (Content-Transfer-Encoding)
+let pub MAX_ATTACHMENT_SIZE = 25_000_000
+
+# Maximum filename length (255 chars)
+#
+# Rationale:
+# - Common filesystem limit (ext4, NTFS, APFS)
+# - Historical DOS filename limit (8.3 format)
+# - Email standard practice for Content-Disposition filename parameter
+# - Prevents filesystem errors when saving attachments
+#
+# RFC reference: RFC 2183 (Content-Disposition)
+let pub MAX_FILENAME_SIZE = 255
+
+# Maximum domain name length (255 chars)
+#
+# Rationale:
+# - DNS specification limit (RFC 1035)
+# - FQDN (fully qualified domain name) maximum length
+# - Ensures compatibility with all DNS resolvers
+# - Prevents buffer overflows in DNS queries
+#
+# RFC reference: RFC 1035 section 2.3.4
+let pub MAX_DOMAIN_SIZE = 255
+
+# ========== Count Limits ==========
+
+# Maximum number of attachments to parse (100)
+#
+# Rationale:
+# - Storage limits: prevents excessive memory/disk usage
+# - Real-world usage: most emails have < 10 attachments
+# - User experience: large attachment lists are rarely useful
+# - DoS prevention: prevents abuse via many small attachments
+# - Processing time: each attachment requires decoding and validation
+#
+# RFC reference: RFC 2045 section 6 (Content-Transfer-Encoding)
+let pub MAX_ATTACHMENTS = 100
+
+# Maximum number of headers to parse (1000)
+#
+# Rationale:
+# - DoS prevention: prevents header parsing DoS attacks
+# - Real-world usage: most emails have < 50 headers
+# - Memory efficiency: each header is stored in memory
+# - Performance: header parsing is O(n) where n is number of headers
+# - RFC compliance: RFC 5322 doesn't specify a limit, but typical limits exist
+#
+# RFC reference: RFC 5322 section 2.2 (Header Fields)
+let pub MAX_HEADERS = 1000
+
+# Maximum header value length in bytes (8192)
+#
+# Rationale:
+# - DoS prevention: prevents memory exhaustion from folded headers
+# - RFC 5322: allows line folding but doesn't specify limit
+# - Postfix: default limit is 102400 but many use smaller values
+# - Sendmail: header size limit of 32768 bytes total
+# - Gmail: practical limit around 10KB per header
+# - Performance: prevents O(n) string concatenation attacks
+# - Folding protection: prevents millions of continuation lines
+#
+# This limit applies to the unfolded header value (after folding processing).
+# Individual lines may be shorter, but the combined value must fit within
+# this limit. In strict mode, exceeding this limit returns an error.
+# In permissive mode, the header value is truncated.
+#
+# RFC reference: RFC 5322 section 2.2.3 (Long Header Fields)
+let pub MAX_HEADER_VALUE_LENGTH = 8192
+
+# Maximum number of message IDs to parse (100)
+#
+# Rationale:
+# - Threading limits: prevents excessive thread ancestry processing
+# - Real-world usage: typical email threads have < 20 references
+# - Gmail/Outlook: both cap displayed thread history at reasonable depths
+# - DoS prevention: prevents abuse via massive References headers
+# - Performance: each message ID is stored and processed
+#
+# RFC reference: RFC 5322 section 3.6.4 (Message-ID Header Field)
+let pub MAX_MESSAGE_IDS = 100
+
+# ========== Structural Limits ==========
+
+# Maximum nesting depth for multipart messages (10 levels)
+#
+# Rationale:
+# - Stack overflow prevention: limits recursive parsing depth
+# - Real-world usage: most emails have 2-4 nesting levels max
+#   - Level 1: multipart/mixed (message root)
+#   - Level 2: multipart/alternative (text + HTML)
+#   - Level 3: multipart/related (HTML + inline images)
+#   - Level 4+: rarely used
+# - DoS prevention: prevents pathological nested multipart attacks
+# - Processing time: O(depth) complexity for nested structures
+#
+# RFC reference: RFC 2046 section 5.1.3 (Nested Multipart)
+let pub MAX_MULTIPART_DEPTH = 10
+
+# Maximum boundary string length (70 characters)
+#
+# Rationale:
+# - RFC 2046 specification: boundary = 0*69<bchars> bcharspace
+# - Maximum length is 70 characters (69 bchars + optional space)
+# - Ensures compatibility with all MIME parsers
+# - Prevents header overflow attacks
+#
+# RFC reference: RFC 2046 section 5.1.1 (Multipart Media Type)
+let pub MAX_BOUNDARY_LENGTH = 70
+
+# ========== Iteration Limits ==========
+
+# Maximum iterations for header decoding (1000)
+#
+# Rationale:
+# - RFC 2047 encoded-word parsing: limits number of encoded words processed
+# - DoS prevention: prevents infinite loops from pathological inputs
+# - Real-world usage: most headers have < 50 encoded words
+# - Performance: each iteration performs string operations and decoding
+# - Safety: ensures bounded execution time for header parsing
+#
+# RFC reference: RFC 2047 section 6 (Encoded-Word Syntax)
+let pub MAX_HEADER_ITERATIONS = 1000

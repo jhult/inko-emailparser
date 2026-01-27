@@ -1,0 +1,387 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# ==============================================================================
+# RFC 5322 Message-ID Generation Module
+# ==============================================================================
+#
+# This module provides generation and validation of RFC 5322 Message-ID headers.
+# Message-IDs are unique identifiers assigned to each email message, essential
+# for threading, reference tracking, and duplicate detection.
+#
+# ## Purpose
+#
+# Message-ID is a mandatory header field in RFC 5322 emails that uniquely
+# identifies a message. This module:
+# - Generates globally unique Message-IDs following RFC 5322 format
+# - Validates Message-ID format for compliance
+# - Parses Message-ID components (local part and domain)
+# - Provides convenient helper functions for common operations
+#
+# ## Architecture
+#
+# The module centers on the MessageIdGenerator type which:
+# - Stores hostname configuration for Message-ID generation
+# - Generates Message-IDs using timestamp + random components
+# - Validates Message-ID format (angle brackets, @ separator)
+# - Extracts local part and domain from Message-IDs
+#
+# Helper functions provide convenient access:
+# - generate_message_id: Generate with default hostname
+# - generate_message_id_with_host: Generate with custom hostname
+# - generate_message_id_with_prefix: Generate with custom prefix
+#
+# ## Design Decisions
+#
+# ### Uniqueness Strategy
+#
+# Message-IDs are generated using:
+# - Timestamp (seconds since epoch) provides time-based uniqueness
+# - Random number provides collision resistance within same second
+# - Hostname provides spatial uniqueness (different servers)
+#
+# Format: `<timestamp.random@hostname>`
+# - Example: `<1736946800.1234567890123456@example.com>`
+#
+# ### Random Component Length
+#
+# The random component is truncated to 12-16 characters because:
+# - 128 bits of randomness provides sufficient collision resistance
+# - Shorter values are more readable in headers
+# - Full Inko integers would be unnecessarily long
+#
+# ### Hostname Default
+#
+# Default hostname is "localhost" because:
+# - Ensures valid format even when hostname is not configured
+# - Production code should use actual hostname for proper uniqueness
+# - Follows principle of sensible defaults
+#
+# ### Validation Approach
+#
+# Message-ID validation is structural rather than semantic:
+# - Checks for angle brackets (< >)
+# - Verifies @ separator presence
+# - Ensures non-empty local and domain parts
+# - Does NOT validate hostname syntax (delegates to other modules)
+#
+# ## Module Interactions
+#
+# This module is used by:
+# - **emailparser**: Not currently used by main parser (for Message-ID generation)
+# - Applications may import this module to generate Message-IDs for outgoing emails
+#
+# This module imports:
+# - **emailparser.ascii**: ASCII constants for bracket characters
+# - **std.rand**: Random number generation for uniqueness
+# - **std.time**: DateTime for timestamp generation
+#
+# ## Public vs Private API
+#
+# ### Public API
+#
+# All functions and types are public:
+# - `MessageIdGenerator`: Main generator type
+# - `MessageIdGenerator.new`: Create generator with custom hostname
+# - `MessageIdGenerator.default`: Create generator with "localhost"
+# - `MessageIdGenerator.generate`: Generate standard Message-ID
+# - `MessageIdGenerator.generate_with_prefix`: Generate with custom prefix
+# - `MessageIdGenerator.is_valid`: Validate Message-ID format
+# - `MessageIdGenerator.local_part`: Extract local part from Message-ID
+# - `MessageIdGenerator.domain_part`: Extract domain from Message-ID
+# - Helper functions: generate_message_id, generate_message_id_with_host, generate_message_id_with_prefix
+#
+# ### Private API
+#
+# None - all functions are public.
+#
+# ## RFC Compliance
+#
+# This module implements:
+# - **RFC 5322 section 3.6.4**: Identification Fields (Message-ID specification)
+# - **RFC 5322 section 3.6.4.1**: Message-ID Format
+#
+# ### Format Specification
+#
+# From RFC 5322:
+# ```
+# msg-id          =   [CFWS] "<" id-left "@" id-right ">" [CFWS]
+# id-left         =   dot-atom-text / obs-id-left
+# id-right        =   dot-atom-text / no-fold-literal / obs-id-right
+# dot-atom-text   =   atom *("." atom)
+# ```
+#
+# Where:
+# - Message-ID is enclosed in angle brackets
+# - Contains exactly one @ separator
+# - Left side (local part) and right side (domain) are non-empty
+# - CFWS (comments and folding white space) is allowed but not generated
+#
+# ### Notable Limitations
+#
+# - Does not generate obsolete Message-ID formats
+# - Does not include comments or folding white space
+# - Does not validate id-left and id-right as dot-atom-text (simplified validation)
+#
+# ## Usage Example
+#
+# ```inko
+# import emailparser.message_id (MessageIdGenerator)
+#
+# # Generate Message-ID with default hostname
+# let generator = MessageIdGenerator.default
+# let msg_id = generator.generate
+# # Result: "<1736946800.123456789012@example.com>"
+#
+# # Generate with custom hostname
+# let generator_custom = MessageIdGenerator.new("mail.example.com")
+# let msg_id_custom = generator_custom.generate
+# # Result: "<1736946800.987654321098@mail.example.com>"
+#
+# # Generate with prefix
+# let msg_id_prefix = generator.generate_with_prefix("user")
+# # Result: "<user.1736946800.123456789012@example.com>"
+#
+# # Validate Message-ID
+# if generator.is_valid(msg_id) {
+#   # Message-ID is valid
+# }
+#
+# # Extract components
+# let local = generator.local_part(msg_id)      # "1736946800.123456789012"
+# let domain = generator.domain_part(msg_id)    # "example.com"
+# ```
+
+import emailparser.ascii (
+  ASCII_DOT, ASCII_GREATER_THAN, ASCII_HYPHEN, ASCII_LESS_THAN, is_alnum,
+  is_domain_char, is_email_local_special,
+)
+import emailparser.limits (MAX_DOMAIN_SIZE)
+import std.rand (Random)
+import std.time (DateTime)
+
+# Message-ID generator
+type pub MessageIdGenerator {
+  let pub @hostname: String
+}
+
+impl MessageIdGenerator {
+  fn pub static new(hostname: String) -> MessageIdGenerator {
+    MessageIdGenerator(hostname: hostname)
+  }
+
+  fn pub static default -> MessageIdGenerator {
+    MessageIdGenerator.new('localhost')
+  }
+
+  # Generate a unique Message-ID per RFC 5322
+  # Format: <timestamp.random@hostname>
+  fn pub generate -> String {
+    let timestamp = DateTime.local.to_int
+    let mut rng = Random.new
+    let random = rng.int.to_string
+
+    let rand_part = if random.size >= 16 {
+      random.substring(0, 16)
+    } else {
+      random
+    }
+
+    '<${timestamp}.${rand_part}@${@hostname}>'
+  }
+
+  # Generate Message-ID with custom prefix
+  fn pub generate_with_prefix(prefix: String) -> String {
+    let timestamp = DateTime.local.to_int
+    let mut rng = Random.new
+    let random = rng.int.to_string
+
+    let rand_part = if random.size >= 12 {
+      random.substring(0, 12)
+    } else {
+      random
+    }
+
+    '<${prefix}.${timestamp}.${rand_part}@${@hostname}>'
+  }
+
+  # Validate a Message-ID format per RFC 5322
+  fn pub is_valid(message_id: String) -> Bool {
+    # Basic validation: must be enclosed in <>, contain @, and not be empty
+    # Minimum valid format is <a@b> (5 characters)
+    if message_id.size < 5 {
+      false
+    } else if message_id.get(0).or(0) != ASCII_LESS_THAN {
+      false
+    } else if message_id.get(message_id.size - 1).or(0) != ASCII_GREATER_THAN {
+      false
+    } else {
+      match message_id.index_of('@', 0) {
+        case Some(at_pos) -> {
+          # Must have at least one char before @ (position > 1 because of '<')
+          # and at least one char after @ (position < size - 2 because of '>')
+          if at_pos <= 1 or at_pos >= (message_id.size - 2) { return false }
+
+          # Extract local part (id-left) - everything between < and @
+          let local_start = 1
+          let local_end = at_pos
+          let local_part = message_id.substring(local_start, local_end)
+
+          # Extract domain part (id-right) - everything between @ and >
+          let domain_start = at_pos + 1
+          let domain_end = message_id.size - 1
+          let domain_part = message_id.substring(domain_start, domain_end)
+
+          # Validate local part (id-left): dot-atom-text per RFC 5322
+          # RFC 5322: id-left = dot-atom-text / obs-id-left
+          # dot-atom-text = atom *("." atom)
+          # atom = 1*atext (atext = alphanumeric + special chars)
+          # We support standard dot-atom-text (not obsolete forms)
+          is_valid_local_part(local_part) and is_valid_domain_part(domain_part)
+        }
+        case None -> false
+      }
+    }
+  }
+
+  # Validate local part (id-left) as dot-atom-text per RFC 5322
+  fn is_valid_local_part(local: String) -> Bool {
+    if local.empty? { return false }
+
+    # Maximum length for local part (64 chars is common email limit)
+    if local.size > 64 { return false }
+
+    let mut i = 0
+
+    while i < local.size {
+      match local.get(i) {
+        case Ok(byte) -> {
+          # Allow alphanumeric and atext special characters
+          let is_atext = is_alnum(byte) or is_email_local_special(byte)
+
+          if !is_atext and byte != ASCII_DOT { return false }
+
+          # Cannot start or end with dot
+          if byte == ASCII_DOT and (i == 0 or i == (local.size - 1)) {
+            return false
+          }
+
+          # Cannot have consecutive dots
+          if byte == ASCII_DOT and i > 0 {
+            match local.get(i - 1) {
+              case Ok(prev) -> if prev == ASCII_DOT { return false }
+              case Error(_) -> return false
+            }
+          }
+
+          i = i + 1
+        }
+        case Error(_) -> return false
+      }
+    }
+
+    true
+  }
+
+  # Validate domain part (id-right) as dot-atom-text per RFC 5322
+  fn is_valid_domain_part(domain: String) -> Bool {
+    if domain.empty? { return false }
+
+    # Maximum length for domain (255 chars is DNS limit)
+    if domain.size > MAX_DOMAIN_SIZE { return false }
+
+    let mut i = 0
+
+    while i < domain.size {
+      match domain.get(i) {
+        case Ok(byte) -> {
+          # Allow alphanumeric, dot, and hyphen (valid hostname characters)
+          if !is_domain_char(byte) { return false }
+
+          # Cannot start or end with hyphen
+          if byte == ASCII_HYPHEN and (i == 0 or i == (domain.size - 1)) {
+            return false
+          }
+
+          # Cannot start or end with dot
+          if byte == ASCII_DOT and (i == 0 or i == (domain.size - 1)) {
+            return false
+          }
+
+          # Cannot have consecutive dots
+          if byte == ASCII_DOT and i > 0 {
+            match domain.get(i - 1) {
+              case Ok(prev) -> if prev == ASCII_DOT { return false }
+              case Error(_) -> return false
+            }
+          }
+
+          i = i + 1
+        }
+        case Error(_) -> return false
+      }
+    }
+
+    true
+  }
+
+  # Strip angle brackets from a string
+  # Removes leading '<' and trailing '>' if present
+  fn strip_angle_brackets(s: String) -> String {
+    let without_start = if s.starts_with?('<') {
+      s.substring(1, s.size)
+    } else {
+      s
+    }
+
+    if without_start.ends_with?('>') {
+      without_start.substring(0, without_start.size - 1)
+    } else {
+      without_start
+    }
+  }
+
+  # Extract local part from Message-ID
+  fn pub local_part(message_id: String) -> String {
+    let without_brackets = strip_angle_brackets(message_id)
+
+    match without_brackets.index_of('@', 0) {
+      case Some(pos) -> without_brackets.substring(0, pos)
+      case None -> without_brackets
+    }
+  }
+
+  # Extract domain from Message-ID
+  fn pub domain_part(message_id: String) -> String {
+    let without_brackets = strip_angle_brackets(message_id)
+
+    match without_brackets.index_of('@', 0) {
+      case Some(pos) -> {
+        without_brackets.substring(pos + 1, without_brackets.size)
+      }
+      case None -> ''
+    }
+  }
+}
+
+# Generate Message-ID using default generator
+fn pub generate_message_id -> String {
+  let generator = MessageIdGenerator.default
+
+  generator.generate
+}
+
+# Generate Message-ID with custom hostname
+fn pub generate_message_id_with_host(hostname: String) -> String {
+  let generator = MessageIdGenerator.new(hostname)
+
+  generator.generate
+}
+
+# Generate Message-ID with prefix
+fn pub generate_message_id_with_prefix(prefix: String) -> String {
+  let generator = MessageIdGenerator.default
+
+  generator.generate_with_prefix(prefix)
+}

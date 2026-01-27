@@ -1,0 +1,177 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+import emailparser.error (Error)
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  t.test('error_with_line_number', fn (t) {
+    let error = Error.InvalidHeaderFieldName(
+      'Invalid-Name',
+      Option.Some(42),
+      Option.None,
+      Option.None,
+    )
+
+    let message = error.to_message
+
+    t.true(message.contains?('Line 42'))
+    t.true(message.contains?('Invalid header field name'))
+    t.true(message.contains?('Invalid-Name'))
+  })
+
+  t.test('error_with_position', fn (t) {
+    let error = Error.MalformedHeader(
+      'possible missing newline',
+      Option.None,
+      Option.Some(100),
+      Option.None,
+    )
+
+    let message = error.to_message
+
+    t.true(message.contains?('position 100'))
+    t.true(message.contains?('Malformed header'))
+    t.true(message.contains?('possible missing newline'))
+  })
+
+  t.test('error_with_fragment', fn (t) {
+    let error = Error.BoundaryNotFound(
+      Option.None,
+      Option.None,
+      Option.Some('This is the beginning of the body...'),
+    )
+
+    let message = error.to_message
+
+    t.true(message.contains?('This is the beginning of the body...'))
+    t.true(message.contains?('Boundary marker not found'))
+  })
+
+  t.test('error_with_all_context', fn (t) {
+    let error = Error.DuplicateHeader(
+      'Subject',
+      Option.Some(15),
+      Option.Some(30),
+      Option.Some('Subject: First'),
+    )
+
+    let message = error.to_message
+
+    t.true(message.contains?('Line 15'))
+    t.true(message.contains?('position 30'))
+    t.true(message.contains?('Subject: First'))
+    t.true(message.contains?('Duplicate header detected'))
+    t.true(message.contains?('Subject'))
+  })
+
+  t.test('error_without_context', fn (t) {
+    let error = Error.ParseError(
+      'Generic error',
+      Option.None,
+      Option.None,
+      Option.None,
+    )
+
+    let message = error.to_message
+
+    t.true(message.contains?('Generic error'))
+    t.false(message.contains?('Line '))
+    t.false(message.contains?('position'))
+    t.false(message.contains?('['))
+  })
+
+  t.test('error_with_line_and_fragment', fn (t) {
+    let error = Error.NoBodyInPart(
+      Option.Some(100),
+      Option.None,
+      Option.Some('Content-Type: text/plain'),
+    )
+
+    let message = error.to_message
+
+    t.true(message.contains?('Line 100'))
+    t.true(message.contains?('Content-Type: text/plain'))
+    t.true(message.contains?('No body found'))
+    t.false(message.contains?('position'))
+  })
+
+  t.test('email_size_error_with_context', fn (t) {
+    let error = Error.EmailSizeTooLarge(
+      60_000_000,
+      50_000_000,
+      Option.Some(1),
+      Option.None,
+      Option.Some('Large email content...'),
+    )
+
+    let message = error.to_message
+
+    t.true(message.contains?('Line 1'))
+    t.true(message.contains?('60000000'))
+    t.true(message.contains?('50000000'))
+    t.true(message.contains?('Large email content...'))
+    t.true(message.contains?('Email size exceeds maximum'))
+  })
+
+  t.test('error_variant_access', fn (t) {
+    let error = Error.HeaderWithoutColon(
+      Option.Some(5),
+      Option.Some(10),
+      Option.None,
+    )
+
+    let variant = error.variant
+
+    t.equal(variant, 'HeaderWithoutColon')
+  })
+
+  t.test('fragment_in_message', fn (t) {
+    let error = Error.ParseError(
+      'Test',
+      Option.None,
+      Option.None,
+      Option.Some('sample fragment'),
+    )
+
+    let message = error.to_message
+
+    t.true(message.contains?('Test'))
+    t.true(message.contains?('"sample fragment"'))
+  })
+
+  t.test('too_many_headers_with_context', fn (t) {
+    let error = Error.TooManyHeaders(
+      1001,
+      1000,
+      Option.Some(1001),
+      Option.None,
+      Option.None,
+    )
+
+    let message = error.to_message
+
+    t.true(message.contains?('Line 1001'))
+    t.true(message.contains?('1001'))
+    t.true(message.contains?('1000'))
+    t.true(message.contains?('Maximum number of headers exceeded'))
+  })
+
+  t.test('multipart_depth_exceeded_with_context', fn (t) {
+    let error = Error.MultipartDepthExceeded(
+      11,
+      10,
+      Option.Some(50),
+      Option.None,
+      Option.None,
+    )
+
+    let message = error.to_message
+
+    t.true(message.contains?('Line 50'))
+    t.true(message.contains?('11'))
+    t.true(message.contains?('10'))
+    t.true(message.contains?('Maximum multipart nesting depth exceeded'))
+  })
+}

@@ -1,0 +1,985 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# RFC 5322 Email Message Parser
+#
+# Parses raw email messages (RFC 5322, RFC 2045 for MIME) into structured format.
+# Supports:
+# - Header parsing (From, To, Cc, Subject, Date, Message-ID, etc.)
+# - MIME multipart messages
+# - Attachments extraction
+# - Content-Transfer-Encoding decoding (base64, quoted-printable, 7bit, 8bit)
+# - Character set handling
+# - Folding/unfolding of header fields
+
+import emailparser.address (EmailAddress, parse_address_list_impl)
+import emailparser.address (is_valid_email_format)
+import emailparser.attachment (EmailAttachment)
+import emailparser.decoder (decode_body_impl, decode_rfc2047_word)
+import emailparser.error (Error)
+import emailparser.header (
+  eq_ignore_case, extract_extra_headers, get_header_value_impl,
+  get_param_value_impl, is_standard_header_impl, parse_content_type_impl,
+  parse_headers_impl,
+)
+import emailparser.limits (MAX_HEADER_ITERATIONS, MAX_MESSAGE_IDS)
+import emailparser.multipart (parse_multipart_impl)
+import emailparser.validation (is_valid_boundary)
+import std.bytes (ByteArray)
+import std.option (Option)
+import std.result (Result)
+
+# Version constant for programmatic access
+let pub VERSION = '0.1.0'
+
+# Email address information
+type pub AddressInfo {
+  let pub @from: EmailAddress
+  let pub @to: Array[EmailAddress]
+  let pub @cc: Array[EmailAddress]
+  let pub @bcc: Array[EmailAddress]
+}
+
+# Threading information for email conversations
+type pub ThreadingInfo {
+  let pub @in_reply_to: Option[String]
+  let pub @references: Array[String]
+  let pub @thread_id: String
+}
+
+# MIME structure and encoding information
+type pub MIMEInfo {
+  let pub @content_type: String
+  let pub @content_type_params: Array[(String, String)]
+  let pub @content_transfer_encoding: String
+  let pub @charset: Option[String]
+  let pub @boundary: Option[String]
+}
+
+# Parsed email message structure
+type pub ParsedEmailMessage {
+  # Address information
+  let pub @addresses: AddressInfo
+
+  # Basic headers
+  let pub @subject: String
+  let pub @date: String
+  let pub @message_id: String
+
+  # Threading information
+  let pub @threading: ThreadingInfo
+
+  # MIME structure and encoding
+  let pub @mime: MIMEInfo
+
+  # Body content
+  let pub @text_body: Option[String]
+  let pub @html_body: Option[String]
+
+  # Attachments
+  let pub @attachments: Array[EmailAttachment]
+
+  # Additional headers
+  let pub @extra_headers: Array[(String, String)]
+
+  # Raw size
+  let pub @size: Int
+}
+
+# Configuration for email parser
+type pub ParserConfig {
+  # Strict mode enables additional validation
+  let pub mut @strict_mode: Bool
+
+  # Maximum email size in bytes (50 MB default)
+  let pub mut @max_email_size: Int
+
+  # Maximum attachment size in bytes (25 MB default)
+  let pub mut @max_attachment_size: Int
+
+  # Maximum nesting depth for multipart messages
+  let pub mut @max_multipart_depth: Int
+
+  # Maximum number of attachments to parse
+  let pub mut @max_attachments: Int
+
+  # Maximum number of headers to parse (DoS prevention)
+  let pub mut @max_headers: Int
+}
+
+impl ParserConfig {
+  # Create a default configuration
+  fn pub static new -> ParserConfig {
+    ParserConfig(
+      strict_mode: false,
+      max_email_size: 50_000_000,
+      max_attachment_size: 25_000_000,
+      max_multipart_depth: 10,
+      max_attachments: 100,
+      max_headers: 1000,
+    )
+  }
+
+  # Set strict mode
+  fn pub mut with_strict_mode(strict: Bool) -> mut Self {
+    @strict_mode = strict
+    self
+  }
+
+  # Set maximum email size
+  fn pub mut with_max_email_size(size: Int) -> mut Self {
+    @max_email_size = size
+    self
+  }
+
+  # Set maximum attachment size
+  fn pub mut with_max_attachment_size(size: Int) -> mut Self {
+    @max_attachment_size = size
+    self
+  }
+
+  # Set maximum multipart depth
+  fn pub mut with_max_multipart_depth(depth: Int) -> mut Self {
+    @max_multipart_depth = depth
+    self
+  }
+
+  # Set maximum attachments
+  fn pub mut with_max_attachments(count: Int) -> mut Self {
+    @max_attachments = count
+    self
+  }
+
+  # Set maximum headers
+  fn pub mut with_max_headers(count: Int) -> mut Self {
+    @max_headers = count
+    self
+  }
+
+  # Set all limit values at once
+  fn pub mut with_limits(
+    max_email_size: Int,
+    max_attachment_size: Int,
+    max_multipart_depth: Int,
+    max_attachments: Int,
+  ) -> mut Self {
+    @max_email_size = max_email_size
+    @max_attachment_size = max_attachment_size
+    @max_multipart_depth = max_multipart_depth
+    @max_attachments = max_attachments
+    self
+  }
+}
+
+# Normalize line endings to LF for consistent parsing
+# RFC 5322 specifies CRLF, but we accept LF-only for compatibility
+fn normalize_line_endings(text: String) -> String {
+  # Replace CRLF with LF
+  text.replace('\r\n', '\n')
+}
+
+# Email parser
+type pub EmailParser {
+  let pub @config: ParserConfig
+}
+
+# Parse a single address header (From, To, Cc, Bcc)
+fn parse_address_header(
+  headers: ref Array[(String, String)],
+  name: String,
+) -> Array[EmailAddress] {
+  let raw = get_header_value_impl(headers, name)
+  let decoded = match raw.clone {
+    case Some(v) -> decode_header_value_impl(v)
+    case None -> ''
+  }
+
+  parse_address_list_impl(ref raw, decoded)
+}
+
+# Validate parsed addresses in strict mode
+fn validate_addresses(
+  from: ref EmailAddress,
+  to: ref Array[EmailAddress],
+  cc: ref Array[EmailAddress],
+  bcc: ref Array[EmailAddress],
+  strict_mode: Bool,
+) -> Result[Bool, Error] {
+  if !strict_mode { return Result.Ok(true) }
+
+  # Validate From address
+  if from.address.size > 0 and !is_valid_email_format(from.address.clone) {
+    return Result.Error(
+      Error.InvalidEmailFormat(
+        'From address has invalid format',
+        Option.None,
+        Option.None,
+        Option.Some(from.raw.clone),
+      ),
+    )
+  }
+
+  # Validate To addresses
+  for addr in to.iter {
+    if addr.address.size > 0 and !is_valid_email_format(addr.address.clone) {
+      return Result.Error(
+        Error.InvalidEmailFormat(
+          'To address has invalid format',
+          Option.None,
+          Option.None,
+          Option.Some(addr.raw.clone),
+        ),
+      )
+    }
+  }
+
+  # Validate Cc addresses
+  for addr in cc.iter {
+    if addr.address.size > 0 and !is_valid_email_format(addr.address.clone) {
+      return Result.Error(
+        Error.InvalidEmailFormat(
+          'Cc address has invalid format',
+          Option.None,
+          Option.None,
+          Option.Some(addr.raw.clone),
+        ),
+      )
+    }
+  }
+
+  # Validate Bcc addresses
+  for addr in bcc.iter {
+    if addr.address.size > 0 and !is_valid_email_format(addr.address.clone) {
+      return Result.Error(
+        Error.InvalidEmailFormat(
+          'Bcc address has invalid format',
+          Option.None,
+          Option.None,
+          Option.Some(addr.raw.clone),
+        ),
+      )
+    }
+  }
+
+  Result.Ok(true)
+}
+
+# Extract email address headers (From, To, Cc, Bcc)
+fn parse_email_addresses(
+  headers: ref Array[(String, String)],
+) -> (
+  EmailAddress,
+  Array[EmailAddress],
+  Array[EmailAddress],
+  Array[EmailAddress],
+) {
+  let from_list = parse_address_header(headers, 'From')
+
+  let from = if from_list.empty? {
+    EmailAddress(name: Option.None, address: '', raw: '')
+  } else {
+    match from_list.into_iter.next {
+      case Some(addr) -> addr
+      case None -> EmailAddress(name: Option.None, address: '', raw: '')
+    }
+  }
+
+  let to = parse_address_header(headers, 'To')
+
+  let cc = parse_address_header(headers, 'Cc')
+
+  let bcc = parse_address_header(headers, 'Bcc')
+
+  (from, to, cc, bcc)
+}
+
+# Extract threading headers (In-Reply-To, References, thread_id)
+fn parse_threading_headers(
+  headers: ref Array[(String, String)],
+) -> (Option[String], Array[String], String) {
+  let in_reply_to = get_header_value_impl(headers, 'In-Reply-To')
+  let references = parse_message_ids_impl(
+    get_header_value_impl(headers, 'References').or(''),
+  )
+  let message_id = get_header_value_impl(headers, 'Message-ID').or('')
+
+  # Compute thread_id
+  let thread_id = if references.empty? {
+    message_id
+  } else {
+    match references.get(0) {
+      case Ok(r) -> r
+      case Error(_) -> message_id
+    }
+  }
+
+  (in_reply_to, references, thread_id)
+}
+
+# Extract MIME headers (Content-Type, Content-Transfer-Encoding, charset, boundary)
+fn parse_mime_headers(
+  headers: ref Array[(String, String)],
+) -> Result[(String, Array[(String, String)], String, Option[String]), String] {
+  let content_type = get_header_value_impl(headers, 'Content-Type').or(
+    'text/plain',
+  )
+
+  match parse_content_type_impl(content_type) {
+    case Ok((ct_main, ct_params)) -> {
+      let content_transfer_encoding = get_header_value_impl(
+        headers,
+        'Content-Transfer-Encoding',
+      )
+        .or('7bit')
+
+      let charset = get_param_value_impl(ct_params, 'charset')
+
+      Result.Ok((ct_main, ct_params, content_transfer_encoding, charset))
+    }
+    case Error(e) -> Result.Error(e.to_message)
+  }
+}
+
+# Validate required headers per RFC 5322
+# RFC 5322 section 3.6: From and Date are required headers
+# At least one recipient header (To, Cc, or Bcc) is required
+fn validate_required_headers(
+  headers: ref Array[(String, String)],
+  strict_mode: Bool,
+) -> Result[Bool, Error] {
+  # Strict mode: Check From header (required by RFC 5322)
+  if strict_mode {
+    let from_value = get_header_value_impl(headers, 'From')
+
+    match from_value {
+      case None -> {
+        return Result.Error(
+          Error.MissingRequiredHeader(
+            'From',
+            Option.None,
+            Option.None,
+            Option.None,
+          ),
+        )
+      }
+      case Some(value) -> {
+        if value.trim.empty? {
+          return Result.Error(
+            Error.EmptyRequiredHeader(
+              'From',
+              Option.None,
+              Option.None,
+              Option.Some(value.clone),
+            ),
+          )
+        }
+      }
+    }
+
+    # Strict mode: Check for at least one recipient header (To, Cc, or Bcc)
+    # RFC 5322 requires at least one recipient
+    let to_value = get_header_value_impl(headers, 'To')
+    let cc_value = get_header_value_impl(headers, 'Cc')
+    let bcc_value = get_header_value_impl(headers, 'Bcc')
+
+    let has_recipient = match to_value {
+      case Some(v) -> !v.trim.empty?
+      case None -> false
+    }
+      or match cc_value {
+        case Some(v) -> !v.trim.empty?
+        case None -> false
+      }
+      or match bcc_value {
+        case Some(v) -> !v.trim.empty?
+        case None -> false
+      }
+
+    if !has_recipient {
+      return Result.Error(
+        Error.MissingRequiredHeader(
+          'To, Cc, or Bcc',
+          Option.None,
+          Option.None,
+          Option.None,
+        ),
+      )
+    }
+  }
+
+  Result.Ok(true)
+}
+
+# Parse email body based on content type
+fn parse_email_body(
+  body_raw: String,
+  ct_main: String,
+  boundary: Option[String],
+  content_transfer_encoding: String,
+  max_depth: Int,
+  max_size: Int,
+  max_atts: Int,
+  max_hdrs: Int,
+) -> Result[(Option[String], Option[String], Array[EmailAttachment]), Error] {
+  if is_multipart(ct_main) {
+    match boundary {
+      case Some(b) -> {
+        parse_multipart_impl(
+          body_raw,
+          b,
+          content_transfer_encoding,
+          0,
+          max_depth,
+          max_size,
+          max_atts,
+          max_hdrs,
+        )
+      }
+      case None -> Result.Ok((Option.None, Option.None, []))
+    }
+  } else {
+    Result.Ok((Option.None, Option.None, []))
+  }
+}
+
+# Decode text body based on content type
+fn decode_text_body(
+  body_raw: String,
+  ct_main: String,
+  content_transfer_encoding: String,
+  max_size: Int,
+) -> (Option[String], Option[String]) {
+  let mut text_body = Option.None
+  let mut html_body = Option.None
+
+  if is_text_plain(ct_main) {
+    match decode_body_impl(body_raw, content_transfer_encoding, max_size) {
+      case Ok(decoded) -> text_body = Option.Some(decoded)
+      case Error(_) -> {}
+    }
+  } else if is_text_html(ct_main) {
+    match decode_body_impl(body_raw, content_transfer_encoding, max_size) {
+      case Ok(decoded) -> html_body = Option.Some(decoded)
+      case Error(_) -> {}
+    }
+  }
+
+  (text_body, html_body)
+}
+
+# Parse Message-ID references from header value
+#
+# RFC 5322 section 3.6.4: Message-ID Header Field
+#
+# Format: <msg-id> <msg-id> ...
+# Where msg-id: local-part@domain
+#
+# Examples:
+# - Single: <12345@example.com>
+# - Multiple: <12345@example.com> <67890@example.com>
+#
+# Algorithm:
+# 1. Scan input for '<' character
+# 2. Find matching '>' character
+# 3. Extract content between brackets
+# 4. Add to result if non-empty
+# 5. Continue from after '>'
+# 6. Repeat until no more message IDs found
+#
+# Edge cases handled:
+# - Empty string -> return empty array
+# - No angle brackets -> return empty array
+# - Unmatched brackets -> skip malformed ID
+# - Empty message ID (<>) -> skipped
+# - Maximum iterations limit to prevent DoS
+#
+# Note: This is a simple parser that doesn't validate the
+# format of the message ID content (e.g., it doesn't check
+# for '@' presence or valid characters).
+fn parse_message_ids_impl(raw: String) -> Array[String] {
+  if raw.empty? { return [] }
+
+  let mut result = []
+
+  # Split by angle brackets
+  let mut start = 0
+  let mut iterations = 0
+  let max_iterations = MAX_MESSAGE_IDS
+
+  while start < raw.size {
+    iterations = iterations + 1
+
+    if iterations > max_iterations { break }
+
+    let lt_pos = raw.index_of('<', start).or(raw.size)
+    let gt_pos = raw.index_of('>', lt_pos + 1).or(raw.size)
+
+    # Only extract if we found both brackets and they're in the right order
+    if lt_pos < raw.size and gt_pos < raw.size and lt_pos < gt_pos {
+      # Extract from angle brackets
+      let msg_id = raw.substring(lt_pos + 1, gt_pos).trim
+
+      # Only add non-empty message IDs
+      if msg_id.empty? == false { result.push(msg_id) }
+
+      start = gt_pos + 1
+    } else {
+      break
+    }
+  }
+
+  result
+}
+
+# Decode header value by processing RFC 2047 encoded words
+#
+# RFC 2047 section 6: Encoded-Word Syntax
+#
+# Headers can contain encoded words for non-ASCII text:
+# =?charset?encoding?encoded-text?=
+#
+# Multiple encoded words can appear in a single header value:
+# "=?utf-8?B?SGVsbG8=?= =?utf-8?B?V29ybGQ=?="
+#
+# Algorithm:
+# 1. Scan input for "=?" sequence (encoded word start)
+# 2. Find matching "?=" sequence (encoded word end)
+# 3. Decode the encoded word using decode_rfc2047_word
+# 4. Replace encoded word with decoded text
+# 5. Continue from after the decoded text
+# 6. Repeat until no more encoded words found
+#
+# Edge cases handled:
+# - No encoded words -> return original string
+# - Malformed encoded words -> left as-is (not decoded)
+# - Multiple encodings in same header -> handled by sequential processing
+# - Partial encoded words -> left as-is
+# - Maximum iterations limit to prevent infinite loops
+#
+# Performance considerations:
+# - Uses ByteArray for O(n) performance instead of O(n^2) string concatenation
+# - Iteration limit prevents DoS from pathological inputs
+fn decode_header_value_impl(raw: String) -> String {
+  # RFC 2047 encoded-word decoding: =?charset?encoding?encoded-text?=
+  let mut result = ByteArray.new
+  let mut pos = 0
+  let mut iterations = 0
+  let max_iterations = MAX_HEADER_ITERATIONS
+
+  # Find all encoded words
+  while pos < raw.size {
+    iterations = iterations + 1
+
+    if iterations > max_iterations { break }
+
+    match raw.index_of('=?', pos) {
+      case Some(begin) -> {
+        match raw.index_of('?=', begin + 2) {
+          case Some(end) -> {
+            # Push text before the encoded word
+            if begin > pos {
+              let before = raw.substring(pos, begin)
+              let before_bytes = before.to_byte_array
+
+              result.append(before_bytes)
+            }
+
+            # Decode and push the encoded word
+            let encoded_word = raw.substring(begin, end + 2)
+            let decoded = decode_rfc2047_word(encoded_word)
+            let decoded_bytes = decoded.to_byte_array
+
+            result.append(decoded_bytes)
+
+            # Move position past the encoded word
+            pos = end + 2
+          }
+          case None -> break
+        }
+      }
+      case None -> break
+    }
+  }
+
+  # Push any remaining text after the last encoded word
+  if pos < raw.size {
+    let remaining = raw.substring(pos, raw.size)
+    let remaining_bytes = remaining.to_byte_array
+
+    result.append(remaining_bytes)
+  }
+
+  result.into_string
+}
+
+# Check if content is text/plain
+fn is_text_plain(content_type: String) -> Bool {
+  content_type == 'text/plain'
+}
+
+# Check if content is text/html
+fn is_text_html(content_type: String) -> Bool {
+  content_type == 'text/html'
+}
+
+# Check if content is multipart
+fn is_multipart(content_type: String) -> Bool {
+  content_type.starts_with?('multipart/')
+}
+
+# Extract boundary from Content-Type params
+fn get_boundary_from_params(
+  params: ref Array[(String, String)],
+) -> Option[String] {
+  for (key, value) in params.iter {
+    # Use case-insensitive comparison for 'boundary'
+    if eq_ignore_case(key.clone, 'boundary') { return Option.Some(value.clone) }
+  }
+
+  Option.None
+}
+
+impl EmailParser {
+  fn pub static new -> EmailParser {
+    EmailParser(config: ParserConfig.new)
+  }
+
+  fn pub static with_config(config: ParserConfig) -> EmailParser {
+    EmailParser(config: config)
+  }
+
+  fn pub move with_strict_mode(strict: Bool) -> EmailParser {
+    @config.strict_mode = strict
+    self
+  }
+
+  fn pub move with_max_email_size(size: Int) -> EmailParser {
+    @config.max_email_size = size
+    self
+  }
+
+  fn pub move with_max_attachment_size(size: Int) -> EmailParser {
+    @config.max_attachment_size = size
+    self
+  }
+
+  fn pub move with_max_multipart_depth(depth: Int) -> EmailParser {
+    @config.max_multipart_depth = depth
+    self
+  }
+
+  fn pub move with_max_attachments(count: Int) -> EmailParser {
+    @config.max_attachments = count
+    self
+  }
+
+  fn pub move with_max_headers(count: Int) -> EmailParser {
+    @config.max_headers = count
+    self
+  }
+
+  fn pub move with_limits(
+    max_email_size: Int,
+    max_attachment_size: Int,
+    max_multipart_depth: Int,
+    max_attachments: Int,
+  ) -> EmailParser {
+    @config.max_email_size = max_email_size
+    @config.max_attachment_size = max_attachment_size
+    @config.max_multipart_depth = max_multipart_depth
+    @config.max_attachments = max_attachments
+    self
+  }
+
+  # Parse raw email message
+  fn pub parse(raw: String) -> Result[ParsedEmailMessage, String] {
+    # Normalize line endings for consistent parsing
+    # RFC 5322 specifies CRLF, but we also accept LF-only for compatibility
+    let normalized = normalize_line_endings(raw)
+    let email_size = normalized.size
+
+    # Check total email size limit before parsing
+    if email_size > @config.max_email_size {
+      return Result.Error(
+        Error
+          .EmailSizeExceeded(
+            @config.max_email_size,
+            email_size,
+            Option.None,
+            Option.None,
+          )
+          .to_message,
+      )
+    }
+
+    # Split headers and body
+    # RFC 5322 specifies CRLF, but we also accept LF-only for compatibility
+    # Body is optional - if no blank line found, treat entire email as headers
+    let split_pos = normalized.index_of('\n\n', 0)
+
+    let (headers_raw, body_raw) = match split_pos {
+      case Some(pos) -> {
+        (
+          normalized.substring(0, pos),
+          normalized.substring(pos + 2, normalized.size),
+        )
+      }
+      case None -> {
+        # No body section - treat entire email as headers with empty body
+        (normalized.clone(), '')
+      }
+    }
+
+    # Parse headers
+    let headers = match
+      parse_headers_impl(
+        headers_raw,
+        @config.strict_mode,
+        @config.max_email_size,
+        @config.max_headers,
+      )
+    {
+      case Ok(h) -> h
+      case Error(e) -> return Result.Error(e.to_message)
+    }
+
+    # Validate required headers in strict mode
+    match validate_required_headers(ref headers, @config.strict_mode) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e.to_message)
+    }
+
+    # Extract email addresses (From, To, Cc, Bcc)
+    let (from, to, cc, bcc) = parse_email_addresses(headers)
+
+    # Validate addresses in strict mode  
+    match
+      validate_addresses(ref from, ref to, ref cc, ref bcc, @config.strict_mode)
+    {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e.to_message)
+    }
+
+    # Extract basic headers
+    let subject = decode_header_value_impl(
+      get_header_value_impl(headers, 'Subject').or(''),
+    )
+    let date = get_header_value_impl(headers, 'Date').or('')
+
+    # Extract threading headers (In-Reply-To, References, thread_id)
+    let (in_reply_to, references, thread_id) = parse_threading_headers(headers)
+    let message_id = get_header_value_impl(headers, 'Message-ID').or('')
+
+    # Extract MIME headers (Content-Type, Content-Transfer-Encoding, charset, boundary)
+    let (ct_main, ct_params, content_transfer_encoding, charset) = match
+      parse_mime_headers(headers)
+    {
+      case Ok(result) -> result
+      case Error(e) -> return Result.Error(e)
+    }
+
+    let boundary = get_boundary_from_params(ct_params)
+
+    # Validate boundary string format per RFC 2046
+    match boundary.clone {
+      case Some(b) -> {
+        # RFC 2046 requires boundary to be 1-70 chars with valid characters
+        # This is a basic MIME requirement, not strict mode specific
+        if !is_valid_boundary(b.clone) {
+          return Result.Error(
+            Error
+              .InvalidBoundary(
+                'boundary string exceeds 70 characters or contains invalid characters',
+                Option.None,
+                Option.None,
+                Option.Some(b),
+              )
+              .to_message,
+          )
+        }
+      }
+      case None -> {}
+    }
+
+    # Validate that multipart Content-Type has boundary parameter
+    let has_boundary = match boundary.clone {
+      case Some(_) -> true
+      case None -> false
+    }
+
+    if is_multipart(ct_main) and !has_boundary {
+      return Result.Error(
+        Error
+          .InvalidBoundary(
+            'missing boundary parameter for multipart Content-Type',
+            Option.None,
+            Option.None,
+            Option.Some(ct_main.clone()),
+          )
+          .to_message,
+      )
+    }
+
+    # Parse body based on content type
+    let max_depth = @config.max_multipart_depth
+    let max_size = @config.max_attachment_size
+    let max_atts = @config.max_attachments
+    let max_hdrs = @config.max_headers
+
+    let boundary_for_mime = match boundary.clone {
+      case Some(b) -> Option.Some(b.clone())
+      case None -> Option.None
+    }
+
+    let (text_body, html_body, attachments) = match
+      if is_multipart(ct_main) {
+        parse_email_body(
+          body_raw,
+          ct_main,
+          boundary_for_mime.clone(),
+          content_transfer_encoding,
+          max_depth,
+          max_size,
+          max_atts,
+          max_hdrs,
+        )
+      } else {
+        let (text, html) = decode_text_body(
+          body_raw,
+          ct_main,
+          content_transfer_encoding,
+          @config.max_email_size,
+        )
+
+        Result.Ok((text, html, []))
+      }
+    {
+      case Ok(result) -> result
+      case Error(e) -> return Result.Error(e.to_message)
+    }
+
+    # Extract non-standard headers
+    let extra_headers = extract_extra_headers(headers)
+
+    Result.Ok(
+      ParsedEmailMessage(
+        addresses: AddressInfo(from: from, to: to, cc: cc, bcc: bcc),
+        subject: subject,
+        date: date,
+        message_id: message_id,
+        threading: ThreadingInfo(
+          in_reply_to: in_reply_to,
+          references: references,
+          thread_id: thread_id,
+        ),
+        mime: MIMEInfo(
+          content_type: ct_main,
+          content_type_params: ct_params,
+          content_transfer_encoding: content_transfer_encoding,
+          charset: charset,
+          boundary: boundary_for_mime,
+        ),
+        text_body: text_body,
+        html_body: html_body,
+        attachments: attachments,
+        extra_headers: extra_headers,
+        size: email_size,
+      ),
+    )
+  }
+
+  # Parse headers from raw string
+  fn pub parse_headers(raw: String) -> Result[Array[(String, String)], String] {
+    match
+      parse_headers_impl(
+        raw,
+        @config.strict_mode,
+        @config.max_email_size,
+        @config.max_headers,
+      )
+    {
+      case Ok(h) -> Result.Ok(h)
+      case Error(e) -> Result.Error(e.to_message)
+    }
+  }
+
+  # Get header value by name (case-insensitive)
+  fn pub get_header_value(
+    headers: Array[(String, String)],
+    name: String,
+  ) -> Option[String] {
+    get_header_value_impl(headers, name)
+  }
+
+  # Parse address list
+  fn pub parse_address_list(raw: Option[String]) -> Array[EmailAddress] {
+    let decoded = match raw.clone {
+      case Some(v) -> decode_header_value_impl(v)
+      case None -> ''
+    }
+
+    parse_address_list_impl(raw.clone, decoded)
+  }
+
+  # Parse Message-ID references
+  fn pub parse_message_ids(raw: String) -> Array[String] {
+    parse_message_ids_impl(raw)
+  }
+
+  # Parse Content-Type header
+  fn pub parse_content_type(
+    raw: String,
+  ) -> Result[(String, Array[(String, String)]), String] {
+    match parse_content_type_impl(raw) {
+      case Ok(result) -> Result.Ok(result)
+      case Error(e) -> Result.Error(e.to_message)
+    }
+  }
+
+  # Get parameter value from params list
+  fn pub get_param_value(
+    params: Array[(String, String)],
+    key: String,
+  ) -> Option[String] {
+    get_param_value_impl(params, key)
+  }
+
+  # Decode header value
+  fn pub decode_header_value(raw: String) -> String {
+    decode_header_value_impl(raw)
+  }
+
+  # Decode body based on transfer encoding
+  fn pub decode_body(raw: String, encoding: String) -> Result[String, Error] {
+    decode_body_impl(raw, encoding, @config.max_email_size)
+  }
+
+  # Parse multipart MIME message
+  fn pub parse_multipart(
+    raw: String,
+    boundary: String,
+    default_encoding: String,
+  ) -> Result[(Option[String], Option[String], Array[EmailAttachment]), String] {
+    match
+      parse_multipart_impl(
+        raw,
+        boundary,
+        default_encoding,
+        0,
+        @config.max_multipart_depth,
+        @config.max_attachment_size,
+        @config.max_attachments,
+        @config.max_headers,
+      )
+    {
+      case Ok(r) -> Result.Ok(r)
+      case Error(e) -> Result.Error(e.to_message)
+    }
+  }
+
+  # Check if header is standard RFC 5322 header
+  fn pub is_standard_header(name: String) -> Bool {
+    is_standard_header_impl(name)
+  }
+}

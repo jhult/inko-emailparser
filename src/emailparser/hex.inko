@@ -1,0 +1,128 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# ==============================================================================
+# Hexadecimal Parsing Utilities Module
+# ==============================================================================
+#
+# This module provides functions for parsing hexadecimal byte representations.
+# It is primarily used by the quoted-printable and RFC 2047 decoders to convert
+# hex-encoded text back to its original binary form.
+#
+# ## Purpose
+#
+# Email encodings often represent binary data as hexadecimal strings (e.g.,
+# "=3D" in quoted-printable represents the "=" character). This module provides:
+# - Hex byte string parsing (e.g., "3D" -> 61)
+# - Hex string construction from byte pairs
+# - Validation of hexadecimal input
+#
+# ## Architecture
+#
+# The module provides two main functions:
+#
+# - `parse_hex_byte`: Parse a 2-character hex string to a byte value
+#   - Input: "3D" (hex string)
+#   - Output: Some(61) (byte value) or None (invalid input)
+#   - Used by: quoted-printable decoders
+#
+# - `two_bytes_to_hex_string`: Convert two bytes to a hex string
+#   - Input: Two byte values (e.g., 51, 68 representing 'Q' and 'd')
+#   - Output: Hex string (e.g., "5164")
+#   - Used by: RFC 2047 quoted-printable decoder
+#
+# ## Algorithm
+#
+# ### parse_hex_byte
+# 1. Verify input is exactly 2 characters
+# 2. Convert both characters to uppercase
+# 3. Parse first character as high nibble (value * 16)
+# 4. Parse second character as low nibble (value)
+# 5. Return combined value
+#
+# Edge cases handled:
+# - Input not 2 characters -> return None
+# - Invalid hex characters -> return None
+# - Byte read errors -> return None
+
+# Parse a hex byte string (e.g., "3D" -> 61)
+#
+# Used by quoted-printable decoders to convert hex-encoded bytes
+# back to their original values.
+#
+# Algorithm:
+# 1. Verify input is exactly 2 characters
+# 2. Convert both characters to uppercase
+# 3. Parse first character as high nibble (value * 16)
+# 4. Parse second character as low nibble (value)
+# 5. Return combined value
+#
+# Edge cases handled:
+# - Input not 2 characters -> return None
+# - Invalid hex characters -> return None
+# - Byte read errors -> return None
+fn pub parse_hex_byte(hex: String) -> Option[Int] {
+  if hex.size != 2 { return Option.None }
+
+  let upper = hex.to_upper
+  let mut value = 0
+
+  # First digit
+  match upper.get(0) {
+    case Ok(byte) -> {
+      match hex_char_to_value(byte) {
+        case Some(v) -> value = v * 16
+        case None -> return Option.None
+      }
+    }
+    case Error(_) -> return Option.None
+  }
+
+  # Second digit
+  match upper.get(1) {
+    case Ok(byte) -> {
+      match hex_char_to_value(byte) {
+        case Some(v) -> value = value + v
+        case None -> return Option.None
+      }
+    }
+    case Error(_) -> return Option.None
+  }
+
+  Option.Some(value)
+}
+
+# Convert hex character to value (0-15)
+#
+# Maps ASCII characters to their hexadecimal values:
+# - '0'-'9' -> 0-9
+# - 'A'-'F' -> 10-15
+# - 'a'-'f' -> 10-15
+# - All others -> None
+fn hex_char_to_value(byte: Int) -> Option[Int] {
+  if byte >= 48 and byte <= 57 {
+    # 0-9
+    Option.Some(byte - 48)
+  } else if byte >= 65 and byte <= 70 {
+    # A-F
+    Option.Some(byte - 65 + 10)
+  } else if byte >= 97 and byte <= 102 {
+    # a-f
+    Option.Some(byte - 97 + 10)
+  } else {
+    Option.None
+  }
+}
+
+# Helper: Convert two bytes to a 2-character hex string for parsing
+#
+# This is a common pattern when building hex strings character
+# by character during decoding operations.
+fn pub two_bytes_to_hex_string(b1: Int, b2: Int) -> String {
+  let hex_bytes = ByteArray.new
+
+  hex_bytes.push(b1)
+  hex_bytes.push(b2)
+  hex_bytes.into_string
+}

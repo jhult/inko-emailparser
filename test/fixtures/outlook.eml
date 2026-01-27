@@ -1,0 +1,60 @@
+Received: from DB5EUR06FT063.mail.protection.outlook.com (2a01:111:f403:fd04::1) by
+ SN1NAM02FT026.mail.protection.outlook.com (2a01:111:e400:c417::1) with HTTPS via
+ SN1NAM02HT004.outlook.office.com; Thu, 17 Jan 2026 09:15:00 +0000
+Received: from BN1PR10MB3561.namprd10.prod.outlook.com (2603:10b6:a03:1a7::18) by
+ BN1PR10MB3561.namprd10.prod.outlook.com (2603:10b6:a03:1a7::18) with
+ mapi id 15.20.8235.018; Thu, 17 Jan 2026 09:15:00 +0000
+From: "Smith, John" <John.Smith@company.com>
+To: "Doe, Jane" <Jane.Doe@company.com>
+CC: "Team Lead" <Team.Lead@company.com>
+Subject: Outlook Project Update
+Thread-Topic: Outlook Project Update
+Thread-Index: AdKLmNzOpQRsYzU8vK9GwPq==
+Date: Thu, 17 Jan 2026 09:15:00 +0000
+Message-ID: <BN1PR10MB35612ABCDEF123456789@BN1PR10MB3561.namprd10.prod.outlook.com>
+References: <BN1PR10MB35612ABCDEF123456788@BN1PR10MB3561.namprd10.prod.outlook.com>
+In-Reply-To: <BN1PR10MB35612ABCDEF123456788@BN1PR10MB3561.namprd10.prod.outlook.com>
+Accept-Language: en-US
+Content-Language: en-US
+X-MS-Has-Attach: yes
+X-MS-TNEF-Correlator:
+X-MS-Exchange-Organization-SCL: -1
+X-MS-Exchange-Organization-Network-Message-Id: abc123-def456-ghi789
+X-Microsoft-Antispam-PRVS: <prvs=123456@outlook.com>
+X-MS-Exchange-Organization-RecordId: abc123-def456-ghi789
+X-Proofpoint-GUID: abc123def456
+X-Proofpoint-ORIG-GUID: abc123def456
+X-Proofpoint-Virus-Version: vendor=base64
+Authentication-Results: spf=none (sender IP is 192.0.2.3)
+ smtp.mailfrom=John.Smith@company.com; dkim=none header.d=company.com;
+ dmarc=none action=none header.from=company.com
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="_000_BN1PR10MB35612ABCDEF123456789BN1PR10MB3561namprd_"
+
+--_000_BN1PR10MB35612ABCDEF123456789BN1PR10MB3561namprd_
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+SGVsbG8gSmFuZSwKCkhlcmUgaXMgdGhlIHByb2plY3QgdXBkYXRlLiBUaGUgdGVhbSBoYXMgbWFk
+ZSBncmVhdCBwcm9ncmVzcyB0aGlzIHdlZWsuCgpdIEdyZWV0aW5ncywKSm9obiBTbWl0aA==
+
+--_000_BN1PR10MB35612ABCDEF123456789BN1PR10MB3561namprd_
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGJvZHk+PHA+SGVsbG8gSmFuZSw8L3A+PHA+SGVyZSBpcyB0aGUgcHJvamVjdCB1cGRh
+dGUuIFRoZSB0ZWFtIGhhcyBtYWRlIGdyZWF0IHByb2dyZXNzIHRoaXMgd2Vlay48L3A+PHA+QmVz
+dCByZWdhcmRzLDxicj5Kb2huIFNtaXRoPC9wPjwvYm9keT48L2h0bWw+
+
+--_000_BN1PR10MB35612ABCDEF123456789BN1PR10MB3561namprd_
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document; name="Project Update.docx"
+Content-Description: Project Update.docx
+Content-Disposition: attachment; filename="Project Update.docx"; size=12345;
+ creation-date="Thu, 17 Jan 2026 09:15:00 GMT";
+ modification-date="Thu, 17 Jan 2026 09:15:00 GMT"
+Content-Transfer-Encoding: base64
+
+UEsDBBQABgAIAAAAIQAAAAAAAAAAAAAAAA==
+
+--_000_BN1PR10MB35612ABCDEF123456789BN1PR10MB3561namprd_--

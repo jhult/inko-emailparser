@@ -1,0 +1,574 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# ==============================================================================
+# Multipart MIME Message Parsing Module
+# ==============================================================================
+#
+# This module handles parsing of multipart MIME messages as specified in
+# RFC 2046 section 5. It processes emails with multiple parts, including
+# alternative text/HTML versions, inline images, and file attachments.
+#
+# ## Purpose
+#
+# Multipart messages allow emails to contain multiple content types:
+# - **multipart/alternative**: Same content in different formats (e.g., text + HTML)
+# - **multipart/related**: HTML with inline images (Content-ID references)
+# - **multipart/mixed**: Combination of text, HTML, and attachments
+# - **Nested multipart**: Complex structures with multiple levels
+#
+# This module:
+# - Splits multipart bodies by boundary strings
+# - Parses individual multipart parts (headers + body)
+# - Handles nested multipart messages recursively
+# - Merges text, HTML, and attachment parts into structured output
+#
+# ## Architecture
+#
+# The module provides one main public function:
+#
+# - `parse_multipart_impl`: Parse a multipart message body
+#   - Input: Raw body string, boundary string, recursion depth, max depth
+#   - Output: Tuple of (text_body, html_body, attachments_array)
+#   - Handles: Nested multipart, text extraction, attachment parsing
+#
+# And one helper function:
+#
+# - `merge_multipart_part`: Merge a single part into existing results
+#   - Updates: text_body, html_body based on content type
+#   - Creates: EmailAttachment for disposition="attachment" parts
+#   - Returns: Updated tuple of (text, html, attachment)
+#
+# ## RFC Compliance
+#
+# - RFC 2046 section 5: Multipart Media Type
+#   - 5.1: Multipart Media Type
+#   - 5.1.1: Multipart: The common syntax
+#   - 5.1.3: Nested Multipart
+#
+# ## Design Decisions
+#
+# ### Recursive Parsing
+# Nested multipart messages are parsed recursively with depth tracking to prevent
+# stack overflow attacks. The max depth limit (default: 10) is enforced.
+#
+# ### Content Type Handling
+# - text/plain -> Stored in text_body
+# - text/html -> Stored in html_body
+# - Other types -> Treated as attachments
+# - multipart/* -> Parsed recursively
+#
+# ### Attachment Detection
+# Parts with Content-Disposition="attachment" are always treated as attachments,
+# regardless of content type. Parts without disposition are inferred from type.
+
+import emailparser.attachment (EmailAttachment)
+import emailparser.decoder (decode_body_impl)
+import emailparser.error (Error)
+import emailparser.header (
+  get_header_value_impl, parse_content_disposition_impl,
+  parse_content_type_impl, parse_headers_impl, sanitize_filename,
+)
+import std.option (Option)
+import std.result (Result)
+
+# Process a single multipart part and merge results
+fn pub merge_multipart_part(
+  text_body: ref Option[String],
+  html_body: ref Option[String],
+  ct_main: String,
+  disp_main: String,
+  filename: Option[String],
+  content_id: Option[String],
+  decoded_body: String,
+) -> (Option[String], Option[String], Option[EmailAttachment]) {
+  # Track if we need to clone (lazy initialization)
+  let mut text_modified = false
+  let mut html_modified = false
+  let mut new_text_body = Option.None
+  let mut new_html_body = Option.None
+  let mut new_attachment = Option.None
+
+  if disp_main == 'attachment' or (disp_main == 'inline' and filename.some?) {
+    new_attachment = Option.Some(
+      EmailAttachment.from_decoded_part(
+        content_type: ct_main,
+        filename: filename,
+        content_disposition: disp_main,
+        content_id: content_id,
+        decoded_body: decoded_body,
+      ),
+    )
+  } else if ct_main == 'text/plain' and text_body.none? {
+    new_text_body = Option.Some(decoded_body)
+    text_modified = true
+  } else if ct_main == 'text/html' and html_body.none? {
+    new_html_body = Option.Some(decoded_body)
+    html_modified = true
+  } else if ct_main.starts_with?('image/') and disp_main == 'inline' {
+    new_attachment = Option.Some(
+      EmailAttachment.from_decoded_part(
+        content_type: ct_main,
+        filename: filename,
+        content_disposition: disp_main,
+        content_id: content_id,
+        decoded_body: decoded_body,
+      ),
+    )
+  }
+
+  # Clone original values only if we didn't modify them
+  let final_text = if text_modified {
+    new_text_body
+  } else {
+    match text_body.clone {
+      case Some(v) -> Option.Some(v)
+      case None -> Option.None
+    }
+  }
+
+  let final_html = if html_modified {
+    new_html_body
+  } else {
+    match html_body.clone {
+      case Some(v) -> Option.Some(v)
+      case None -> Option.None
+    }
+  }
+
+  (final_text, final_html, new_attachment)
+}
+
+# Handle nested multipart messages
+import emailparser.validation (is_valid_boundary)
+
+# Handle nested multipart messages
+fn pub handle_nested_multipart(
+  decoded_body: String,
+  ct_params: Array[(String, String)],
+  transfer_encoding: String,
+  depth: Int,
+  max_depth: Int,
+  max_attachment_size: Int,
+  max_attachments: Int,
+  max_headers: Int,
+  ct_main: String,
+  disp_main: String,
+  filename: Option[String],
+  content_id: Option[String],
+) -> Result[(Option[String], Option[String], Array[EmailAttachment]), Error] {
+  match get_header_value_impl(ct_params, 'boundary') {
+    case Some(nested_boundary) -> {
+      match
+        parse_multipart_impl(
+          decoded_body,
+          nested_boundary,
+          transfer_encoding,
+          depth + 1,
+          max_depth,
+          max_attachment_size,
+          max_attachments,
+          max_headers,
+        )
+      {
+        case Ok(result) -> Result.Ok(result)
+        case Error(e) -> Result.Error(e)
+      }
+    }
+    case None -> {
+      Result.Ok(
+        (
+          Option.None,
+          Option.None,
+          [
+            EmailAttachment.from_decoded_part(
+              content_type: ct_main,
+              filename: filename,
+              content_disposition: disp_main,
+              content_id: content_id,
+              decoded_body: decoded_body,
+            ),
+          ],
+        ),
+      )
+    }
+  }
+}
+
+# Parse multipart MIME message
+fn parse_multipart_impl(
+  raw: String,
+  boundary: String,
+  default_encoding: String,
+  depth: Int,
+  max_depth: Int,
+  max_attachment_size: Int,
+  max_attachments: Int,
+  max_headers: Int,
+) -> Result[(Option[String], Option[String], Array[EmailAttachment]), Error] {
+  if depth > max_depth {
+    return Result.Error(
+      Error.MultipartDepthExceeded(
+        depth,
+        max_depth,
+        Option.None,
+        Option.None,
+        Option.None,
+      ),
+    )
+  }
+
+  if !is_valid_boundary(boundary) {
+    return Result.Error(
+      Error.InvalidBoundary(
+        'contains disallowed characters',
+        Option.None,
+        Option.None,
+        Option.Some(boundary.clone),
+      ),
+    )
+  }
+
+  let mut text_body = Option.None
+  let mut html_body = Option.None
+  let mut attachments = []
+
+  let parts = match split_multipart_body(raw, boundary) {
+    case Ok(p) -> p
+    case Error(e) -> return Result.Error(e)
+  }
+
+  # Validate that multipart has at least one part
+  # RFC 2046: multipart bodies must contain at least one body part
+  let mut has_valid_part = false
+
+  if parts.size > 1 {
+    let mut i = 1
+
+    while i < parts.size {
+      let part = match parts.get(i) {
+        case Ok(p) -> p
+        case Error(_) -> break
+      }
+
+      let trimmed = part.trim
+
+      # Check if this is a valid part (not just the closing marker)
+      if !trimmed.starts_with?('--') and !trimmed.empty? {
+        has_valid_part = true
+        break
+      }
+
+      i = i + 1
+    }
+  }
+
+  if !has_valid_part {
+    return Result.Error(
+      Error.MultipartWithoutParts(
+        Option.None,
+        Option.None,
+        Option.Some(raw.clone),
+      ),
+    )
+  }
+
+  if parts.size > 1 {
+    let mut i = 1
+
+    while i < parts.size {
+      let part = match parts.get(i) {
+        case Ok(p) -> p
+        case Error(_) -> break
+      }
+
+      let trimmed = part.trim
+
+      # Empty parts are OK (just skip them), but -- marks the end
+      if trimmed.starts_with?('--') { break }
+
+      if !trimmed.empty? {
+        match
+          parse_single_multipart_part(
+            trimmed,
+            max_attachment_size,
+            max_headers,
+            default_encoding,
+          )
+        {
+          case
+            Ok(
+              (
+                ct_main,
+                ct_params,
+                disp_main,
+                filename,
+                content_id,
+                decoded_body,
+              ),
+            ) -> {
+            if ct_main.starts_with?('multipart/') {
+              match
+                handle_nested_multipart(
+                  decoded_body,
+                  ct_params,
+                  default_encoding,
+                  depth,
+                  max_depth,
+                  max_attachment_size,
+                  max_attachments,
+                  max_headers,
+                  ct_main,
+                  disp_main,
+                  filename,
+                  content_id,
+                )
+              {
+                case Ok((nested_text, nested_html, nested_atts)) -> {
+                  if text_body.none? {
+                    match nested_text {
+                      case Some(txt) -> text_body = Option.Some(txt)
+                      case None -> {}
+                    }
+                  }
+
+                  if html_body.none? {
+                    match nested_html {
+                      case Some(html) -> html_body = Option.Some(html)
+                      case None -> {}
+                    }
+                  }
+
+                  for att in nested_atts.into_iter {
+                    if attachments.size < max_attachments {
+                      attachments.push(att)
+                    }
+                  }
+                }
+                case Error(e) -> return Result.Error(e)
+              }
+            } else {
+              let (new_text, new_html, new_att) = merge_multipart_part(
+                text_body,
+                html_body,
+                ct_main,
+                disp_main,
+                filename,
+                content_id,
+                decoded_body,
+              )
+
+              text_body = new_text
+              html_body = new_html
+
+              match new_att {
+                case Some(att) -> {
+                  if attachments.size < max_attachments {
+                    attachments.push(att)
+                  }
+                }
+                case None -> {}
+              }
+            }
+          }
+          case Error(_) -> {}
+        }
+      }
+
+      i = i + 1
+    }
+  }
+
+  Result.Ok((text_body, html_body, attachments))
+}
+
+# Split and validate multipart body by boundary
+fn pub split_multipart_body(
+  raw: String,
+  boundary: String,
+) -> Result[Array[String], Error] {
+  let boundary_delim = '--' + boundary.trim
+
+  if raw.contains?(boundary_delim) == false {
+    let fragment = if raw.size > 50 { raw.substring(0, 50) } else { raw.clone }
+
+    return Result.Error(
+      Error.BoundaryNotFound(Option.None, Option.None, Option.Some(fragment)),
+    )
+  }
+
+  let parts = raw.split(boundary_delim).map(fn (s) { s.to_string }).to_array
+
+  Result.Ok(parts)
+}
+
+# Parse headers from a single multipart part
+fn pub parse_multipart_part_headers(
+  part_headers_raw: String,
+  max_attachment_size: Int,
+  max_headers: Int,
+) -> Result[Array[(String, String)], Error] {
+  parse_headers_impl(part_headers_raw, false, max_attachment_size, max_headers)
+}
+
+# Extract metadata from a multipart part's headers
+fn pub extract_part_metadata(
+  part_headers: ref Array[(String, String)],
+  default_encoding: String,
+) -> Result[
+  (String, Array[(String, String)], String, Array[(String, String)], String),
+  Error,
+] {
+  let content_type = get_header_value_impl(part_headers, 'Content-Type').or(
+    'text/plain',
+  )
+
+  match parse_content_type_impl(content_type) {
+    case Ok((ct_main, ct_params)) -> {
+      let content_disposition = get_header_value_impl(
+        part_headers,
+        'Content-Disposition',
+      )
+        .or('')
+
+      # Handle empty Content-Disposition - treat as inline with no params
+      if content_disposition.empty? {
+        let transfer_encoding = get_header_value_impl(
+          part_headers,
+          'Content-Transfer-Encoding',
+        )
+          .or(default_encoding)
+
+        Result.Ok((ct_main, ct_params, 'inline', [], transfer_encoding))
+      } else {
+        match parse_content_disposition_impl(content_disposition) {
+          case Ok((disp_main, disp_params)) -> {
+            let transfer_encoding = get_header_value_impl(
+              part_headers,
+              'Content-Transfer-Encoding',
+            )
+              .or(default_encoding)
+
+            Result.Ok(
+              (ct_main, ct_params, disp_main, disp_params, transfer_encoding),
+            )
+          }
+          case Error(e) -> Result.Error(e)
+        }
+      }
+    }
+    case Error(e) -> Result.Error(e)
+  }
+}
+
+# Process a single multipart part's body
+fn pub process_multipart_part_body(
+  part_body_raw: String,
+  transfer_encoding: String,
+  max_attachment_size: Int,
+) -> Result[String, Error] {
+  match
+    decode_body_impl(part_body_raw, transfer_encoding, max_attachment_size)
+  {
+    case Ok(decoded_body) -> Result.Ok(decoded_body)
+    case Error(e) -> Result.Error(e)
+  }
+}
+
+# Extract content ID from part headers
+fn pub extract_content_id(
+  part_headers: Array[(String, String)],
+) -> Option[String] {
+  get_header_value_impl(part_headers, 'Content-ID').map(fn (id) {
+    let trimmed = id.trim
+
+    if
+      trimmed.size >= 2
+        and trimmed.starts_with?('<')
+        and trimmed.ends_with?('>')
+    {
+      trimmed.substring(1, trimmed.size - 1)
+    } else {
+      trimmed
+    }
+  })
+}
+
+# Parse a single multipart part from its raw content
+fn pub parse_single_multipart_part(
+  trimmed: String,
+  max_attachment_size: Int,
+  max_headers: Int,
+  default_encoding: String,
+) -> Result[
+  (
+    String,
+    Array[(String, String)],
+    String,
+    Option[String],
+    Option[String],
+    String,
+  ),
+  Error,
+] {
+  let newline_pos = trimmed.index_of('\n\n', 0)
+
+  match newline_pos {
+    case Some(pos) -> {
+      let part_headers_raw = trimmed.substring(0, pos)
+      let part_body_raw = trimmed.substring(pos + 2, trimmed.size)
+
+      let part_headers = match
+        parse_multipart_part_headers(
+          part_headers_raw,
+          max_attachment_size,
+          max_headers,
+        )
+      {
+        case Ok(h) -> h
+        case Error(e) -> return Result.Error(e)
+      }
+
+      let (ct_main, ct_params, disp_main, disp_params, transfer_encoding) = match
+        extract_part_metadata(part_headers, default_encoding)
+      {
+        case Ok(metadata) -> metadata
+        case Error(e) -> return Result.Error(e)
+      }
+
+      let decoded_body = match
+        process_multipart_part_body(
+          part_body_raw,
+          transfer_encoding,
+          max_attachment_size,
+        )
+      {
+        case Ok(b) -> b
+        case Error(e) -> return Result.Error(e)
+      }
+
+      let filename = match get_header_value_impl(disp_params, 'filename') {
+        case Some(f) -> sanitize_filename(f)
+        case None -> Option.None
+      }
+
+      let content_id = extract_content_id(part_headers)
+
+      Result.Ok(
+        (ct_main, ct_params, disp_main, filename, content_id, decoded_body),
+      )
+    }
+    case None -> {
+      let fragment = if trimmed.size > 50 {
+        trimmed.substring(0, 50)
+      } else {
+        trimmed.clone
+      }
+
+      Result.Error(
+        Error.NoBodyInPart(Option.None, Option.None, Option.Some(fragment)),
+      )
+    }
+  }
+}

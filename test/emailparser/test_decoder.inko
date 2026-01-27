@@ -1,0 +1,151 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Tests for early size checks in decode_body_impl
+
+import emailparser.decoder (decode_body_impl, decode_rfc2047_quoted_printable)
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  # Test that base64 decoding rejects oversized content early
+  t.test('base64_oversized_content', fn (t) {
+    # Create a base64 string that would decode to ~300KB
+    # Each 'AAAA' decodes to 3 bytes, so 100000 iterations = ~300KB
+    let mut large_input = ''
+    let mut i = 0
+
+    while i < 100000 {
+      large_input = large_input + 'AAAA'
+      i = i + 1
+    }
+
+    # This should fail early (before full decoding) with max_size of 100KB
+    match decode_body_impl(large_input, 'base64', 100 * 1024) {
+      case Ok(_) -> t.false(true) # Force failure
+      case Error(_) -> t.true(true) # Expected error
+    }
+
+    # This should succeed with max_size of 1MB
+    match decode_body_impl(large_input, 'base64', 1024 * 1024) {
+      case Ok(_) -> t.true(true) # Expected success
+      case Error(_) -> t.false(true) # Force failure
+    }
+  })
+
+  # Test that quoted-printable decoding rejects oversized content early
+  t.test('qp_oversized_content', fn (t) {
+    # Create a QP-encoded string with many encoded bytes
+    # Each =XX sequence decodes to 1 byte
+    # =41=42=43 is 9 chars and decodes to 3 bytes
+    # 100000 iterations = ~900KB input, ~300KB output
+    let mut large_qp = ''
+    let mut i = 0
+
+    while i < 100000 {
+      large_qp = large_qp + '=41=42=43'
+      i = i + 1
+    }
+
+    # This should fail early with max_size of 50KB
+    match decode_body_impl(large_qp, 'quoted-printable', 50 * 1024) {
+      case Ok(_) -> t.false(true) # Force failure
+      case Error(_) -> t.true(true) # Expected error
+    }
+
+    # This should succeed with max_size of 500KB
+    match decode_body_impl(large_qp, 'quoted-printable', 500 * 1024) {
+      case Ok(_) -> t.true(true) # Expected success
+      case Error(_) -> t.false(true) # Force failure
+    }
+  })
+
+  # Test that valid base64 content within limits is accepted
+  t.test('base64_valid_content', fn (t) {
+    let encoded = 'SGVsbG8sIFdvcmxkIQ==' # "Hello, World!" in base64
+
+    match decode_body_impl(encoded, 'base64', 1024) {
+      case Ok(decoded) -> t.equal(decoded, 'Hello, World!')
+      case Error(_) -> t.false(true) # Force failure
+    }
+  })
+
+  # Test that valid quoted-printable content within limits is accepted
+  t.test('qp_valid_content', fn (t) {
+    # QP encoded "Hello, World!"
+    let encoded = 'Hello=2C=20World=21'
+
+    match decode_body_impl(encoded, 'quoted-printable', 1024) {
+      case Ok(decoded) -> t.equal(decoded, 'Hello, World!')
+      case Error(_) -> t.false(true) # Force failure
+    }
+  })
+
+  # Test that 7bit encoding passes through with size check
+  t.test('7bit_encoding', fn (t) {
+    let content = 'Hello, World!'
+
+    match decode_body_impl(content, '7bit', 1024) {
+      case Ok(decoded) -> t.equal(decoded, content)
+      case Error(_) -> t.false(true) # Force failure
+    }
+  })
+
+  # Test that 7bit encoding rejects oversized content
+  t.test('7bit_oversized', fn (t) {
+    let mut large_content = ''
+    let mut i = 0
+
+    while i < 100000 {
+      large_content = large_content + 'Hello, World!'
+      i = i + 1
+    }
+
+    match decode_body_impl(large_content, '7bit', 100) {
+      case Ok(_) -> t.false(true) # Force failure
+      case Error(_) -> t.true(true) # Expected error
+    }
+  })
+
+  # Test that invalid quoted-printable sequences use Unicode replacement character
+  t.test('qp_invalid_sequence_uses_unicode_replacement', fn (t) {
+    # Test with invalid hex sequence =ZZ (Z is not a valid hex digit)
+    # This should use U+FFFD (Unicode replacement character) not '?'
+    let invalid_qp = 'Hello=ZZWorld'
+    let decoded = decode_rfc2047_quoted_printable(invalid_qp)
+
+    # U+FFFD is 3 bytes in UTF-8: 239, 191, 189
+    # The decoded string should contain the Unicode replacement character
+    let bytes = decoded.to_byte_array
+
+    # Check that we have the Unicode replacement character bytes
+    let mut found_replacement = false
+    let mut i = 0
+    let max_i = bytes.size - 2
+
+    while i < max_i {
+      match bytes.get(i) {
+        case Ok(b1) -> {
+          match bytes.get(i + 1) {
+            case Ok(b2) -> {
+              match bytes.get(i + 2) {
+                case Ok(b3) -> {
+                  if b1 == 239 and b2 == 191 and b3 == 189 {
+                    found_replacement = true
+                  }
+
+                  i = i + 1
+                }
+                case Error(_) -> i = i + 1
+              }
+            }
+            case Error(_) -> i = i + 1
+          }
+        }
+        case Error(_) -> i = i + 1
+      }
+    }
+
+    t.true(found_replacement)
+  })
+}

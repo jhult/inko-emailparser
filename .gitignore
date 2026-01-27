@@ -1,0 +1,45 @@
+# Inko build artifacts
+build/
+*.o
+*.so
+*.dylib
+*.dll
+
+# Inko dependencies
+dep/
+.inko/
+
+# Beads
+.beads/daemon-error
+.beads/interactions.jsonl
+
+# Node.js / Web UI
+web-ui/node_modules/
+web-ui/.svelte-kit/
+web-ui/build/
+web-ui/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+*.bak
+*.bak*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+coverage/
+
+# Benchmark results
+benchmark-results/

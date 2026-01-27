@@ -1,0 +1,81 @@
+Delivered-To: user@gmail.com
+Received: by 2002:a05:6914:2411:b0:238:6474:b5e with SMTP id q17csp1234567pgr;
+        Thu, 16 Jan 2026 14:20:00 -0800 (PST)
+X-Received: by 2002:a05:6914:2411:b0:238:6474:b5e with SMTP id q17csp1234567pgr;
+        Thu, 16 Jan 2026 14:20:00 -0800 (PST)
+ARC-Seal: i=1; a=rsa-sha256; t=1737052800; cv=none;
+        d=google.com; s=arc-20160816;
+        b=fake_signature_value
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=google.com; s=arc-20160816;
+        h=mime-version:references:in-reply-to:date:message-id:subject:from:to
+         :cc:content-transfer-encoding;
+        bh=fake_hash_value;
+        b=fake_signature_value
+ARC-Authentication-Results: i=1; mx.google.com;
+       spf=pass (google.com: domain of marketing@company.com designates 192.0.2.2 as permitted sender) smtp.mailfrom=marketing@company.com
+Return-Path: <marketing@company.com>
+Received: from mail.company.com (mail.company.com. [192.0.2.2])
+        by mx.google.com with ESMTPS id q5678.2026.01.16.14.20.00
+        for <user@gmail.com>
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Thu, 16 Jan 2026 14:20:00 -0800 (PST)
+Received-SPF: pass (google.com: domain of marketing@company.com designates 192.0.2.2 as permitted sender)
+Authentication-Results: mx.google.com;
+       spf=pass (google.com: domain of marketing@company.com designates 192.0.2.2 as permitted sender);
+       dkim=pass header.i=@company.com header.s=s1 header.b=fake_value;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=company.com
+Received: by mail.company.com (Postfix, from userid 1001)
+	id GHIJKL; Thu, 16 Jan 2026 14:20:00 -0800 (PST)
+Date: Thu, 16 Jan 2026 14:20:00 -0800
+To: user@gmail.com
+From: Marketing Team <marketing@company.com>
+Subject: Newsletter with Attachments
+Message-ID: <news123@company.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=----=_Part_123_4567890.1234567890
+
+------=_Part_123_4567890.1234567890
+Content-Type: multipart/alternative; boundary=----=_Alt_123_4567890.1234567890
+
+------=_Alt_123_4567890.1234567890
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+Hello,
+
+This is our monthly newsletter with text content.
+
+Best regards,
+The Marketing Team
+------=_Alt_123_4567890.1234567890
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+<html>
+<body>
+<h1>Monthly Newsletter</h1>
+<p>Hello,</p>
+<p>This is our monthly newsletter with <strong>HTML content</strong>.</p>
+<p>Best regards,<br>The Marketing Team</p>
+</body>
+</html>
+------=_Alt_123_4567890.1234567890--
+
+------=_Part_123_4567890.1234567890
+Content-Type: application/pdf; name="report.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="report.pdf"
+
+JVBERi0xLjUKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSL0ZpbHRlci9GbGF0ZURl
+Y29kZT4+CnN0cmVhbQp4nDPz5XATAAAEQ2Z2AAAQaWF1dGhvcml6ZWQKZW5kc3RyZWFtCmVuZG9i
+ago=
+------=_Part_123_4567890.1234567890
+Content-Type: image/jpeg; name="image.jpg"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="image.jpg"
+
+/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a
+HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAACAgBAREA/8QAFAABAAAAAAAAAA
+AAAAAAAACv/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AT//Z
+------=_Part_123_4567890.1234567890--

@@ -1,0 +1,787 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Header Parsing Module
+#
+# RFC 5322 section 2.2: Header Fields
+#
+# Provides functions for parsing email headers, including:
+# - Header field validation
+# - Case-insensitive comparison
+# - Content-Type parameter parsing
+# - Standard header identification
+
+import emailparser.ascii (
+  ASCII_COLON, ASCII_EXCLAMATION, ASCII_TILDE, is_uppercase,
+)
+import emailparser.error (Error)
+import emailparser.limits (MAX_FILENAME_SIZE, MAX_HEADER_VALUE_LENGTH)
+import emailparser.validation (is_quoted_string, is_valid_mime_type)
+import std.option (Option)
+import std.result (Result)
+
+let STANDARD = [
+  'from',
+  'to',
+  'cc',
+  'bcc',
+  'subject',
+  'date',
+  'message-id',
+  'in-reply-to',
+  'references',
+  'sender',
+  'content-type',
+  'content-transfer-encoding',
+  'content-disposition',
+  'mime-version',
+  'content-id',
+  'description',
+  'priority',
+  'disposition-notification-to',
+]
+
+# Validate RFC 5322 field name
+# RFC 5322 section 3.6.8: field names are 1+ printable chars (except colon)
+fn pub is_valid_field_name(name: String) -> Bool {
+  if name.empty? { return false }
+
+  let mut i = 0
+
+  while i < name.size {
+    match name.get(i) {
+      case Ok(byte) -> {
+        # Field name must be printable ASCII (33-126) except colon (58)
+        # RFC 5322: field-name = 1*ftext
+        # ftext = %d33-57 / %d59-126 (any printable ASCII except colon)
+        if
+          byte < ASCII_EXCLAMATION or byte == ASCII_COLON or byte > ASCII_TILDE
+        {
+          return false
+        }
+
+        i = i + 1
+      }
+      case Error(_) -> return false
+    }
+  }
+
+  true
+}
+
+# Parse email headers from raw string
+#
+# RFC 5322 section 2.2: Header Fields
+#
+# Header format:
+# - Each header: "field-name: field-value"
+# - Headers separated by blank line from body
+# - Long headers can be folded (continued) using CRLF + whitespace
+# - Field names are case-insensitive
+#
+# Algorithm:
+# 1. Check email size limit before parsing
+# 2. Split input into lines
+# 3. Process lines sequentially:
+#    a. If line starts with space/tab, append to current header value (folded)
+#    b. Otherwise, if in header, save it and start new header
+#    c. Parse new header: split at first colon
+# 4. In strict mode, validate header format and detect duplicates
+# 5. Stop at blank line (end of headers)
+# 6. Save last header if present
+#
+# Edge cases handled:
+# - Folded headers (continuation lines starting with whitespace)
+# - Missing colon -> strict mode: error, permissive: skip line
+# - Empty headers (field-name is empty) -> strict mode: error
+# - Duplicate headers -> strict mode: error, permissive: last wins
+# - Malformed headers (multiple colons) -> strict mode: detect possible missing newline
+# - Size limits enforced at each step
+#
+# Security considerations:
+# - Size limit checked before parsing to prevent DoS
+# - Header count limit enforced to prevent memory exhaustion
+# - Strict mode detects malformed headers that could be attacks
+#
+# Performance optimizations:
+# - Lowercase header names cached to avoid O(n²) conversions
+# - Case-insensitive comparison without repeated string copies
+fn parse_headers_impl(
+  raw: String,
+  strict_mode: Bool,
+  max_size: Int,
+  max_headers: Int,
+) -> Result[Array[(String, String)], Error] {
+  # Check email size limit before parsing
+  if raw.size > max_size {
+    return Result.Error(
+      Error.EmailSizeTooLarge(
+        raw.size,
+        max_size,
+        Option.None,
+        Option.None,
+        Option.None,
+      ),
+    )
+  }
+
+  let mut headers = []
+  # Optimization: cache lowercase header names to avoid O(n²) conversions
+  let mut lower_keys = []
+
+  # Split into lines
+  let lines = raw.split('\n').into_iter.to_array
+
+  let mut current_key = ''
+  let mut current_value = ''
+  let mut in_header = false
+  let mut line_number = 0
+
+  for line in lines {
+    line_number = line_number + 1
+
+    if line.empty? {
+      if in_header {
+        headers.push((current_key, current_value))
+        in_header = false
+      }
+
+      break # End of headers
+    }
+
+    # Convert Slice to String for processing
+    let mut line_str = line.to_string
+
+    # Strip trailing carriage return (for CRLF line endings)
+    if line_str.ends_with?('\r') {
+      line_str = line_str.substring(0, line_str.size - 1)
+    }
+
+    # Skip empty lines (after stripping CR)
+    if line_str.empty? {
+      if in_header {
+        headers.push((current_key, current_value))
+        in_header = false
+      }
+
+      break # End of headers
+    }
+
+    # Check for folded header (continuation line starting with whitespace)
+    if line_str.starts_with?(' ') or line_str.starts_with?('\t') {
+      if in_header {
+        # Security check: Detect suspicious folding in Content-Type headers
+        # Folding within parameter values (e.g., boundary=) can be used for header injection
+        if
+          current_key.to_lower == 'content-type'
+            and current_value.contains?('=')
+        {
+          # Check if we're folding in the middle of a parameter value
+          let last_eq = current_value.index_of('=', 0)
+
+          match last_eq {
+            case Some(eq_pos) -> {
+              # Check if there's a semicolon after the last = (meaning we're between params)
+              let has_semicolon_after = match
+                current_value.index_of(';', eq_pos)
+              {
+                case Some(semi_pos) -> semi_pos > eq_pos
+                case None -> false
+              }
+
+              # If no semicolon after last =, we're folding within a parameter value
+              if !has_semicolon_after {
+                return Result.Error(
+                  Error.MalformedHeader(
+                    'suspicious folding in boundary parameter value',
+                    Option.Some(line_number),
+                    Option.None,
+                    Option.Some(current_value.clone),
+                  ),
+                )
+              }
+            }
+            case None -> {}
+          }
+        }
+
+        let new_size = current_value.size + 1 + line_str.trim.size
+
+        if new_size > MAX_HEADER_VALUE_LENGTH {
+          if strict_mode {
+            return Result.Error(
+              Error.HeaderValueTooLarge(
+                new_size,
+                MAX_HEADER_VALUE_LENGTH,
+                Option.Some(line_number),
+                Option.None,
+                Option.Some(line_str.clone),
+              ),
+            )
+          } else {
+            break
+          }
+        }
+
+        current_value = current_value + ' ' + line_str.trim
+      }
+    } else {
+      # New header
+      if in_header {
+        # Check max_headers limit before adding
+        if headers.size >= max_headers {
+          return Result.Error(
+            Error.TooManyHeaders(
+              headers.size,
+              max_headers,
+              Option.Some(line_number),
+              Option.None,
+              Option.None,
+            ),
+          )
+        }
+
+        headers.push((current_key, current_value))
+
+        if strict_mode { lower_keys.push(current_key.to_lower) }
+      }
+
+      let colon_pos = line_str.index_of(':', 0)
+
+      match colon_pos {
+        case Some(pos) -> {
+          current_key = line_str.substring(0, pos).trim
+          current_value = line_str.substring(pos + 1, line_str.size).trim
+
+          # RFC 5322 requires non-empty header names - reject even in non-strict mode
+          if current_key.empty? {
+            return Result.Error(
+              Error.InvalidHeaderFieldName(
+                current_key,
+                Option.Some(line_number),
+                Option.None,
+                Option.Some(line_str.clone),
+              ),
+            )
+          }
+
+          # Check header value size limit
+          if current_value.size > MAX_HEADER_VALUE_LENGTH {
+            if strict_mode {
+              return Result.Error(
+                Error.HeaderValueTooLarge(
+                  current_value.size,
+                  MAX_HEADER_VALUE_LENGTH,
+                  Option.Some(line_number),
+                  Option.None,
+                  Option.Some(current_value.clone),
+                ),
+              )
+            } else {
+              current_value = current_value.substring(
+                0,
+                MAX_HEADER_VALUE_LENGTH,
+              )
+            }
+          }
+
+          # Strict mode validation
+          if strict_mode {
+            # Validate field name format
+            if is_valid_field_name(current_key) == false {
+              return Result.Error(
+                Error.InvalidHeaderFieldName(
+                  current_key,
+                  Option.Some(line_number),
+                  Option.None,
+                  Option.Some(current_key.clone),
+                ),
+              )
+            }
+
+            # Check if the value looks like it contains a malformed header
+            # (e.g., "Invalid:Name: value" would have value "Name: value")
+            # This happens when there's a space before the colon in the field name
+            let value_colon = current_value.index_of(':', 0)
+
+            match value_colon {
+              case Some(vpos) -> {
+                # Check if the part before the colon looks like a valid field name
+                let potential_name = current_value.substring(0, vpos).trim
+
+                if
+                  potential_name.empty? == false
+                    and is_valid_field_name(potential_name)
+                {
+                  # This looks like "Field1: Field2: value" which is malformed
+                  return Result.Error(
+                    Error.MalformedHeader(
+                      'possible missing newline',
+                      Option.Some(line_number),
+                      Option.None,
+                      Option.Some(line_str.clone),
+                    ),
+                  )
+                }
+              }
+              case None -> {}
+            }
+
+            # Check for duplicate headers (case-insensitive)
+            # Use cached lowercase keys to avoid repeated conversions
+            let lower_key = current_key.to_lower
+
+            for k in lower_keys.iter {
+              if k == lower_key {
+                return Result.Error(
+                  Error.DuplicateHeader(
+                    current_key,
+                    Option.Some(line_number),
+                    Option.None,
+                    Option.Some(current_key.clone),
+                  ),
+                )
+              }
+            }
+          }
+
+          in_header = true
+        }
+        case None -> {
+          # RFC 5322 requires colon separator - reject even in non-strict mode
+          return Result.Error(
+            Error.HeaderWithoutColon(
+              Option.Some(line_number),
+              Option.None,
+              Option.Some(line_str.clone),
+            ),
+          )
+        }
+      }
+    }
+  }
+
+  # Push the last header if we were in the middle of parsing one
+  if in_header {
+    # Check max_headers limit before adding
+    if headers.size >= max_headers {
+      return Result.Error(
+        Error.TooManyHeaders(
+          headers.size,
+          max_headers,
+          Option.Some(line_number),
+          Option.None,
+          Option.None,
+        ),
+      )
+    }
+
+    headers.push((current_key, current_value))
+
+    if strict_mode { lower_keys.push(current_key.to_lower) }
+  }
+
+  Result.Ok(headers)
+}
+
+# Get header value by name (case-insensitive)
+fn get_header_value_impl(
+  headers: ref Array[(String, String)],
+  name: String,
+) -> Option[String] {
+  let lower_name = name.to_lower
+
+  for (key, value) in headers.iter {
+    # Compare lowercase key with lowercased search name
+    if key.to_lower == lower_name { return Option.Some(value.clone) }
+  }
+
+  Option.None
+}
+
+# Case-insensitive string comparison helper
+# Compares two strings ignoring ASCII case differences
+# Convert byte to lowercase if it's uppercase
+fn to_lowercase(byte: Int) -> Int {
+  if is_uppercase(byte) { byte + 32 } else { byte }
+}
+
+# Compare two bytes ignoring case
+fn bytes_equal_ignore_case(byte_a: Int, byte_b: Int) -> Bool {
+  to_lowercase(byte_a) == to_lowercase(byte_b)
+}
+
+fn eq_ignore_case(a: String, b: String) -> Bool {
+  if a.size != b.size { return false }
+
+  let mut i = 0
+
+  while i < a.size {
+    match a.get(i) {
+      case Ok(byte_a) -> {
+        match b.get(i) {
+          case Ok(byte_b) -> {
+            if bytes_equal_ignore_case(byte_a, byte_b) == false { return false }
+
+            i = i + 1
+          }
+          case Error(_) -> return false
+        }
+      }
+      case Error(_) -> return false
+    }
+  }
+
+  true
+}
+
+fn parse_content_type_impl(
+  raw: String,
+) -> Result[(String, Array[(String, String)]), Error] {
+  # Validate Content-Type format per RFC 2045
+  # Must be "type/subtype" optionally followed by parameters
+  let trimmed = raw.trim
+  let trimmed_size = trimmed.size
+
+  # Find the first semicolon to separate main type from parameters
+  let semi_pos = trimmed.index_of(';', 0)
+
+  # Extract the main type (before any parameters)
+  let main_type_end = match semi_pos.clone {
+    case Some(pos) -> pos
+    case None -> trimmed_size
+  }
+
+  let main_type = trimmed.substring(0, main_type_end).trim
+
+  # Validate that main type is in valid "type/subtype" format
+  if !is_valid_mime_type(main_type.clone) {
+    return Result.Error(
+      Error.InvalidContentType(
+        'invalid MIME type format, expected "type/subtype"',
+        Option.None,
+        Option.None,
+        Option.Some(main_type.clone),
+      ),
+    )
+  }
+
+  # Now parse parameters if present
+  let mut params = []
+
+  match semi_pos {
+    case Some(pos) -> {
+      let params_raw = trimmed.substring(pos + 1, trimmed_size)
+
+      # Split params_raw by semicolon
+      let mut param_start = 0
+
+      while param_start < params_raw.size {
+        let next_semi = params_raw.index_of(';', param_start).or(
+          params_raw.size,
+        )
+
+        if next_semi > param_start {
+          let param = params_raw.substring(param_start, next_semi).trim
+
+          # Skip empty parameters
+          if !param.empty? {
+            let eq_pos = param.index_of('=', 0)
+
+            match eq_pos {
+              case Some(eq) -> {
+                let key = param.substring(0, eq).trim
+                let raw_value = param.substring(eq + 1, param.size)
+                let value = raw_value.trim
+
+                # Check for newlines in parameter values (security issue)
+                if raw_value.contains?('\n') or raw_value.contains?('\r') {
+                  return Result.Error(
+                    Error.InvalidContentType(
+                      'boundary parameter value contains newline characters',
+                      Option.None,
+                      Option.None,
+                      Option.Some(param.clone),
+                    ),
+                  )
+                }
+
+                # Remove quotes if present
+                let clean_value = if is_quoted_string(value) {
+                  value.substring(1, value.size - 1)
+                } else {
+                  value
+                }
+
+                params.push((key, clean_value))
+              }
+              case None -> {
+                # Parameter without = is malformed
+                return Result.Error(
+                  Error.InvalidContentType(
+                    'invalid parameter format: "' + param + '"',
+                    Option.None,
+                    Option.None,
+                    Option.Some(param.clone),
+                  ),
+                )
+              }
+            }
+          }
+
+          param_start = next_semi + 1
+        }
+      }
+    }
+    case None -> {}
+  }
+
+  Result.Ok((main_type, params))
+}
+
+# Parse Content-Disposition header value
+# RFC 2183: Content-Disposition header format is "disposition-type; param=value; ..."
+# disposition-type is typically "inline" or "attachment" (not a MIME type)
+fn parse_content_disposition_impl(
+  raw: String,
+) -> Result[(String, Array[(String, String)]), Error] {
+  let trimmed = raw.trim
+  let trimmed_size = trimmed.size
+
+  # Find the first semicolon to separate disposition type from parameters
+  let semi_pos = trimmed.index_of(';', 0)
+
+  # Extract the disposition type (before any parameters)
+  let disp_type_end = match semi_pos.clone {
+    case Some(pos) -> pos
+    case None -> trimmed_size
+  }
+
+  let disp_type = trimmed.substring(0, disp_type_end).trim
+
+  # Validate disposition type (should be "inline", "attachment", or form-data)
+  # Unlike Content-Type, this is NOT a MIME type format
+  if disp_type.empty? {
+    return Result.Error(
+      Error.InvalidContentType(
+        'empty disposition type',
+        Option.None,
+        Option.None,
+        Option.Some(trimmed.clone),
+      ),
+    )
+  }
+
+  # Now parse parameters if present (same logic as Content-Type parameter parsing)
+  let mut params = []
+
+  match semi_pos {
+    case Some(pos) -> {
+      let params_raw = trimmed.substring(pos + 1, trimmed_size)
+
+      # Split params_raw by semicolon
+      let mut param_start = 0
+
+      while param_start < params_raw.size {
+        let next_semi = params_raw.index_of(';', param_start).or(
+          params_raw.size,
+        )
+
+        if next_semi > param_start {
+          let param = params_raw.substring(param_start, next_semi).trim
+
+          # Skip empty parameters
+          if !param.empty? {
+            let eq_pos = param.index_of('=', 0)
+
+            match eq_pos {
+              case Some(eq) -> {
+                let key = param.substring(0, eq).trim
+                let raw_value = param.substring(eq + 1, param.size)
+                let value = raw_value.trim
+
+                # Check for newlines in parameter values (security issue)
+                if raw_value.contains?('\n') or raw_value.contains?('\r') {
+                  return Result.Error(
+                    Error.InvalidContentType(
+                      'parameter value contains newline characters',
+                      Option.None,
+                      Option.None,
+                      Option.Some(param.clone),
+                    ),
+                  )
+                }
+
+                # Remove quotes if present
+                let value = if
+                  value.size >= 2
+                    and value.starts_with?('"')
+                    and value.ends_with?('"')
+                {
+                  value.substring(1, value.size - 1)
+                } else {
+                  value
+                }
+
+                params.push((key, value))
+              }
+              case None -> {
+                # Parameter without = is malformed
+                return Result.Error(
+                  Error.InvalidContentType(
+                    'invalid parameter format: "' + param + '"',
+                    Option.None,
+                    Option.None,
+                    Option.Some(param.clone),
+                  ),
+                )
+              }
+            }
+          }
+
+          param_start = next_semi + 1
+        }
+      }
+    }
+    case None -> {}
+  }
+
+  Result.Ok((disp_type, params))
+}
+
+# Get parameter value from params list
+fn get_param_value_impl(
+  params: ref Array[(String, String)],
+  key: String,
+) -> Option[String] {
+  for (k, v) in params.iter {
+    if k == key { return Option.Some(v.clone) }
+  }
+
+  Option.None
+}
+
+# Sanitize filename to prevent path traversal attacks
+# Removes path separators and potentially dangerous characters
+fn pub sanitize_filename(filename: String) -> Option[String] {
+  if filename.empty? { return Option.None }
+
+  # Check for path traversal attempts
+  if
+    filename.contains?('..')
+      or filename.contains?('/')
+      or filename.contains?('\\')
+  {
+    return Option.None
+  }
+
+  # Check for Windows reserved characters
+  if
+    filename.contains?('<')
+      or filename.contains?('>')
+      or filename.contains?(':')
+      or filename.contains?('"')
+      or filename.contains?('|')
+      or filename.contains?('?')
+      or filename.contains?('*')
+  {
+    return Option.None
+  }
+
+  # Check for leading/trailing dots (security issue on Windows/macOS)
+  if filename.starts_with?('.') or filename.ends_with?('.') {
+    return Option.None
+  }
+
+  # Check for Windows reserved filenames (case-insensitive)
+  let reserved_names = [
+    'CON',
+    'PRN',
+    'AUX',
+    'NUL',
+    'COM1',
+    'COM2',
+    'COM3',
+    'COM4',
+    'COM5',
+    'COM6',
+    'COM7',
+    'COM8',
+    'COM9',
+    'LPT1',
+    'LPT2',
+    'LPT3',
+    'LPT4',
+    'LPT5',
+    'LPT6',
+    'LPT7',
+    'LPT8',
+    'LPT9',
+  ]
+
+  # Extract the base name (before extension) for reserved name checking
+  let base_name = match filename.index_of('.', 0) {
+    case Some(dot_pos) -> filename.substring(0, dot_pos)
+    case None -> filename.clone
+  }
+
+  # Check if base name matches any reserved name (case-insensitive)
+  for reserved_name in reserved_names.iter {
+    if eq_ignore_case(base_name.clone, reserved_name.clone) {
+      return Option.None
+    }
+  }
+
+  # Check for null bytes or control characters
+  let mut i = 0
+  let mut has_valid_chars = false
+
+  while i < filename.size {
+    match filename.get(i) {
+      case Ok(byte) -> {
+        # Reject control characters (0-31) and null (0)
+        if byte < 32 or byte == 0 { return Option.None }
+
+        # Check for at least one printable character
+        if byte >= 32 and byte <= 126 { has_valid_chars = true }
+
+        i = i + 1
+      }
+      case Error(_) -> return Option.None
+    }
+  }
+
+  # Reject if no valid chars or too long (max 255 chars)
+  if has_valid_chars == false or filename.size > MAX_FILENAME_SIZE {
+    Option.None
+  } else {
+    Option.Some(filename)
+  }
+}
+
+# Check if header is standard RFC 5322 header
+fn is_standard_header_impl(name: String) -> Bool {
+  let lower = name.to_lower
+
+  for std in STANDARD.iter {
+    if std == lower { return true }
+  }
+
+  false
+}
+
+# Extract non-standard headers
+fn pub extract_extra_headers(
+  headers: ref Array[(String, String)],
+) -> Array[(String, String)] {
+  let mut extra_headers = []
+
+  for (key, value) in headers.iter {
+    if is_standard_header_impl(key) == false {
+      extra_headers.push((key.clone, value.clone))
+    }
+  }
+
+  extra_headers
+}

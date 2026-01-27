@@ -1,0 +1,29 @@
+Message-ID: <abc123def456@icloud.com>
+Subject: Apple Mail Test Email
+From: Jane Doe <jane.doe@icloud.com>
+To: Recipient <recipient@example.com>
+Date: Fri, 18 Jan 2026 16:45:00 -0800
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary=B7FE4B5C-AE1B-4CBE-BF6D-0123456789AB
+X-Mailer: Apple Mail (2.3605.60.0.2)
+
+--B7FE4B5C-AE1B-4CBE-BF6D-0123456789AB
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/plain;
+	charset=utf-8
+
+Hi there,
+
+This is an email sent from Apple Mail on macOS.
+
+Best,
+Jane
+
+--B7FE4B5C-AE1B-4CBE-BF6D-0123456789AB
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/html;
+	charset=utf-8
+
+<html><head><meta http-equiv=3D"Content-Type" content=3D"text/html; =charset=3Dutf-8"></head><body style=3D"word-wrap: break-word; -webkit-nbsp-mode: =space; -webkit-line-break: after-white-space; color: rgb(0, 0, 0); font-size: =14px; font-family: Helvetica, Arial, sans-serif;"><div>Hi there,</div><div><br>=</div><div>This is an email sent from Apple Mail on =macOS.</div><div><br></div><div>Best,<br>Jane</div></body></html>
+
+--B7FE4B5C-AE1B-4CBE-BF6D-0123456789AB--

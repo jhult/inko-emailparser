@@ -1,0 +1,739 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Integration Tests with Real-World Email Samples
+#
+# These tests parse actual emails from major providers:
+# - Gmail (simple and complex)
+# - Outlook/O365
+# - Apple Mail
+# - Mobile clients
+# - Internationalized emails
+
+import emailparser (EmailParser)
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  # ============================================================
+  # GMAIL EMAILS
+  # ============================================================
+
+  t.test('gmail_simple_plain_text', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'Delivered-To: user@gmail.com
+Received: by 2002:a05:6914:2411:b0:238:6474:b5e with SMTP id q17csp1234567pgr;
+        Wed, 15 Jan 2026 10:30:00 -0800 (PST)
+X-Received: by 2002:a05:6914:2411:b0:238:6474:b5e with SMTP id q17csp1234567pgr;
+        Wed, 15 Jan 2026 10:30:00 -0800 (PST)
+ARC-Seal: i=1; a=rsa-sha256; t=1736964600; cv=none;
+        d=google.com; s=arc-20160816;
+        b=fake_signature_value
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=google.com; s=arc-20160816;
+        h=mime-version:references:in-reply-to:date:message-id:subject:from:to
+         :cc:content-transfer-encoding;
+        bh=fake_hash_value;
+        b=fake_signature_value
+ARC-Authentication-Results: i=1; mx.google.com;
+       spf=pass (google.com: domain of sender@example.com designates 192.0.2.1 as permitted sender) smtp.mailfrom=sender@example.com
+Return-Path: <sender@example.com>
+Received: from mail.example.com (mail.example.com. [192.0.2.1])
+        by mx.google.com with ESMTPS id q1234.2026.01.15.10.30.00
+        for <user@gmail.com>
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Wed, 15 Jan 2026 10:30:00 -0800 (PST)
+Received-SPF: pass (google.com: domain of sender@example.com designates 192.0.2.1 as permitted sender)
+Authentication-Results: mx.google.com;
+       spf=pass (google.com: domain of sender@example.com designates 192.0.2.1 as permitted sender);
+       dkim=pass header.i=@example.com header.s=s1 header.b=fake_value;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=example.com
+Received: by mail.example.com (Postfix, from userid 1000)
+	id ABCDEF; Wed, 15 Jan 2026 10:30:00 -0800 (PST)
+Date: Wed, 15 Jan 2026 10:30:00 -0800
+To: user@gmail.com
+From: Sender Name <sender@example.com>
+Subject: Simple Gmail Test Email
+Message-ID: <abc123@mail.example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+This is a simple plain text email sent to Gmail.
+
+It has multiple lines of text and tests basic parsing.
+
+Best regards,
+Sender'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.addresses.from.address, 'sender@example.com')
+        t.equal(msg.addresses.to.size, 1)
+        t.equal(msg.addresses.to.get(0).or_panic.address, 'user@gmail.com')
+        t.equal(msg.subject, 'Simple Gmail Test Email')
+        t.equal(msg.message_id, '<abc123@mail.example.com>')
+        t.equal(msg.mime.content_type, 'text/plain')
+
+        match msg.mime.charset {
+          case Some(cs) -> t.equal(cs, 'UTF-8')
+          case None -> t.equal('should have charset', 'got none')
+        }
+
+        match msg.text_body {
+          case Some(body) -> {
+            t.true(body.contains?('simple plain text email'))
+            t.true(body.contains?('multiple lines'))
+          }
+          case None -> t.equal('should have text body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('gmail_complex_with_attachments', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'Delivered-To: user@gmail.com
+Received: by 2002:a05:6914:2411:b0:238:6474:b5e with SMTP id q17csp1234567pgr;
+        Thu, 16 Jan 2026 14:20:00 -0800 (PST)
+X-Received: by 2002:a05:6914:2411:b0:238:6474:b5e with SMTP id q17csp1234567pgr;
+        Thu, 16 Jan 2026 14:20:00 -0800 (PST)
+ARC-Seal: i=1; a=rsa-sha256; t=1737052800; cv=none;
+        d=google.com; s=arc-20160816;
+        b=fake_signature_value
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=google.com; s=arc-20160816;
+        h=mime-version:references:in-reply-to:date:message-id:subject:from:to
+         :cc:content-transfer-encoding;
+        bh=fake_hash_value;
+        b=fake_signature_value
+ARC-Authentication-Results: i=1; mx.google.com;
+       spf=pass (google.com: domain of marketing@company.com designates 192.0.2.2 as permitted sender) smtp.mailfrom=marketing@company.com
+Return-Path: <marketing@company.com>
+Received: from mail.company.com (mail.company.com. [192.0.2.2])
+        by mx.google.com with ESMTPS id q5678.2026.01.16.14.20.00
+        for <user@gmail.com>
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Thu, 16 Jan 2026 14:20:00 -0800 (PST)
+Received-SPF: pass (google.com: domain of marketing@company.com designates 192.0.2.2 as permitted sender)
+Authentication-Results: mx.google.com;
+       spf=pass (google.com: domain of marketing@company.com designates 192.0.2.2 as permitted sender);
+       dkim=pass header.i=@company.com header.s=s1 header.b=fake_value;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=company.com
+Received: by mail.company.com (Postfix, from userid 1001)
+	id GHIJKL; Thu, 16 Jan 2026 14:20:00 -0800 (PST)
+Date: Thu, 16 Jan 2026 14:20:00 -0800
+To: user@gmail.com
+From: Marketing Team <marketing@company.com>
+Subject: Newsletter with Attachments
+Message-ID: <news123@company.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=----=_Part_123_4567890.1234567890
+
+------=_Part_123_4567890.1234567890
+Content-Type: multipart/alternative; boundary=----=_Alt_123_4567890.1234567890
+
+------=_Alt_123_4567890.1234567890
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+Hello,
+
+This is our monthly newsletter with text content.
+
+Best regards,
+The Marketing Team
+------=_Alt_123_4567890.1234567890
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+<html>
+<body>
+<h1>Monthly Newsletter</h1>
+<p>Hello,</p>
+<p>This is our monthly newsletter with <strong>HTML content</strong>.</p>
+<p>Best regards,<br>The Marketing Team</p>
+</body>
+</html>
+------=_Alt_123_4567890.1234567890--
+
+------=_Part_123_4567890.1234567890
+Content-Type: application/pdf; name="report.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="report.pdf"
+
+JVBERi0xLjUKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSL0ZpbHRlci9GbGF0ZURl
+Y29kZT4+CnN0cmVhbQp4nDPz5XATAAAEQ2Z2AAAQaWF1dGhvcml6ZWQKZW5kc3RyZWFtCmVuZG9i
+ago=
+------=_Part_123_4567890.1234567890
+Content-Type: image/jpeg; name="image.jpg"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="image.jpg"
+
+/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a
+HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAACAgBAREA/8QAFAABAAAAAAAAAA
+AAACv/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AT//Z
+------=_Part_123_4567890.1234567890--
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.mime.content_type, 'multipart/mixed')
+        t.equal(msg.addresses.from.address, 'marketing@company.com')
+        t.equal(msg.subject, 'Newsletter with Attachments')
+
+        match msg.text_body {
+          case Some(body) -> t.true(body.contains?('monthly newsletter'))
+          case None -> t.equal('should have text body', 'got none')
+        }
+
+        match msg.html_body {
+          case Some(body) -> t.true(body.contains?('Monthly Newsletter'))
+          case None -> t.equal('should have html body', 'got none')
+        }
+
+        if msg.attachments.size >= 2 {
+          match msg.attachments.get(0) {
+            case Ok(att) -> {
+              t.equal(att.content_type, 'application/pdf')
+              t.equal(att.filename, Option.Some('report.pdf'))
+              t.equal(att.content_disposition, 'attachment')
+            }
+            case Error(_) -> {}
+          }
+
+          match msg.attachments.get(1) {
+            case Ok(att) -> {
+              t.equal(att.content_type, 'image/jpeg')
+              t.equal(att.filename, Option.Some('image.jpg'))
+            }
+            case Error(_) -> {}
+          }
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  # ============================================================
+  # OUTLOOK EMAILS
+  # ============================================================
+
+  t.test('outlook_threading_headers', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'Received: from DB5EUR06FT063.mail.protection.outlook.com (2a01:111:f403:fd04::1) by
+ SN1NAM02FT026.mail.protection.outlook.com (2a01:111:e400:c417::1) with HTTPS via
+ SN1NAM02HT004.outlook.office.com; Thu, 17 Jan 2026 09:15:00 +0000
+Received: from BN1PR10MB3561.namprd10.prod.outlook.com (2603:10b6:a03:1a7::18) by
+ BN1PR10MB3561.namprd10.prod.outlook.com (2603:10b6:a03:1a7::18) with
+ mapi id 15.20.8235.018; Thu, 17 Jan 2026 09:15:00 +0000
+From: "Smith, John" <John.Smith@company.com>
+To: "Doe, Jane" <Jane.Doe@company.com>
+CC: "Team Lead" <Team.Lead@company.com>
+Subject: Outlook Project Update
+Thread-Topic: Outlook Project Update
+Thread-Index: AdKLmNzOpQRsYzU8vK9GwPq==
+Date: Thu, 17 Jan 2026 09:15:00 +0000
+Message-ID: <BN1PR10MB35612ABCDEF123456789@BN1PR10MB3561.namprd10.prod.outlook.com>
+References: <BN1PR10MB35612ABCDEF123456788@BN1PR10MB3561.namprd10.prod.outlook.com>
+In-Reply-To: <BN1PR10MB35612ABCDEF123456788@BN1PR10MB3561.namprd10.prod.outlook.com>
+Accept-Language: en-US
+Content-Language: en-US
+X-MS-Has-Attach: yes
+X-MS-TNEF-Correlator:
+X-MS-Exchange-Organization-SCL: -1
+X-MS-Exchange-Organization-Network-Message-Id: abc123-def456-ghi789
+X-Microsoft-Antispam-PRVS: <prvs=123456@outlook.com>
+X-MS-Exchange-Organization-RecordId: abc123-def456-ghi789
+X-Proofpoint-GUID: abc123def456
+X-Proofpoint-ORIG-GUID: abc123def456
+X-Proofpoint-Virus-Version: vendor=base64
+Authentication-Results: spf=none (sender IP is 192.0.2.3)
+ smtp.mailfrom=John.Smith@company.com; dkim=none header.d=company.com;
+ dmarc=none action=none header.from=company.com
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="_000_BN1PR10MB35612ABCDEF123456789BN1PR10MB3561namprd_"
+
+--_000_BN1PR10MB35612ABCDEF123456789BN1PR10MB3561namprd_
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+SGVsbG8gSmFuZSwKCkhlcmUgaXMgdGhlIHByb2plY3QgdXBkYXRlLiBUaGUgdGVhbSBoYXMgbWFk
+ZSBncmVhdCBwcm9ncmVzcyB0aGlzIHdlZWsuCgpdIEdyZWV0aW5ncywKSm9obiBTbWl0aA==
+
+--_000_BN1PR10MB35612ABCDEF123456789BN1PR10MB3561namprd_
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGJvZHk+PHA+SGVsbG8gSmFuZSw8L3A+PHA+SGVyZSBpcyB0aGUgcHJvamVjdCB1cGRh
+dGUuIFRoZSB0ZWFtIGhhcyBtYWRlIGdyZWF0IHByb2dyZXNzIHRoaXMgd2Vlay48L3A+PHA+QmVz
+dCByZWdhcmRzLDxicj5Kb2huIFNtaXRoPC9wPjwvYm9keT48L2h0bWw+
+
+--_000_BN1PR10MB35612ABCDEF123456789BN1PR10MB3561namprd_
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document; name="Project Update.docx"
+Content-Description: Project Update.docx
+Content-Disposition: attachment; filename="Project Update.docx"; size=12345;
+ creation-date="Thu, 17 Jan 2026 09:15:00 GMT";
+ modification-date="Thu, 17 Jan 2026 09:15:00 GMT"
+Content-Transfer-Encoding: base64
+
+UEsDBBQABgAIAAAAIQAAAAAAAAAAAAAAAA==
+--_000_BN1PR10MB35612ABCDEF123456789BN1PR10MB3561namprd_--
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.addresses.from.address, 'John.Smith@company.com')
+
+        match msg.addresses.from.name {
+          case Some(name) -> t.equal(name, 'Smith, John')
+          case None -> {}
+        }
+
+        t.equal(msg.subject, 'Outlook Project Update')
+        t.equal(msg.date, 'Thu, 17 Jan 2026 09:15:00 +0000')
+
+        match msg.threading.in_reply_to {
+          case Some(reply_to) -> {
+            t.equal(
+              reply_to,
+              '<BN1PR10MB35612ABCDEF123456788@BN1PR10MB3561.namprd10.prod.outlook.com>',
+            )
+          }
+          case None -> t.equal('should have in-reply-to', 'got none')
+        }
+
+        t.equal(msg.threading.references.size, 1)
+        t.equal(msg.attachments.size, 1)
+
+        match msg.attachments.get(0) {
+          case Ok(att) -> {
+            match att.filename {
+              case Some(fname) -> t.true(fname.contains?('Project Update.docx'))
+              case None -> {}
+            }
+          }
+          case Error(_) -> {}
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  # ============================================================
+  # APPLE MAIL EMAILS
+  # ============================================================
+
+  t.test('apple_mail_quoted_printable', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'Message-ID: <abc123def456@icloud.com>
+Subject: Apple Mail Test Email
+From: Jane Doe <jane.doe@icloud.com>
+To: Recipient <recipient@example.com>
+Date: Fri, 18 Jan 2026 16:45:00 -0800
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary=B7FE4B5C-AE1B-4CBE-BF6D-0123456789AB
+X-Mailer: Apple Mail (2.3605.60.0.2)
+
+--B7FE4B5C-AE1B-4CBE-BF6D-0123456789AB
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/plain;
+	charset=utf-8
+
+Hi there,
+
+This is an email sent from Apple Mail on macOS.
+
+Best,
+Jane
+
+--B7FE4B5C-AE1B-4CBE-BF6D-0123456789AB
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/html;
+	charset=utf-8
+
+<html><head><meta http-equiv=3D"Content-Type" content=3D"text/html; =charset=3Dutf-8"></head><body style=3D"word-wrap: break-word; -webkit-nbsp-mode: =space; -webkit-line-break: after-white-space; color: rgb(0, 0, 0); font-size: =14px; font-family: Helvetica, Arial, sans-serif;"><div>Hi there,</div><div><br>=</div><div>This is an email sent from Apple Mail on =macOS.</div><div><br></div><div>Best,<br>Jane</div></body></html>
+
+--B7FE4B5C-AE1B-4CBE-BF6D-0123456789AB--
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.addresses.from.address, 'jane.doe@icloud.com')
+        t.equal(msg.subject, 'Apple Mail Test Email')
+        t.equal(msg.mime.content_type, 'multipart/alternative')
+        t.equal(msg.mime.content_transfer_encoding, '7bit')
+
+        match msg.text_body {
+          case Some(body) -> t.true(body.contains?('Apple Mail on macOS'))
+          case None -> t.equal('should have text body', 'got none')
+        }
+
+        match msg.html_body {
+          case Some(body) -> {
+            t.true(body.contains?('Apple Mail'))
+            t.true(body.contains?('Helvetica, Arial, sans-serif'))
+          }
+          case None -> t.equal('should have html body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  # ============================================================
+  # INTERNATIONALIZED EMAILS
+  # ============================================================
+
+  t.test('utf8_subject_and_body', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: Jose Granados <jose@ejemplo.com>
+To: Maria Garcia Lopez <maria@ejemplo.com>
+Subject: =?UTF-8?B?Q2Fmw6kgZW4gUGFyw6dzIC0gQ2Fmw6k=?=
+Date: Sat, 19 Jan 2026 11:00:00 +0000
+Message-ID: <intl123@ejemplo.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+Hola Mar=C3=ADa,
+
+=C2=BFC=C3=B3mo est=C3=A1s? =C2=BFC=C3=B3mo est=C3=A1 el clima en Par=C3=ADs?
+
+El caf=C3=A9 est=C3=A1 delicioso aqu=C3=AD en Buenos Aires.
+
+Saludos,
+Jos=C3=A9
+
+=E6=97=A5=E6=9C=AC=E8=AA=9E=E3=81=AE=E3=83=86=E3=82=B9=E3=83=88=E3=81=A7=E3=81=99
+한글 텍스트
+Текст на русском
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.addresses.from.address, 'jose@ejemplo.com')
+        t.equal(msg.subject, 'Café en Parçs - Café')
+
+        t.equal(msg.mime.charset, Option.Some('UTF-8'))
+        t.equal(msg.mime.content_transfer_encoding, 'quoted-printable')
+
+        match msg.text_body {
+          case Some(body) -> {
+            t.true(body.contains?('Hola'))
+            t.true(body.contains?('Jos'))
+          }
+          case None -> t.equal('should have text body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('non_ascii_rfc2047_addresses', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: =?UTF-8?B?QW5kcsOpIE1hcnRpbmV6?= <andre.martinez@ejemplo.es>
+To: =?UTF-8?B?Sm9zw6kgR2FyY8OtYQ==?= <jose.garcia@ejemplo.es>
+Subject: Internationalized Email Addresses (EAI)
+Date: Sun, 20 Jan 2026 12:30:00 +0000
+Message-ID: <eai456@ejemplo.es>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+Este es un correo electr=C3=B3nico con direcciones internacionalizadas.
+
+From: =?UTF-8?B?QW5kcsOpIE1hcnRpbmV6?=
+To: =?UTF-8?B?Sm9zw6kgR2FyY8OtYQ==?=
+
+Los nombres est=C3=A1n codificados en RFC 2047.
+
+Saludos,
+Andr=C3=A9
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.subject, 'Internationalized Email Addresses (EAI)')
+
+        if msg.addresses.to.size > 0 {
+          match msg.addresses.to.get(0) {
+            case Ok(addr) -> {
+              match addr.name {
+                case Some(name) -> t.true(name.size > 0)
+                case None -> {}
+              }
+            }
+            case Error(_) -> {}
+          }
+        }
+
+        match msg.addresses.from.name {
+          case Some(name) -> t.true(name.size > 0)
+          case None -> {}
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  # ============================================================
+  # NESTED MULTIPART EMAILS
+  # ============================================================
+
+  t.test('nested_multipart_structure', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Nested Multipart Structure
+Date: Mon, 21 Jan 2026 10:00:00 +0000
+Message-ID: <nested789@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=outer_boundary
+
+--outer_boundary
+Content-Type: multipart/alternative; boundary=inner_text_html
+
+--inner_text_html
+Content-Type: text/plain; charset=UTF-8
+
+Plain text body here.
+--inner_text_html
+Content-Type: text/html; charset=UTF-8
+
+<html><body>HTML body here</body></html>
+--inner_text_html--
+--outer_boundary
+Content-Type: multipart/related; boundary=related_images
+
+--related_images
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+<html><body><img src=3D"cid:image1@example.com" alt=3D"Embedded Image"></body></html>
+--related_images
+Content-Type: image/png
+Content-ID: <image1@example.com>
+Content-Disposition: inline; filename="image1.png"
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==
+--related_images--
+--outer_boundary
+Content-Type: application/pdf; name="document.pdf"
+Content-Disposition: attachment; filename="document.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjUKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSL0ZpbHRlci9GbGF0ZURl
+Y29kZT4+CnN0cmVhbQp4nDPz5XATAAAEQ2Z2AAAQaWF1dGhvcml6ZWQKZW5kc3RyZWFtCmVuZG9i
+ago=
+--outer_boundary--
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.mime.content_type, 'multipart/mixed')
+
+        match msg.text_body {
+          case Some(body) -> t.true(body.contains?('Plain text'))
+          case None -> t.equal('should have text body', 'got none')
+        }
+
+        match msg.html_body {
+          case Some(body) -> t.true(body.contains?('HTML body'))
+          case None -> t.equal('should have html body', 'got none')
+        }
+
+        t.equal(msg.attachments.size, 2)
+
+        match msg.attachments.get(0) {
+          case Ok(att) -> {
+            t.equal(att.content_type, 'image/png')
+            t.equal(att.content_disposition, 'inline')
+            t.equal(att.content_id, Option.Some('image1@example.com'))
+          }
+          case Error(_) -> {}
+        }
+
+        match msg.attachments.get(1) {
+          case Ok(att) -> {
+            t.equal(att.content_type, 'application/pdf')
+            t.equal(att.content_disposition, 'attachment')
+          }
+          case Error(_) -> {}
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  # ============================================================
+  # SPECIAL FILENAMES (RFC 2231)
+  # ============================================================
+
+  t.test('special_filenames_rfc2231', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Email with Special Characters in Filename
+Date: Tue, 22 Jan 2026 14:00:00 +0000
+Message-ID: <special101@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=bnd
+
+--bnd
+Content-Type: text/plain; charset=UTF-8
+
+Please find attached files with special characters.
+--bnd
+Content-Type: application/pdf; name*=UTF-8\'\'document%20with%20spaces.pdf
+Content-Disposition: attachment; filename*=UTF-8\'\'document%20with%20spaces.pdf
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjUKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSL0ZpbHRlci9GbGF0ZURl
+Y29kZT4+CnN0cmVhbQp4nDPz5XATAAAEQ2Z2AAAQaWF1dGhvcml6ZWQKZW5kc3RyZWFtCmVuZG9i
+ago=
+--bnd
+Content-Type: text/plain; name*=UTF-8\'\'%C3%A9%20document%20with%20%C3%A9.txt
+Content-Disposition: attachment; filename*=UTF-8\'\'%C3%A9%20document%20with%20%C3%A9.txt
+Content-Transfer-Encoding: base64
+
+RmlsZSB3aXRoIG5vbi1BU0NJIGNoYXJhY3RlcnM=
+--bnd
+Content-Type: application/octet-stream; name*=UTF-8\'\'%D1%84%D0%B0%D0%B9%D0%BB.bin
+Content-Disposition: attachment; filename*=UTF-8\'\'%D1%84%D0%B0%D0%B9%D0%BB.bin
+Content-Transfer-Encoding: base64
+
+SGVsbG8gV29ybGQ=
+--bnd--
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.attachments.size, 3)
+
+        match msg.attachments.get(0) {
+          case Ok(att) -> {
+            t.equal(att.content_type, 'application/pdf')
+            t.equal(att.content_disposition, 'attachment')
+          }
+          case Error(_) -> {}
+        }
+
+        match msg.attachments.get(1) {
+          case Ok(att) -> t.equal(att.content_type, 'text/plain')
+          case Error(_) -> {}
+        }
+
+        match msg.attachments.get(2) {
+          case Ok(att) -> t.equal(att.content_type, 'application/octet-stream')
+          case Error(_) -> {}
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  # ============================================================
+  # EDGE CASE TESTS
+  # ============================================================
+
+  t.test('email_with_many_received_headers', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'Received: from mail1.example.com (mail1.example.com [192.0.2.1])
+	by mx.google.com with ESMTP id abc123
+	for <user@gmail.com>;
+	Wed, 15 Jan 2026 10:30:00 -0800 (PST)
+Received: from mail2.example.com (mail2.example.com [192.0.2.2])
+	by mail1.example.com with ESMTP id def456
+	for <user@gmail.com>;
+	Wed, 15 Jan 2026 10:29:55 -0800 (PST)
+Received: from localhost (localhost [127.0.0.1])
+	by mail2.example.com with ESMTP id ghi789
+	for <user@gmail.com>;
+	Wed, 15 Jan 2026 10:29:50 -0800 (PST)
+From: sender@example.com
+To: user@gmail.com
+Subject: Multiple Received Headers
+Date: Wed, 15 Jan 2026 10:30:00 -0800 (PST)
+Message-ID: <multi-recv@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Email with multiple Received headers tracking the path.
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.subject, 'Multiple Received Headers')
+        t.equal(msg.addresses.from.address, 'sender@example.com')
+
+        match msg.text_body {
+          case Some(body) -> t.true(body.contains?('Received headers'))
+          case None -> t.equal('should have text body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('email_with_authentication_results', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'Authentication-Results: mx.google.com;
+       spf=pass (google.com: domain of sender@example.com designates 192.0.2.1 as permitted sender) smtp.mailfrom=sender@example.com;
+       dkim=pass header.i=@example.com header.s=s1 header.b=fake_value;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=example.com
+Received-SPF: pass (google.com: domain of sender@example.com designates 192.0.2.1 as permitted sender)
+ARC-Seal: i=1; a=rsa-sha256; t=1736964600; cv=none;
+        d=google.com; s=arc-20160816;
+        b=fake_signature_value
+From: sender@example.com
+To: user@example.com
+Subject: Authentication Headers
+Date: Wed, 15 Jan 2026 10:30:00 -0800
+Message-ID: <auth@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Email with authentication headers (SPF, DKIM, DMARC, ARC).
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.subject, 'Authentication Headers')
+        t.equal(msg.addresses.from.address, 'sender@example.com')
+
+        let mut has_auth_results = false
+
+        for pair in msg.extra_headers.iter {
+          if pair.0 == 'Authentication-Results' { has_auth_results = true }
+        }
+
+        t.true(has_auth_results)
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+}

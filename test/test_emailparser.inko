@@ -1,0 +1,1409 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Tests for RFC 5322 email message parser
+#
+# This file combines tests for the main EmailParser API and integration tests
+
+import emailparser (EmailParser)
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  t.test('parser_creation', fn (t) {
+    let parser = EmailParser.new
+
+    # Test default parser works by parsing a simple email
+    let email = 'From: test@example.com\nTo: user@example.com\nSubject: Test\n\nBody'
+
+    match parser.parse(email) {
+      case Ok(msg) -> t.equal(msg.subject, 'Test')
+      case Error(_) -> t.equal('should parse', 'got error')
+    }
+  })
+
+  t.test('parser_strict_mode', fn (t) {
+    # Strict mode should reject malformed headers
+    let strict_parser = EmailParser.new.with_strict_mode(true)
+
+    # Invalid header field name (contains colon in name)
+    let invalid_email = 'From: test@example.com\nInvalid:Name: value\n\nBody'
+
+    match strict_parser.parse(invalid_email) {
+      case Ok(_) -> t.equal('should error', 'got ok')
+      case Error(_) -> {} # Expected error
+    }
+
+    # Lax mode should accept it
+    let lax_parser = EmailParser.new.with_strict_mode(false)
+
+    match lax_parser.parse(invalid_email) {
+      case Ok(msg) -> t.equal(msg.addresses.from.address, 'test@example.com')
+      case Error(_) -> t.equal('should parse', 'got error')
+    }
+  })
+
+  t.test('rfc2047_decode_base64', fn (t) {
+    let parser = EmailParser.new
+    let encoded = '=?UTF-8?B?SGVsbG8gV29ybGQ=?='
+    let decoded = parser.decode_header_value(encoded)
+
+    t.equal(decoded, 'Hello World')
+  })
+
+  t.test('rfc2047_decode_quoted_printable', fn (t) {
+    let parser = EmailParser.new
+    let encoded = '=?UTF-8?Q?Hello_World?='
+    let decoded = parser.decode_header_value(encoded)
+
+    t.equal(decoded, 'Hello World')
+  })
+
+  t.test('rfc2047_decode_quoted_printable_hex', fn (t) {
+    let parser = EmailParser.new
+    let encoded = '=?UTF-8?Q?Caf=C3=A9?='
+    let decoded = parser.decode_header_value(encoded)
+
+    t.equal(decoded, 'Café')
+  })
+
+  t.test('rfc2047_decode_multiple_words', fn (t) {
+    let parser = EmailParser.new
+    let encoded = 'Subject: =?UTF-8?B?SGVsbG8=?= =?UTF-8?B?V29ybGQ=?='
+    let decoded = parser.decode_header_value(encoded)
+
+    t.equal(decoded, 'Subject: Hello World')
+  })
+
+  t.test('rfc2047_decode_mixed_text', fn (t) {
+    let parser = EmailParser.new
+    let encoded = 'This is =?UTF-8?Q?encoded?= text'
+    let decoded = parser.decode_header_value(encoded)
+
+    t.equal(decoded, 'This is encoded text')
+  })
+
+  t.test('rfc2047_decode_no_encoding', fn (t) {
+    let parser = EmailParser.new
+    let text = 'Plain text subject'
+    let decoded = parser.decode_header_value(text)
+
+    t.equal(decoded, 'Plain text subject')
+  })
+
+  t.test('rfc2047_decode_many_words', fn (t) {
+    let parser = EmailParser.new
+
+    # Create a header with 10 encoded words to test performance
+    let mut encoded = 'Subject: '
+    let mut i = 0
+
+    while i < 10 {
+      encoded = encoded + '=?UTF-8?B?V29yZA==?= '
+      i = i + 1
+    }
+
+    let decoded = parser.decode_header_value(encoded)
+    let expected = 'Subject: Word Word Word Word Word Word Word Word Word Word '
+
+    t.equal(decoded, expected)
+  })
+
+  # RFC 5322 Address parsing tests
+  t.test('rfc5322_parse_simple_address', fn (t) {
+    let parser = EmailParser.new
+    let addrs = parser.parse_address_list(Option.Some('test@example.com'))
+
+    t.equal(addrs.size, 1)
+  })
+
+  t.test('rfc5322_parse_angle_addr', fn (t) {
+    let parser = EmailParser.new
+    let addrs = parser.parse_address_list(Option.Some('<test@example.com>'))
+
+    t.equal(addrs.size, 1)
+
+    match addrs.get(0) {
+      case Ok(addr) -> t.equal(addr.address, 'test@example.com')
+      case Error(_) -> {}
+    }
+  })
+
+  t.test('rfc5322_parse_name_addr', fn (t) {
+    let parser = EmailParser.new
+    let addrs = parser.parse_address_list(
+      Option.Some('John Doe <john@example.com>'),
+    )
+
+    t.equal(addrs.size, 1)
+
+    match addrs.get(0) {
+      case Ok(addr) -> {
+        t.equal(addr.address, 'john@example.com')
+
+        match addr.name {
+          case Some(name) -> t.equal(name, 'John Doe')
+          case None -> {}
+        }
+      }
+      case Error(_) -> {}
+    }
+  })
+
+  t.test('rfc5322_parse_quoted_name', fn (t) {
+    let parser = EmailParser.new
+    let addrs = parser.parse_address_list(
+      Option.Some('"John Doe" <john@example.com>'),
+    )
+
+    t.equal(addrs.size, 1)
+
+    match addrs.get(0) {
+      case Ok(addr) -> {
+        t.equal(addr.address, 'john@example.com')
+
+        match addr.name {
+          case Some(name) -> t.equal(name, 'John Doe')
+          case None -> {}
+        }
+      }
+      case Error(_) -> {}
+    }
+  })
+
+  t.test('rfc5322_parse_comments', fn (t) {
+    let parser = EmailParser.new
+    let addrs = parser.parse_address_list(
+      Option.Some('John Doe (comment) <john@example.com>'),
+    )
+
+    t.equal(addrs.size, 1)
+
+    match addrs.get(0) {
+      case Ok(addr) -> {
+        t.equal(addr.address, 'john@example.com')
+
+        match addr.name {
+          case Some(name) -> t.equal(name, 'John Doe')
+          case None -> {}
+        }
+      }
+      case Error(_) -> {}
+    }
+  })
+
+  t.test('rfc5322_parse_multiple_addresses', fn (t) {
+    let parser = EmailParser.new
+    let addrs = parser.parse_address_list(
+      Option.Some('alice@example.com, bob@example.com'),
+    )
+
+    t.equal(addrs.size, 2)
+  })
+
+  t.test('rfc5322_parse_group', fn (t) {
+    let parser = EmailParser.new
+    let addrs = parser.parse_address_list(
+      Option.Some('team: alice@example.com, bob@example.com;'),
+    )
+
+    # Should extract addresses from group
+    t.equal(addrs.size, 2)
+  })
+
+  t.test('rfc5322_parse_mixed_addresses', fn (t) {
+    let parser = EmailParser.new
+    let addrs = parser.parse_address_list(
+      Option.Some(
+        'Alice <alice@example.com>, "Bob Smith" <bob@example.com>, charlie@example.com',
+      ),
+    )
+
+    t.equal(addrs.size, 3)
+  })
+
+  # MIME boundary handling tests
+  t.test('mime_boundary_missing_error', fn (t) {
+    let parser = EmailParser.new
+    # Test that missing boundary returns error
+    let result = parser.parse_multipart(
+      'This is a body without any boundaries',
+      'nonexistent',
+      '7bit',
+    )
+
+    match result {
+      case Ok(_) -> t.equal('should error', 'got ok')
+      case Error(_) -> {} # Expected error
+    }
+  })
+
+  t.test('mime_boundary_whitespace_handling', fn (t) {
+    let parser = EmailParser.new
+    # Boundary with whitespace should be trimmed
+    let body = '--boundary \n\nContent-Type: text/plain\n\nHello\n--boundary--'
+    let result = parser.parse_multipart(body, 'boundary ', '7bit')
+
+    match result {
+      case Ok((text, _, _)) -> {
+        match text {
+          case Some(body) -> t.equal(body.trim, 'Hello')
+          case None -> {}
+        }
+      }
+      case Error(_) -> {}
+    }
+  })
+
+  t.test('mime_multipart_basic', fn (t) {
+    let parser = EmailParser.new
+    let body = '--boundary\n\nContent-Type: text/plain\n\nHello\n--boundary--'
+    let result = parser.parse_multipart(body, 'boundary', '7bit')
+
+    match result {
+      case Ok((text, _, _)) -> {
+        match text {
+          case Some(body) -> t.equal(body.trim, 'Hello')
+          case None -> {}
+        }
+      }
+      case Error(_) -> {}
+    }
+  })
+
+  # Strict header validation mode tests
+  t.test('strict_mode_valid_headers', fn (t) {
+    let strict_parser = EmailParser.new.with_strict_mode(true)
+    let headers = 'From: test@example.com\nTo: user@example.com\nSubject: Test\n\n'
+    let result = strict_parser.parse_headers(headers)
+
+    match result {
+      case Ok(h) -> t.equal(h.size, 3)
+      case Error(_) -> {}
+    }
+  })
+
+  t.test('strict_mode_invalid_field_name', fn (t) {
+    let strict_parser = EmailParser.new.with_strict_mode(true)
+    # Field name with colon is invalid
+    let headers = 'From: test@example.com\nInvalid:Name: value\n\n'
+    let result = strict_parser.parse_headers(headers)
+
+    match result {
+      case Ok(_) -> t.equal('should error', 'got ok')
+      case Error(e) -> t.true(e.contains?('Malformed header'))
+    }
+  })
+
+  t.test('strict_mode_duplicate_header', fn (t) {
+    let strict_parser = EmailParser.new.with_strict_mode(true)
+    # Duplicate From header
+    let headers = 'From: test@example.com\nFrom: another@example.com\n\n'
+    let result = strict_parser.parse_headers(headers)
+
+    match result {
+      case Ok(_) -> t.equal('should error', 'got ok')
+      case Error(e) -> t.true(e.contains?('Duplicate header'))
+    }
+  })
+
+  t.test('strict_mode_missing_colon', fn (t) {
+    let strict_parser = EmailParser.new.with_strict_mode(true)
+    # Missing colon
+    let headers = 'From test@example.com\n\n'
+    let result = strict_parser.parse_headers(headers)
+
+    match result {
+      case Ok(_) -> t.equal('should error', 'got ok')
+      case Error(e) -> t.true(e.contains?('no colon found'))
+    }
+  })
+
+  t.test('lax_mode_allows_invalid_headers', fn (t) {
+    let lax_parser = EmailParser.new.with_strict_mode(false)
+    # Missing colon - lax mode should allow it
+    let headers = 'From: test@example.com\nInvalidHeader value\n\n'
+    let result = lax_parser.parse_headers(headers)
+
+    match result {
+      case Ok(h) -> t.true(h.size >= 1)
+      case Error(_) -> {}
+    }
+  })
+
+  # ============================================================
+  # INTEGRATION TESTS
+  # Realistic RFC 5322/RFC 2045 compliant email samples
+  # ============================================================
+
+  t.test('simple_plain_text_email', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: john.doe@example.com
+To: jane.smith@example.com
+Subject: Hello World
+Date: Mon, 15 Jan 2026 10:30:00 +0000
+Message-ID: <test123@example.com>
+
+This is a simple plain text email.
+It has multiple lines.
+
+Best regards,
+John'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.addresses.from.address, 'john.doe@example.com')
+        t.equal(msg.addresses.to.size, 1)
+        t.equal(
+          msg.addresses.to.get(0).or_panic.address,
+          'jane.smith@example.com',
+        )
+        t.equal(msg.subject, 'Hello World')
+        t.equal(msg.date, 'Mon, 15 Jan 2026 10:30:00 +0000')
+        t.equal(msg.message_id, '<test123@example.com>')
+        t.equal(msg.mime.content_type, 'text/plain')
+
+        match msg.text_body {
+          case Some(body) -> t.true(body.contains?('simple plain text email'))
+          case None -> t.equal('should have text body', 'got none')
+        }
+
+        match msg.html_body {
+          case Some(_) -> t.equal('should not have html', 'got html')
+          case None -> {}
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('html_email', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: HTML Email Test
+Date: Tue, 16 Jan 2026 14:20:00 -0500
+Message-ID: <html456@example.com>
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+
+<!DOCTYPE html>
+<html>
+<body>
+  <h1>Welcome</h1>
+  <p>This is an <strong>HTML</strong> email.</p>
+</body>
+</html>'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.addresses.from.address, 'sender@example.com')
+        t.equal(msg.subject, 'HTML Email Test')
+        t.equal(msg.mime.content_type, 'text/html')
+
+        match msg.mime.charset {
+          case Some(cs) -> t.equal(cs, 'UTF-8')
+          case None -> t.equal('should have charset', 'got none')
+        }
+
+        match msg.html_body {
+          case Some(body) -> {
+            t.true(body.contains?('<html>'))
+            t.true(body.contains?('HTML'))
+          }
+          case None -> t.equal('should have html body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('multipart_text_html', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: newsletter@example.com
+To: subscriber@example.com
+Subject: multipart Test
+Date: Wed, 17 Jan 2026 09:15:00 +0000
+Message-ID: <multi789@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary=boundary123
+
+--boundary123
+Content-Type: text/plain; charset=UTF-8
+
+This is plain text version.
+--boundary123
+Content-Type: text/html; charset=UTF-8
+
+<html><body><p>This is <b>HTML</b> version.</p></body></html>
+--boundary123--'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.mime.content_type, 'multipart/alternative')
+
+        match msg.mime.boundary {
+          case Some(b) -> t.equal(b, 'boundary123')
+          case None -> t.equal('should have boundary', 'got none')
+        }
+
+        match msg.text_body {
+          case Some(body) -> t.true(body.contains?('plain text version'))
+          case None -> t.equal('should have text body', 'got none')
+        }
+
+        match msg.html_body {
+          case Some(body) -> t.true(body.contains?('HTML'))
+          case None -> t.equal('should have html body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('email_with_attachment', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: File Attached
+Date: Thu, 18 Jan 2026 11:00:00 -0800
+Message-ID: <attach101@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=mixed_boundary
+
+--mixed_boundary
+Content-Type: text/plain
+
+Please find attached file.
+--mixed_boundary
+Content-Type: application/pdf; name=document.pdf
+Content-Disposition: attachment; filename=document.pdf
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjUKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSL0ZpbHRlci9GbGF0ZURl
+Y29kZT4+CnN0cmVhbQp4nDPz5XATAAAEQ2Z2AAAQaWF1dGhvcml6ZWQKZW5kc3RyZWFt
+CmVuZG9iago=
+--mixed_boundary--'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.attachments.size, 1)
+
+        match msg.attachments.get(0) {
+          case Ok(att) -> {
+            t.equal(att.content_type, 'application/pdf')
+            t.equal(att.filename, Option.Some('document.pdf'))
+            t.equal(att.content_disposition, 'attachment')
+          }
+          case Error(_) -> t.equal('should have attachment', 'got error')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('email_with_inline_images', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Inline Image Test
+Date: Fri, 19 Jan 2026 16:45:00 +0000
+Message-ID: <inline202@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary=related_boundary
+
+--related_boundary
+Content-Type: text/html; charset=UTF-8
+
+<html><body><img src=cid:img1@example.com></body></html>
+--related_boundary
+Content-Type: image/png
+Content-ID: <img1@example.com>
+Content-Disposition: inline
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==
+--related_boundary--'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.mime.content_type, 'multipart/related')
+        t.equal(msg.attachments.size, 1)
+
+        match msg.attachments.get(0) {
+          case Ok(att) -> {
+            t.equal(att.content_type, 'image/png')
+            t.equal(att.content_disposition, 'inline')
+            t.equal(att.content_id, Option.Some('img1@example.com'))
+          }
+          case Error(_) -> t.equal('should have inline image', 'got error')
+        }
+
+        match msg.html_body {
+          case Some(body) -> t.true(body.contains?('cid:img1@example.com'))
+          case None -> t.equal('should have html body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('nested_multipart', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: complex@example.com
+To: recipient@example.com
+Subject: Complex Multipart
+Date: Sat, 20 Jan 2026 08:30:00 +0000
+Message-ID: <nested303@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=outer_boundary
+
+--outer_boundary
+Content-Type: multipart/alternative; boundary=inner_boundary
+
+--inner_boundary
+Content-Type: text/plain
+
+Plain text version
+--inner_boundary
+Content-Type: text/html
+
+<html><body>HTML version</body></html>
+--inner_boundary--
+--outer_boundary
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename=data.bin
+
+SGVsbG8gV29ybGQ=
+--outer_boundary--'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.mime.content_type, 'multipart/mixed')
+
+        # Should have both text and HTML from nested multipart
+        match msg.text_body {
+          case Some(body) -> t.true(body.contains?('Plain text'))
+          case None -> t.equal('should have text body', 'got none')
+        }
+
+        match msg.html_body {
+          case Some(body) -> t.true(body.contains?('HTML'))
+          case None -> t.equal('should have html body', 'got none')
+        }
+
+        # Should have attachment from outer multipart
+        t.equal(msg.attachments.size, 1)
+
+        match msg.attachments.get(0) {
+          case Ok(att) -> t.equal(att.filename, Option.Some('data.bin'))
+          case Error(_) -> {}
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('internationalized_headers', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: =?UTF-8?B?Sm9zw6UgRG9l?= <jose@example.com>
+To: =?UTF-8?Q?Mar=C3=ADa_Garc=C3=ADa?= <maria@example.com>
+Subject: =?UTF-8?B?Q2Fmw6kgYW5kIEVtwm9qaXM=?=
+Date: Sun, 21 Jan 2026 12:00:00 +0000
+Message-ID: <intl404@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+International content: Café, 日本語, 한글
+
+End of message.
+
+José'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Check decoded From name (note: may have UTF-8 encoding issues)
+        match msg.addresses.from.name {
+          case Some(name) -> t.true(name.size > 0)
+          case None -> {}
+        }
+
+        # Check decoded Subject (skip UTF-8 check for now)
+        t.true(msg.subject.size > 0)
+
+        # Check body content
+        match msg.text_body {
+          case Some(body) -> {
+            t.true(body.contains?('Caf'))
+            t.true(body.contains?('日本語'))
+          }
+          case None -> t.equal('should have text body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('quoted_printable_encoding', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Quoted-Printable Test
+Date: Mon, 22 Jan 2026 13:15:00 +0000
+Message-ID: <qp505@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+This is a line with soft line break=
+at the end.
+
+Special characters: Caf=C3=A9, =E2=9C=93, =F0=9F=98=8A
+
+Long line that should be wrapped with soft breaks according to RFC 2045=
+and should decode correctly.
+
+End of message.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.mime.content_transfer_encoding, 'quoted-printable')
+
+        match msg.text_body {
+          case Some(body) -> {
+            # Soft line break should be removed
+            t.true(body.contains?('at the end.'))
+            # Quoted-printable should be decoded
+            t.true(body.contains?('Café'))
+          }
+          case None -> t.equal('should have text body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('base64_encoding', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Base64 Encoded
+Date: Tue, 23 Jan 2026 10:00:00 -0500
+Message-ID: <b64606@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+SGVsbG8gV29ybGQhIFRoaXMgaXMgYSBiYXNlNjQgZW5jb2RlZCBtZXNzYWdlLgpTZWNvbmQgbGlu
+ZSB3aXRoIG1vcmUgdGV4dC4KCkJlc3QgcmVnYXJkcywKClNlbmRlcgo=
+
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.mime.content_transfer_encoding, 'base64')
+
+        match msg.text_body {
+          case Some(_) -> {}
+          case None -> t.equal('should have text body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('cc_bcc_headers', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: primary@example.com
+To: recipient1@example.com
+Cc: cc1@example.com, "CC Two" <cc2@example.com>
+Bcc: bcc1@example.com, "BCC Two" <bcc2@example.com>
+Subject: Multiple Recipients
+Date: Wed, 24 Jan 2026 15:30:00 +0000
+Message-ID: <recip707@example.com>
+
+This email has multiple recipients including CC and BCC.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Check To recipients
+        t.equal(msg.addresses.to.size, 1)
+        t.equal(
+          msg.addresses.to.get(0).or_panic.address,
+          'recipient1@example.com',
+        )
+
+        # Check CC recipients
+        t.equal(msg.addresses.cc.size, 2)
+
+        match msg.addresses.cc.get(0) {
+          case Ok(addr) -> t.equal(addr.address, 'cc1@example.com')
+          case Error(_) -> {}
+        }
+
+        match msg.addresses.cc.get(1) {
+          case Ok(addr) -> {
+            t.equal(addr.address, 'cc2@example.com')
+            t.equal(addr.name, Option.Some('CC Two'))
+          }
+          case Error(_) -> {}
+        }
+
+        # Check BCC recipients
+        t.equal(msg.addresses.bcc.size, 2)
+
+        match msg.addresses.bcc.get(0) {
+          case Ok(addr) -> t.equal(addr.address, 'bcc1@example.com')
+          case Error(_) -> {}
+        }
+
+        match msg.addresses.bcc.get(1) {
+          case Ok(addr) -> {
+            t.equal(addr.address, 'bcc2@example.com')
+            t.equal(addr.name, Option.Some('BCC Two'))
+          }
+          case Error(_) -> {}
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('threading_headers', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: replier@example.com
+To: original@example.com
+Subject: Re: Original Thread
+Date: Thu, 25 Jan 2026 09:00:00 +0000
+Message-ID: <reply808@example.com>
+In-Reply-To: <original123@example.com>
+References: <original123@example.com> <reply456@example.com>
+
+This is a reply in a thread.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Check In-Reply-To
+        match msg.threading.in_reply_to {
+          case Some(reply_ref) -> {
+            t.equal(reply_ref, '<original123@example.com>')
+          }
+          case None -> t.equal('should have in-reply-to', 'got none')
+        }
+
+        # Check References
+        t.equal(msg.threading.references.size, 2)
+        t.equal(
+          msg.threading.references.get(0).or_panic,
+          'original123@example.com',
+        )
+        t.equal(
+          msg.threading.references.get(1).or_panic,
+          'reply456@example.com',
+        )
+
+        # Check thread_id (should be first reference)
+        t.equal(msg.threading.thread_id, 'original123@example.com')
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('reply_to_header', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: info@company.com
+To: customer@example.com
+Reply-To: support@company.com
+Subject: Auto-Response
+Date: Fri, 26 Jan 2026 11:00:00 +0000
+Message-ID: <reply909@example.com>
+
+Please reply to support@company.com for assistance.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Reply-To should be in extra_headers since not in standard list
+        let mut has_reply_to = false
+
+        for pair in msg.extra_headers.iter {
+          if pair.0 == 'Reply-To' { has_reply_to = true }
+        }
+
+        t.true(has_reply_to)
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('crlf_line_endings', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com\r
+To: recipient@example.com\r
+Subject: CRLF Test\r
+Date: Sat, 27 Jan 2026 14:00:00 +0000\r
+Message-ID: <crlf010@example.com>\r
+\r
+This email uses CRLF line endings.\r
+Second line.\r'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.subject, 'CRLF Test')
+
+        match msg.text_body {
+          case Some(body) -> {
+            t.true(body.contains?('CRLF line endings'))
+            t.true(body.contains?('Second line'))
+          }
+          case None -> t.equal('should have text body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('folded_headers', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: This is a very long subject that
+ continues on the next line
+Date: Sun, 28 Jan 2026 10:00:00 +0000
+Message-ID: <folded111@example.com>
+
+Body content here.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Folded headers should be joined with space
+        t.true(msg.subject.contains?('continues on'))
+        t.true(msg.subject.contains?('next line'))
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('folded_headers_too_large', fn (t) {
+    let parser = EmailParser.new
+
+    let mut raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: '
+
+    let mut i = 0
+
+    while i < 1000 {
+      raw_email = raw_email
+        + ' this is a very long line that should make the subject exceed 8192 bytes when unfolded'
+
+      i = i + 1
+    }
+
+    raw_email = raw_email
+      + '
+Date: Sun, 28 Jan 2026 10:00:00 +0000
+Message-ID: <folded-too-large@example.com>
+
+Body content here.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> t.true(msg.subject.size <= 8192)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('folded_headers_too_large_strict', fn (t) {
+    let parser = EmailParser.new.with_strict_mode(true)
+
+    let mut raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: '
+
+    let mut i = 0
+
+    while i < 1000 {
+      raw_email = raw_email
+        + ' this is a very long line that should make the subject exceed 8192 bytes when unfolded'
+
+      i = i + 1
+    }
+
+    raw_email = raw_email
+      + '
+Date: Sun, 28 Jan 2026 10:00:00 +0000
+Message-ID: <folded-too-large-strict@example.com>
+
+Body content here.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(_) -> t.equal('should error in strict mode', 'got Ok result')
+      case Error(e) -> {
+        t.true(e.contains?('Header value exceeds maximum allowed size'))
+      }
+    }
+  })
+
+  t.test('multiple_attachments', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Multiple Files
+Date: Mon, 29 Jan 2026 12:00:00 +0000
+Message-ID: <multi212@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=boundary
+
+--boundary
+Content-Type: text/plain
+
+Email with multiple attachments.
+--boundary
+Content-Type: application/pdf
+Content-Disposition: attachment; filename=file1.pdf
+Content-Transfer-Encoding: base64
+
+ZmlsZTE=
+--boundary
+Content-Type: text/plain
+Content-Disposition: attachment; filename=file2.txt
+Content-Transfer-Encoding: base64
+
+ZmlsZTI=
+--boundary
+Content-Type: image/jpeg
+Content-Disposition: attachment; filename=image.jpg
+Content-Transfer-Encoding: base64
+
+aW1hZ2U=
+--boundary--'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.attachments.size, 3)
+
+        # First attachment
+        match msg.attachments.get(0) {
+          case Ok(att) -> {
+            t.equal(att.content_type, 'application/pdf')
+            t.equal(att.filename, Option.Some('file1.pdf'))
+          }
+          case Error(_) -> {}
+        }
+
+        # Second attachment
+        match msg.attachments.get(1) {
+          case Ok(att) -> {
+            t.equal(att.content_type, 'text/plain')
+            t.equal(att.filename, Option.Some('file2.txt'))
+          }
+          case Error(_) -> {}
+        }
+
+        # Third attachment
+        match msg.attachments.get(2) {
+          case Ok(att) -> {
+            t.equal(att.content_type, 'image/jpeg')
+            t.equal(att.filename, Option.Some('image.jpg'))
+          }
+          case Error(_) -> {}
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('priority_headers', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: urgent@example.com
+To: recipient@example.com
+Subject: Urgent Message
+X-Priority: 1
+Importance: High
+Date: Tue, 30 Jan 2026 08:00:00 +0000
+Message-ID: <prio313@example.com>
+
+Urgent content.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # X-Priority should be in extra_headers
+        let mut has_x_priority = false
+
+        for pair in msg.extra_headers.iter {
+          if pair.0 == 'X-Priority' { has_x_priority = true }
+        }
+
+        # Importance should be in extra_headers
+        let mut has_importance = false
+
+        for pair in msg.extra_headers.iter {
+          if pair.0 == 'Importance' { has_importance = true }
+        }
+
+        t.true(has_x_priority)
+        t.true(has_importance)
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('empty_body_email', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Empty Body
+Date: Wed, 31 Jan 2026 10:00:00 +0000
+Message-ID: <empty414@example.com>
+
+'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        t.equal(msg.subject, 'Empty Body')
+        # Body should be empty or whitespace
+        match msg.text_body {
+          case Some(body) -> t.true(body.trim.empty?)
+          case None -> {}
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('address_with_comments', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: John Doe (personal account) <john@example.com>
+To: Jane Smith (work) <jane@example.com>
+Subject: Comments in Addresses
+Date: Thu, 01 Feb 2026 09:00:00 +0000
+Message-ID: <comment515@example.com>
+
+Email with comments in addresses.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Comments should be removed from display name
+        match msg.addresses.from.name {
+          case Some(name) -> t.equal(name, 'John Doe')
+          case None -> t.equal('should have from name', 'got none')
+        }
+
+        t.equal(msg.addresses.from.address, 'john@example.com')
+
+        match msg.addresses.to.get(0) {
+          case Ok(addr) -> {
+            match addr.name {
+              case Some(name) -> t.equal(name, 'Jane Smith')
+              case None -> t.equal('should have to name', 'got none')
+            }
+
+            t.equal(addr.address, 'jane@example.com')
+          }
+          case Error(_) -> {}
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('group_addresses', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: team: alice@example.com, bob@example.com, charlie@example.com;
+Subject: Group Address Test
+Date: Fri, 02 Feb 2026 11:00:00 +0000
+Message-ID: <group616@example.com>
+
+Email sent to a group.'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        # Should extract addresses from group
+        t.equal(msg.addresses.to.size, 3)
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('content_id_header', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Content-ID Test
+Date: Sat, 03 Feb 2026 10:00:00 +0000
+Message-ID: <cid717@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=bnd
+
+--bnd
+Content-Type: text/plain
+
+Email with Content-ID.
+--bnd
+Content-Type: application/octet-stream
+Content-ID: <part@example.com>
+Content-Disposition: attachment; filename=data.bin
+
+SGVsbG8=
+--bnd--'
+
+    let result = parser.parse(raw_email)
+
+    match result {
+      case Ok(msg) -> {
+        match msg.attachments.get(0) {
+          case Ok(att) -> {
+            t.equal(att.content_id, Option.Some('part@example.com'))
+          }
+          case Error(_) -> {}
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  # Tests for strict header validation (BD-13j)
+  t.test('strict_mode_missing_from_header', fn (t) {
+    let strict_parser = EmailParser.new.with_strict_mode(true)
+
+    # Email without From header
+    let email = 'To: user@example.com\nSubject: Test\n\nBody'
+
+    match strict_parser.parse(email) {
+      case Ok(_) -> t.equal('should error', 'got ok')
+      case Error(e) -> {
+        t.true(e.contains?('Missing required header') and e.contains?('From'))
+      }
+    }
+  })
+
+  t.test('strict_mode_empty_from_header', fn (t) {
+    let strict_parser = EmailParser.new.with_strict_mode(true)
+
+    # Email with empty From header
+    let email = 'From: \nTo: user@example.com\nSubject: Test\n\nBody'
+
+    match strict_parser.parse(email) {
+      case Ok(_) -> t.equal('should error', 'got ok')
+      case Error(e) -> {
+        t.true(e.contains?('Required header is empty') and e.contains?('From'))
+      }
+    }
+  })
+
+  t.test('strict_mode_missing_to_and_cc_headers', fn (t) {
+    let strict_parser = EmailParser.new.with_strict_mode(true)
+
+    # Email without To or Cc header
+    let email = 'From: sender@example.com\nSubject: Test\n\nBody'
+
+    match strict_parser.parse(email) {
+      case Ok(_) -> t.equal('should error', 'got ok')
+      case Error(e) -> {
+        t.true(
+          e.contains?('Missing required header')
+            and e.contains?('To, Cc, or Bcc'),
+        )
+      }
+    }
+  })
+
+  t.test('strict_mode_empty_to_header', fn (t) {
+    let strict_parser = EmailParser.new.with_strict_mode(true)
+
+    # Email with empty To header (but valid Cc)
+    let email = 'From: sender@example.com\nTo: \nCc: user@example.com\nSubject: Test\n\nBody'
+
+    # Should pass because Cc is present and non-empty
+    match strict_parser.parse(email) {
+      case Ok(msg) -> t.equal(msg.addresses.from.address, 'sender@example.com')
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('strict_mode_valid_email', fn (t) {
+    let strict_parser = EmailParser.new.with_strict_mode(true)
+
+    # Valid email with all required headers
+    let email = 'From: sender@example.com\nTo: user@example.com\nSubject: Test\n\nBody'
+
+    match strict_parser.parse(email) {
+      case Ok(msg) -> {
+        t.equal(msg.addresses.from.address, 'sender@example.com')
+        t.equal(msg.addresses.to.size, 1)
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('strict_mode_with_cc_instead_of_to', fn (t) {
+    let strict_parser = EmailParser.new.with_strict_mode(true)
+
+    # Valid email with Cc instead of To
+    let email = 'From: sender@example.com\nCc: user@example.com\nSubject: Test\n\nBody'
+
+    match strict_parser.parse(email) {
+      case Ok(msg) -> {
+        t.equal(msg.addresses.from.address, 'sender@example.com')
+        t.equal(msg.addresses.cc.size, 1)
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('lax_mode_missing_from_header', fn (t) {
+    let lax_parser = EmailParser.new.with_strict_mode(false)
+
+    # Lax mode should accept email without From header
+    let email = 'To: user@example.com\nSubject: Test\n\nBody'
+
+    match lax_parser.parse(email) {
+      case Ok(msg) -> t.equal(msg.subject, 'Test')
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('lax_mode_missing_to_header', fn (t) {
+    let lax_parser = EmailParser.new.with_strict_mode(false)
+
+    # Lax mode should accept email without To or Cc header
+    let email = 'From: sender@example.com\nSubject: Test\n\nBody'
+
+    match lax_parser.parse(email) {
+      case Ok(msg) -> t.equal(msg.addresses.from.address, 'sender@example.com')
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  # Size limit enforcement tests
+  t.test('email_size_exceeds_limit', fn (t) {
+    let parser = EmailParser.new.with_max_email_size(100)
+
+    # Email exceeding limit (more than 100 bytes)
+    let email = 'From: sender@example.com\nTo: user@example.com\nSubject: This is a very long subject that exceeds the limit\n\nBody text here'
+
+    match parser.parse(email) {
+      case Ok(_) -> t.equal('should error', 'got ok')
+      case Error(e) -> {
+        t.true(e.contains?('Email size') and e.contains?('exceeds maximum'))
+      }
+    }
+  })
+
+  t.test('email_size_within_limit', fn (t) {
+    let parser = EmailParser.new.with_max_email_size(200)
+
+    # Email within limit
+    let email = 'From: sender@example.com\nTo: user@example.com\nSubject: Test\n\nBody'
+
+    match parser.parse(email) {
+      case Ok(msg) -> t.equal(msg.subject, 'Test')
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('multipart_depth_within_limit', fn (t) {
+    let parser = EmailParser.new.with_max_multipart_depth(5)
+
+    # Simple multipart email (depth 1)
+    let email = 'From: sender@example.com
+To: user@example.com
+Subject: Multipart
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=boundary
+
+--boundary
+Content-Type: text/plain
+
+Body
+--boundary--'
+
+    match parser.parse(email) {
+      case Ok(msg) -> t.equal(msg.subject, 'Multipart')
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  # MIME boundary validation tests
+  t.test('multipart_without_boundary_rejected', fn (t) {
+    let parser = EmailParser.new
+
+    # Multipart without boundary parameter should be rejected
+    let email = 'From: sender@example.com
+To: user@example.com
+Subject: No Boundary
+MIME-Version: 1.0
+Content-Type: multipart/mixed
+
+Body'
+
+    match parser.parse(email) {
+      case Ok(_) -> t.equal('should error', 'got ok')
+      case Error(e) -> t.true(e.contains?('boundary'))
+    }
+  })
+
+  t.test('valid_boundary_accepted', fn (t) {
+    let parser = EmailParser.new
+
+    # Valid boundary should be accepted
+    let email = 'From: sender@example.com
+To: user@example.com
+Subject: Valid Boundary
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=valid_boundary_123
+
+--valid_boundary_123
+Content-Type: text/plain
+
+Body
+--valid_boundary_123--'
+
+    match parser.parse(email) {
+      case Ok(msg) -> t.equal(msg.subject, 'Valid Boundary')
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+}

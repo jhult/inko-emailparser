@@ -1,0 +1,354 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# ==============================================================================
+# Email Address Parsing Module
+# ==============================================================================
+#
+# This module provides parsing and manipulation of email addresses as specified
+# in RFC 5322 section 3.4. It handles the full complexity of email address
+# syntax including display names, comments, quoted strings, and angle brackets.
+#
+# ## Purpose
+#
+# Email addresses in headers can appear in various formats:
+# - Simple: `user@example.com`
+# - With display name: `John Doe <john@example.com>`
+# - Quoted: `"John Doe" <john@example.com>`
+# - With comments: `john@example.com (Work)`
+# - Multiple addresses: `a@example.com, b@example.com`
+#
+# This module provides:
+# - Parsing of single and multiple email addresses
+# - Extraction of display names and email addresses
+# - Comment removal from address strings
+# - String unquoting and validation
+#
+# ## Architecture
+#
+# The module provides:
+#
+# ### Types
+# - `EmailAddress`: Represents a parsed email address with name, address, and raw
+#
+# ### Public Functions
+# - `remove_comments`: Remove RFC 5322 comments from address strings
+# - `unquote_string`: Remove surrounding double quotes from strings
+# - `extract_display_name`: Extract display name from address string
+# - `is_valid_email_format`: Validate basic email format
+# - `parse_comma_separated_addresses`: Parse multiple addresses
+#
+# ### Private Functions
+# - `parse_address_list_impl`: Core parsing logic (used by main parser)
+#
+# ## RFC Compliance
+#
+# - RFC 5322 section 3.4: Address Specification
+#   - 3.4.1: Addr-Spec Specification
+#   - 3.4.2: Angle Bracket and Comment Syntax
+#
+import emailparser.ascii (
+  UNICODE_REPLACEMENT_CHAR_UTF8, is_alnum, is_domain_char,
+  is_email_local_special,
+)
+import emailparser.validation (is_quoted_string)
+import std.bytes (ByteArray)
+import std.option (Option)
+
+type pub EmailAddress {
+  let pub @name: Option[String]
+  let pub @address: String
+  let pub @raw: String
+}
+
+fn pub remove_comments(input: String) -> String {
+  let result = ByteArray.new
+  let mut i = 0
+  let mut depth = 0
+  let mut in_quote = false
+
+  while i < input.size {
+    match input.get(i) {
+      case Ok(byte) -> {
+        if byte == 34 and depth == 0 {
+          in_quote = if in_quote { false } else { true }
+          result.push(byte)
+        } else if byte == 40 and in_quote == false {
+          depth = depth + 1
+        } else if byte == 41 and in_quote == false {
+          if depth > 0 { depth = depth - 1 }
+        } else if depth == 0 {
+          result.push(byte)
+        }
+
+        i = i + 1
+      }
+      case Error(_) -> {
+        # Push Unicode replacement character U+FFFD (UTF-8: 239, 191, 189)
+        for byte in UNICODE_REPLACEMENT_CHAR_UTF8.iter { result.push(byte) }
+
+        i = i + 1
+      }
+    }
+  }
+
+  result.into_string
+}
+
+fn pub unquote_string(input: String) -> String {
+  if !is_quoted_string(input) { return input }
+
+  let inner = input.substring(1, input.size - 1)
+  let result = ByteArray.new
+  let mut i = 0
+
+  while i < inner.size {
+    match inner.get(i) {
+      case Ok(byte) -> {
+        if byte == 92 and i + 1 < inner.size {
+          i = i + 1
+
+          match inner.get(i) {
+            case Ok(escaped) -> result.push(escaped)
+            case Error(_) -> {
+              # Push Unicode replacement character U+FFFD (UTF-8: 239, 191, 189)
+              for byte in UNICODE_REPLACEMENT_CHAR_UTF8.iter {
+                result.push(byte)
+              }
+            }
+          }
+        } else {
+          result.push(byte)
+        }
+
+        i = i + 1
+      }
+      case Error(_) -> {
+        # Push Unicode replacement character U+FFFD (UTF-8: 239, 191, 189)
+        for byte in UNICODE_REPLACEMENT_CHAR_UTF8.iter { result.push(byte) }
+
+        i = i + 1
+      }
+    }
+  }
+
+  result.into_string
+}
+
+fn pub extract_display_name(input: String) -> (Option[String], String) {
+  let trimmed = input.trim
+
+  match trimmed.index_of('<', 0) {
+    case Some(lt_pos) -> {
+      if lt_pos > 0 {
+        let name_part = trimmed.substring(0, lt_pos).trim
+        let name = if is_quoted_string(name_part) {
+          unquote_string(name_part)
+        } else {
+          name_part
+        }
+
+        (Option.Some(name), trimmed)
+      } else {
+        (Option.None, trimmed)
+      }
+    }
+    case None -> (Option.None, trimmed)
+  }
+}
+
+fn pub is_valid_email_format(email: String) -> Bool {
+  if email.empty? { return false }
+
+  let at_pos = match email.index_of('@', 0) {
+    case Some(pos) -> pos
+    case None -> return false
+  }
+
+  let last_pos = email.size - 1
+
+  if (at_pos == 0) or (at_pos == last_pos) { return false }
+
+  if email.index_of('@', at_pos + 1).some? { return false }
+
+  let local_part = email.substring(0, at_pos)
+
+  if local_part.empty? { return false }
+
+  let mut local_valid = false
+  let mut i = 0
+
+  while i < local_part.size {
+    match local_part.get(i) {
+      case Ok(byte) -> {
+        if !(is_alnum(byte) or is_email_local_special(byte)) { return false }
+
+        local_valid = true
+        i = i + 1
+      }
+      case Error(_) -> return false
+    }
+  }
+
+  if !local_valid { return false }
+
+  let domain = email.substring(at_pos + 1, email.size)
+
+  if domain.empty? { return false }
+
+  if domain.starts_with?('.') or domain.starts_with?('-') { return false }
+
+  if domain.ends_with?('.') or domain.ends_with?('-') { return false }
+
+  let mut i = 0
+  let mut domain_valid = false
+
+  while i < domain.size {
+    match domain.get(i) {
+      case Ok(byte) -> {
+        if !is_domain_char(byte) { return false }
+
+        domain_valid = true
+        i = i + 1
+      }
+      case Error(_) -> return false
+    }
+  }
+
+  domain_valid
+}
+
+fn byte_array_to_string(bytes: Array[Int]) -> String {
+  let ba = ByteArray.new
+
+  for b in bytes.iter { ba.push(b) }
+
+  ba.into_string
+}
+
+fn extract_angle_bracket_content(input: String) -> String {
+  let lt_pos = input.index_of('<', 0)
+  let gt_pos = input.index_of('>', 0)
+
+  match (lt_pos, gt_pos) {
+    case (Some(lt), Some(gt)) if lt < gt -> input.substring(lt + 1, gt).trim
+    case _ -> input.trim
+  }
+}
+
+fn extract_addr_spec(input: String) -> Option[String] {
+  let candidate = extract_angle_bracket_content(input)
+
+  # If empty, try the whole input
+  let final_candidate = if candidate.empty? { input.trim } else { candidate }
+
+  # Store the address even if invalid for detection purposes
+  # Validation happens separately in strict mode
+  if final_candidate.empty? {
+    Option.None
+  } else {
+    Option.Some(final_candidate)
+  }
+}
+
+fn parse_single_address(input: String) -> Option[EmailAddress] {
+  let cleaned = remove_comments(input)
+  let (name_opt, remaining) = extract_display_name(cleaned)
+
+  match extract_addr_spec(remaining) {
+    case Some(addr) -> {
+      Option.Some(EmailAddress(name: name_opt, address: addr, raw: input))
+    }
+    case None -> Option.None
+  }
+}
+
+fn pub parse_comma_separated_addresses(input: String) -> Array[EmailAddress] {
+  # RFC 5322 group addresses use syntax: group-name: mailbox-list;
+  # We don't support parsing groups, so return empty if detected
+  match input.index_of(':', 0) {
+    case Some(_) -> return []
+    case None -> {}
+  }
+
+  let mut result = []
+  let mut current = [] as Array[Int]
+  let mut in_quote = false
+  let mut paren_depth = 0
+  let mut i = 0
+
+  while i < input.size {
+    match input.get(i) {
+      case Ok(byte) -> {
+        if byte == 34 {
+          in_quote = if in_quote { false } else { true }
+          current.push(byte)
+        } else if byte == 40 and in_quote == false {
+          paren_depth = paren_depth + 1
+        } else if byte == 41 and in_quote == false {
+          if paren_depth > 0 { paren_depth = paren_depth - 1 }
+        } else if byte == 44 and in_quote == false and paren_depth == 0 {
+          let addr_str = byte_array_to_string(current).trim
+
+          if addr_str.empty? == false {
+            match parse_single_address(addr_str) {
+              case Some(addr) -> result.push(addr)
+              case None -> {}
+            }
+          }
+
+          current = [] as Array[Int]
+        } else if in_quote == true or paren_depth == 0 {
+          current.push(byte)
+        }
+
+        i = i + 1
+      }
+      case Error(_) -> i = i + 1
+    }
+  }
+
+  let addr_str = byte_array_to_string(current).trim
+
+  if addr_str.empty? == false {
+    match parse_single_address(addr_str) {
+      case Some(addr) -> result.push(addr)
+      case None -> {}
+    }
+  }
+
+  result
+}
+
+# Core parsing logic for address lists
+fn parse_address_list_impl(
+  raw: ref Option[String],
+  decoded: String,
+) -> Array[EmailAddress] {
+  match raw {
+    case Some(_) -> {
+      let mut result = []
+      let colon_pos = decoded.index_of(':', 0)
+
+      match colon_pos {
+        case Some(colon) -> {
+          let _group_name = decoded.substring(0, colon).trim
+          let group_content = decoded.substring(colon + 1, decoded.size)
+
+          let semi_pos = group_content.index_of(';', 0)
+          let content = match semi_pos {
+            case Some(pos) -> group_content.substring(0, pos)
+            case None -> group_content
+          }
+
+          result = parse_comma_separated_addresses(content)
+        }
+        case None -> result = parse_comma_separated_addresses(decoded)
+      }
+
+      result
+    }
+    case None -> []
+  }
+}
