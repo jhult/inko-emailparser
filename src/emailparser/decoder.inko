@@ -324,7 +324,10 @@ fn pub decode_rfc2047_word(word: String) -> String {
     case Error(_) -> return word
   }
 
-  if charset.empty? or encoding.empty? { return word }
+  # RFC 2047 section 4: encoding must be 'B' or 'Q'
+  if encoding != 'B' and encoding != 'Q' { return word }
+
+  if charset.empty? { return word }
 
   let mut encoded_text = ByteArray.new
   let mut i = 2
