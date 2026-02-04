@@ -70,452 +70,135 @@ type pub enum Error {
 }
 
 impl Error {
+  # Format error message with optional context (line, position, fragment)
+  fn pub format_with_context(
+    message: String,
+    line: ref Option[Int],
+    pos: ref Option[Int],
+    frag: ref Option[String],
+  ) -> String {
+    let mut result = message
+
+    match line {
+      case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
+      case None -> {}
+    }
+
+    match pos {
+      case Some(p) -> result = result + ' (position ' + p.to_string + ')'
+      case None -> {}
+    }
+
+    match frag {
+      case Some(f) -> result = result + ' ["' + f + '"]'
+      case None -> {}
+    }
+
+    result
+  }
+
   # Convert error to human-readable message with context
   fn pub to_message -> String {
     match self {
       case EmailSizeTooLarge(size, max_size, line, pos, frag) -> {
-        let mut result = 'Email size exceeds maximum allowed size: '
+        let msg = 'Email size exceeds maximum allowed size: '
           + size.to_string
           + ' bytes (max: '
           + max_size.to_string
           + ' bytes)'
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context(msg, line, pos, frag)
       }
       case AttachmentSizeTooLarge(size, max_size, line, pos, frag) -> {
-        let mut result = 'Attachment size exceeds maximum allowed size: '
+        let msg = 'Attachment size exceeds maximum allowed size: '
           + size.to_string
           + ' bytes (max: '
           + max_size.to_string
           + ' bytes)'
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context(msg, line, pos, frag)
       }
       case TooManyHeaders(count, max_count, line, pos, frag) -> {
-        let mut result = 'Maximum number of headers exceeded: '
+        let msg = 'Maximum number of headers exceeded: '
           + count.to_string
           + ' (max: '
           + max_count.to_string
           + ')'
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context(msg, line, pos, frag)
       }
       case MultipartDepthExceeded(depth, max_depth, line, pos, frag) -> {
-        let mut result = 'Maximum multipart nesting depth exceeded: '
+        let msg = 'Maximum multipart nesting depth exceeded: '
           + depth.to_string
           + ' (max: '
           + max_depth.to_string
           + ')'
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context(msg, line, pos, frag)
       }
       case InvalidHeaderFieldName(name, line, pos, frag) -> {
-        let mut result = 'Invalid header field name: ' + name
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context('Invalid header field name: ' + name, line, pos, frag)
       }
       case MalformedHeader(reason, line, pos, frag) -> {
-        let mut result = 'Malformed header: ' + reason
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context('Malformed header: ' + reason, line, pos, frag)
       }
       case DuplicateHeader(name, line, pos, frag) -> {
-        let mut result = 'Duplicate header detected: ' + name
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context('Duplicate header detected: ' + name, line, pos, frag)
       }
       case HeaderWithoutColon(line, pos, frag) -> {
-        let mut result = 'Invalid header format: no colon found'
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context('Invalid header format: no colon found', line, pos, frag)
       }
       case InvalidEmailFormat(reason, line, pos, frag) -> {
-        let mut result = 'Invalid email format: ' + reason
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context('Invalid email format: ' + reason, line, pos, frag)
       }
       case HeaderValueTooLarge(size, max_size, line, pos, frag) -> {
-        let mut result = 'Header value exceeds maximum allowed size: '
+        let msg = 'Header value exceeds maximum allowed size: '
           + size.to_string
           + ' bytes (max: '
           + max_size.to_string
           + ' bytes)'
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context(msg, line, pos, frag)
       }
       case BoundaryNotFound(line, pos, frag) -> {
-        let mut result = 'Boundary marker not found in message body'
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context('Boundary marker not found in message body', line, pos, frag)
       }
       case InvalidBoundary(reason, line, pos, frag) -> {
-        let mut result = 'Invalid boundary string: ' + reason
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context('Invalid boundary string: ' + reason, line, pos, frag)
       }
       case MultipartWithoutParts(line, pos, frag) -> {
-        let mut result = 'Multipart message has no body parts'
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context('Multipart message has no body parts', line, pos, frag)
       }
       case NoBodyInPart(line, pos, frag) -> {
-        let mut result = 'No body found in multipart part'
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context('No body found in multipart part', line, pos, frag)
       }
       case ParseError(message, line, pos, frag) -> {
-        let mut result = message
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context(message, line, pos, frag)
       }
       case DecodingFailed(encoding, reason, line, pos, frag) -> {
-        let mut result = 'Failed to decode ' + encoding + ' content: ' + reason
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        let msg = 'Failed to decode ' + encoding + ' content: ' + reason
+        format_with_context(msg, line, pos, frag)
       }
       case DecodedSizeTooLarge(size, max_size, encoding, line, pos, frag) -> {
-        let mut result = 'Decoded '
+        let msg = 'Decoded '
           + encoding
           + ' content exceeds maximum size: '
           + size.to_string
           + ' bytes (max: '
           + max_size.to_string
           + ' bytes)'
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context(msg, line, pos, frag)
       }
       case MissingRequiredHeader(header_name, line, pos, frag) -> {
-        let mut result = 'Missing required header: ' + header_name
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context('Missing required header: ' + header_name, line, pos, frag)
       }
       case EmptyRequiredHeader(header_name, line, pos, frag) -> {
-        let mut result = 'Required header is empty: ' + header_name
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context('Required header is empty: ' + header_name, line, pos, frag)
       }
       case EmailSizeExceeded(max_size, actual_size, line, pos) -> {
-        let mut result = 'Email size '
+        let msg = 'Email size '
           + actual_size.to_string
           + ' exceeds maximum '
           + max_size.to_string
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        result
+        format_with_context(msg, line, pos, Option.None)
       }
       case InvalidContentType(reason, line, pos, frag) -> {
-        let mut result = 'Invalid Content-Type: ' + reason
-
-        match line {
-          case Some(l) -> result = 'Line ' + l.to_string + ': ' + result
-          case None -> {}
-        }
-
-        match pos {
-          case Some(p) -> result = result + ' (position ' + p.to_string + ')'
-          case None -> {}
-        }
-
-        match frag {
-          case Some(f) -> result = result + ' ["' + f + '"]'
-          case None -> {}
-        }
-
-        result
+        format_with_context('Invalid Content-Type: ' + reason, line, pos, frag)
       }
     }
   }
