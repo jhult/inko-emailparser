@@ -107,6 +107,44 @@ fn pub tests(t: mut Tests) {
     }
   })
 
+  # Test that base64 with whitespace checks size after removal
+  t.test('base64_with_whitespace_size_check', fn (t) {
+    # Create a base64 string with whitespace that would decode to ~1KB
+    # Base64: 4 chars -> 3 bytes
+    # 4000 chars = ~3000 bytes
+    let mut large_input = ''
+    let mut i = 0
+
+    while i < 1000 {
+      large_input = large_input + 'AAAA\n'
+      i = i + 1
+    }
+
+    # This should succeed with max_size of 10KB
+    match decode_body_impl(large_input, 'base64', 10 * 1024) {
+      case Ok(decoded) -> {
+        # Verify it decoded correctly (each 'AAAA' -> 3 bytes of zeros)
+        t.equal(decoded.size, 3000)
+      }
+      case Error(_) -> t.false(true) # Force failure
+    }
+
+    # Create a larger base64 string that would decode to ~20KB after whitespace removal
+    let mut very_large_input = ''
+    let mut i = 0
+
+    while i < 10000 {
+      very_large_input = very_large_input + 'AAAA\n'
+      i = i + 1
+    }
+
+    # This should fail with max_size of 10KB
+    match decode_body_impl(very_large_input, 'base64', 10 * 1024) {
+      case Ok(_) -> t.false(true) # Force failure
+      case Error(_) -> t.true(true) # Expected error
+    }
+  })
+
   # Test that invalid quoted-printable sequences use Unicode replacement character
   t.test('qp_invalid_sequence_uses_unicode_replacement', fn (t) {
     # Test with invalid hex sequence =ZZ (Z is not a valid hex digit)

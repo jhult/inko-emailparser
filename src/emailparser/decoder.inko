@@ -66,29 +66,14 @@ fn decode_body_impl(
   let enc_lower = encoding.to_lower
 
   if enc_lower == 'base64' {
-    let estimated_size = (raw.size / BASE64_CHUNK_SIZE) * BASE64_DECODED_SIZE
-
-    if estimated_size > max_size {
-      return Result.Error(
-        Error.DecodedSizeTooLarge(
-          estimated_size,
-          max_size,
-          encoding,
-          Option.None,
-          Option.None,
-          Option.None,
-        ),
-      )
-    }
-
-    # Remove whitespace (including newlines) as per RFC 2045 section 6.8
+    # Estimate decoded size after whitespace removal
+    # Base64: 4 chars -> 3 bytes ratio, accounting for padding
     let result_bytes = ByteArray.new
     let mut i = 0
 
     while i < raw.size {
       match raw.get(i) {
         case Ok(byte) -> {
-          # Skip whitespace: \n (LF), \r (CR), space, tab
           if
             byte != ASCII_LF
               and byte != ASCII_CR
@@ -105,6 +90,35 @@ fn decode_body_impl(
     }
 
     let cleaned = result_bytes.into_string
+
+    let cleaned_size = cleaned.size
+
+    let padding = if cleaned_size >= 2 and cleaned.ends_with?('==') {
+      2
+    } else if cleaned_size >= 1 and cleaned.ends_with?('=') {
+      1
+    } else {
+      0
+    }
+
+    let estimated_size = if cleaned_size >= BASE64_CHUNK_SIZE {
+      ((cleaned_size - padding) / BASE64_CHUNK_SIZE) * BASE64_DECODED_SIZE
+    } else {
+      0
+    }
+
+    if estimated_size > max_size {
+      return Result.Error(
+        Error.DecodedSizeTooLarge(
+          estimated_size,
+          max_size,
+          encoding,
+          Option.None,
+          Option.None,
+          Option.None,
+        ),
+      )
+    }
 
     let decoder = Decoder.new
     let output = ByteArray.new
