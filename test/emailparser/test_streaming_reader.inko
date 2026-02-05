@@ -1,0 +1,169 @@
+# Tests for streaming reader (AsyncReader trait and ByteArrayReader)
+
+import std.test (Tests)
+import emailparser.streaming_reader (AsyncReader, ByteArrayReader)
+
+fn pub tests(t: mut Tests) {
+  t.test("byte_array_reader_new", fn (t) {
+    let data = "Hello World".to_byte_array
+    let reader = ByteArrayReader.new(data)
+
+    t.equal(reader.position, 0)
+    t.equal(reader.size, 11)
+    t.false(reader.eof?)
+  })
+
+  t.test("byte_array_reader_from_string", fn (t) {
+    let reader = ByteArrayReader.from_string("Hello")
+
+    t.equal(reader.position, 0)
+    t.equal(reader.size, 5)
+    t.false(reader.eof?)
+  })
+
+  t.test("byte_array_reader_read_partial", fn (t) {
+    let mut reader = ByteArrayReader.from_string("Hello World")
+
+    match reader.read(5) {
+      case Ok(chunk) -> {
+        t.equal(chunk.size, 5)
+        t.equal(chunk.into_string, "Hello")
+        t.equal(reader.position, 5)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("byte_array_reader_read_full", fn (t) {
+    let mut reader = ByteArrayReader.from_string("Hello")
+
+    match reader.read(10) {
+      case Ok(chunk) -> {
+        t.equal(chunk.size, 5)
+        t.equal(chunk.into_string, "Hello")
+        t.equal(reader.position, 5)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("byte_array_reader_read_multiple", fn (t) {
+    let mut reader = ByteArrayReader.from_string("Hello World")
+
+    match reader.read(5) {
+      case Ok(chunk) -> {
+        t.equal(chunk.into_string, "Hello")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    match reader.read(6) {
+      case Ok(chunk) -> {
+        t.equal(chunk.into_string, " World")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    t.equal(reader.position, 11)
+  })
+
+  t.test("byte_array_reader_eof", fn (t) {
+    let mut reader = ByteArrayReader.from_string("Hi")
+
+    match reader.read(10) {
+      case Ok(chunk) -> {
+        t.equal(chunk.into_string, "Hi")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    t.true(reader.eof?)
+
+    match reader.read(10) {
+      case Ok(chunk) -> {
+        t.equal(chunk.size, 0)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("byte_array_reader_empty_data", fn (t) {
+    let mut reader = ByteArrayReader.new(ByteArray.new)
+
+    t.equal(reader.size, 0)
+    t.true(reader.eof?)
+
+    match reader.read(10) {
+      case Ok(chunk) -> {
+        t.equal(chunk.size, 0)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("byte_array_reader_zero_size_read", fn (t) {
+    let mut reader = ByteArrayReader.from_string("Hello")
+
+    match reader.read(0) {
+      case Ok(chunk) -> {
+        t.equal(chunk.size, 0)
+        t.equal(reader.position, 0)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("byte_array_reader_single_byte_reads", fn (t) {
+    let mut reader = ByteArrayReader.from_string("ABC")
+
+    match reader.read(1) {
+      case Ok(chunk) -> t.equal(chunk.into_string, "A")
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    match reader.read(1) {
+      case Ok(chunk) -> t.equal(chunk.into_string, "B")
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    match reader.read(1) {
+      case Ok(chunk) -> t.equal(chunk.into_string, "C")
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    t.true(reader.eof?)
+  })
+
+  t.test("byte_array_reader_binary_data", fn (t) {
+    let mut data = ByteArray.new
+    data.push(0)
+    data.push(255)
+    data.push(128)
+    data.push(1)
+
+    let mut reader = ByteArrayReader.new(data)
+
+    match reader.read(4) {
+      case Ok(chunk) -> {
+        t.equal(chunk.size, 4)
+        match chunk.get(0) {
+          case Ok(b) -> t.equal(b, 0)
+          case Error(_) -> panic("Failed")
+        }
+        match chunk.get(1) {
+          case Ok(b) -> t.equal(b, 255)
+          case Error(_) -> panic("Failed")
+        }
+        match chunk.get(2) {
+          case Ok(b) -> t.equal(b, 128)
+          case Error(_) -> panic("Failed")
+        }
+        match chunk.get(3) {
+          case Ok(b) -> t.equal(b, 1)
+          case Error(_) -> panic("Failed")
+        }
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+}

@@ -1,0 +1,90 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Async Reader Trait and Implementations
+#
+# This module provides a generic async reader trait for streaming input.
+# The trait-based design allows parsing emails from various sources:
+# - ByteArrayReader: For testing with in-memory data
+# - Future: FileReader when async file I/O becomes available
+#
+# Returns empty ByteArray on EOF (not Error) to distinguish from actual errors.
+
+import std.bytes (ByteArray)
+import std.result (Result)
+
+# Async Reader trait for streaming input
+trait pub AsyncReader {
+  # Read up to size bytes from the source
+  #
+  # Returns:
+  # - Ok(ByteArray) with bytes read (may be empty if EOF)
+  # - Error(String) if a read error occurs
+  fn pub mut read(size: Int) -> Result[ByteArray, String]
+}
+
+# ByteArrayReader implementation wraps ByteArray for streaming
+#
+# Useful for testing or when data is already in memory.
+# Returns empty ByteArray when all data has been consumed.
+type pub ByteArrayReader {
+  let mut @data: ByteArray
+  let mut @position: Int
+}
+
+impl ByteArrayReader {
+  # Create a new ByteArrayReader from the given data
+  fn pub static new(data: ByteArray) -> ByteArrayReader {
+    ByteArrayReader(data: data, position: 0)
+  }
+
+  # Create a new ByteArrayReader from a String
+  fn pub static from_string(text: String) -> ByteArrayReader {
+    ByteArrayReader(data: text.to_byte_array, position: 0)
+  }
+
+  # Get the current read position
+  fn pub position -> Int {
+    @position
+  }
+
+  # Get the total size of the data
+  fn pub size -> Int {
+    @data.size
+  }
+
+  # Check if all data has been read
+  fn pub eof? -> Bool {
+    @position >= @data.size
+  }
+}
+
+impl AsyncReader for ByteArrayReader {
+  # Read up to size bytes from the internal ByteArray
+  #
+  # Returns empty ByteArray when EOF is reached (position >= size).
+  # Never returns Error for ByteArrayReader (always Ok).
+  fn pub mut read(size: Int) -> Result[ByteArray, String] {
+    if @position >= @data.size {
+      return Result.Ok(ByteArray.new)
+    }
+
+    let remaining = @data.size - @position
+    let bytes_to_read = if size < remaining { size } else { remaining }
+
+    let mut result = ByteArray.new
+    let mut i = 0
+    while i < bytes_to_read {
+      match @data.get(@position + i) {
+        case Ok(byte) -> result.push(byte)
+        case Error(_) -> {}
+      }
+      i = i + 1
+    }
+
+    @position = @position + bytes_to_read
+
+    Result.Ok(result)
+  }
+}
