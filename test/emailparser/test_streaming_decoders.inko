@@ -1,0 +1,292 @@
+# Tests for streaming decoders (Base64 and Quoted-Printable)
+
+import std.test (Tests)
+import emailparser.streaming_decoder (Base64StreamingDecoder, QuotedPrintableStreamingDecoder)
+
+fn pub tests(t: mut Tests) {
+  # ============================================================================
+  # Base64StreamingDecoder Tests
+  # ============================================================================
+
+  t.test("base64_simple", fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(1000000, false)
+    match decoder.feed("SGVsbG8gV29ybGQ=") {
+      case Ok(decoded) -> {
+        t.equal(decoded.into_string, "Hello World")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+    match decoder.finish {
+      case Ok(final) -> {
+        t.equal(final.size, 0)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("base64_split_across_chunks", fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(1000000, false)
+
+    match decoder.feed("SGVs") {
+      case Ok(decoded) -> {
+        t.equal(decoded.size, 0)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    match decoder.feed("bG8=") {
+      case Ok(decoded) -> {
+        t.equal(decoded.into_string, "Hello")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    match decoder.finish {
+      case Ok(final) -> {
+        t.equal(final.size, 0)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("base64_padding_split", fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(1000000, false)
+
+    match decoder.feed("QQ") {
+      case Ok(decoded) -> {
+        t.equal(decoded.size, 0)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    match decoder.feed("==") {
+      case Ok(decoded) -> {
+        t.equal(decoded.into_string, "A")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("base64_with_whitespace", fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(1000000, false)
+    let encoded = "SGVs\nbG8g\r\n V29ybGQ="
+
+    match decoder.feed(encoded) {
+      case Ok(decoded) -> {
+        t.equal(decoded.into_string, "Hello World")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("base64_size_limit", fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(3, true)
+
+    match decoder.feed("SGVsbG8=") {
+      case Ok(decoded) -> {
+        t.equal(decoded.size, 3)
+        t.equal(decoder.decoded_size, 3)
+        t.equal(decoded.into_string, "Hel")
+      }
+      case Error(_) -> t.false(true)
+    }
+  })
+
+  t.test("base64_invalid_strict", fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(1000000, true)
+
+    match decoder.feed("!!!") {
+      case Ok(_) -> t.false(true)
+      case Error(_) -> t.true(true)
+    }
+  })
+
+  t.test("base64_invalid_lax", fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(1000000, false)
+
+    match decoder.feed("SG!!!VsbG8=") {
+      case Ok(decoded) -> {
+        t.equal(decoded.into_string, "Hello")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("base64_empty_chunks", fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(1000000, false)
+
+    match decoder.feed("") {
+      case Ok(decoded) -> {
+        t.equal(decoded.size, 0)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("base64_max_size_exact", fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(5, true)
+
+    match decoder.feed("SGVsbG8=") {
+      case Ok(decoded) -> {
+        t.equal(decoded.into_string, "Hello")
+        t.equal(decoder.decoded_size, 5)
+      }
+      case Error(_) -> panic("Should succeed at exact limit")
+    }
+  })
+
+  t.test("base64_finish_empty", fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(1000000, false)
+
+    match decoder.feed("SGVsbG8=") {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    match decoder.finish {
+      case Ok(final) -> {
+        t.equal(final.size, 0)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("base64_finish_partial", fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(1000000, false)
+
+    match decoder.feed("SGVs") {
+      case Ok(decoded) -> {
+        t.equal(decoded.size, 0)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    match decoder.finish {
+      case Ok(final) -> {
+        t.equal(final.into_string, "Hel")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  # ============================================================================
+  # Quoted-PrintableStreamingDecoder Tests
+  # ============================================================================
+
+  t.test("qp_simple", fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, false)
+
+    match decoder.feed("Hello=20World") {
+      case Ok(decoded) -> {
+        t.equal(decoded.into_string, "Hello World")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("qp_sequence_split", fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, false)
+
+    match decoder.feed("=4") {
+      case Ok(decoded) -> {
+        t.equal(decoded.size, 0)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    match decoder.feed("1") {
+      case Ok(decoded) -> {
+        t.equal(decoded.into_string, "A")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("qp_soft_line_break", fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, false)
+
+    match decoder.feed("Hello=\r\nWorld") {
+      case Ok(decoded) -> {
+        t.equal(decoded.into_string, "HelloWorld")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("qp_soft_line_break_split", fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, false)
+
+    match decoder.feed("Hello=") {
+      case Ok(decoded) -> {
+        t.equal(decoded.size, 0)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    match decoder.feed("\r\nWorld") {
+      case Ok(decoded) -> {
+        t.equal(decoded.into_string, "HelloWorld")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("qp_underscore_as_space", fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, true)
+
+    match decoder.feed("Hello_World") {
+      case Ok(decoded) -> {
+        t.equal(decoded.into_string, "Hello World")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("qp_literal_equals", fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, false)
+
+    match decoder.feed("a==b") {
+      case Ok(decoded) -> {
+        t.equal(decoded.into_string, "a=b")
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+
+  t.test("qp_max_size_exact", fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(5, false, false)
+
+    match decoder.feed("Hello") {
+      case Ok(decoded) -> {
+        t.equal(decoded.into_string, "Hello")
+        t.equal(decoder.decoded_size, 5)
+      }
+      case Error(_) -> panic("Should succeed at exact limit")
+    }
+  })
+
+  t.test("qp_max_size_exceeded", fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(5, false, false)
+
+    match decoder.feed("Hello!") {
+      case Ok(_) -> t.false(true)
+      case Error(_) -> t.true(true)
+    }
+  })
+
+  t.test("qp_finish_empty", fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, false)
+
+    match decoder.feed("Hello=20World") {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Failed: ${e}")
+    }
+
+    match decoder.finish {
+      case Ok(final) -> {
+        t.equal(final.size, 0)
+      }
+      case Error(e) -> panic("Failed: ${e}")
+    }
+  })
+}
