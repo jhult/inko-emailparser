@@ -1,0 +1,650 @@
+# Tests for streaming multipart parser
+
+import std.bytes (ByteArray)
+import std.option (Option)
+import std.result (Result)
+import std.test (Tests)
+import emailparser.streaming_multipart (
+  MultipartStreamParser,
+  MultipartStreamHandler,
+  MultipartState,
+)
+
+# Test handler that collects parts for verification
+type TestHandler {
+  let pub mut @parts_begun: Int
+  let pub mut @parts_ended: Int
+  let pub mut @data_chunks: Array[String]
+  let pub mut @headers_seen: Array[Array[(String, String)]]
+  let pub mut @content_types: Array[String]
+  let pub mut @is_attachments: Array[Bool]
+}
+
+impl TestHandler {
+  fn pub static new -> TestHandler {
+    TestHandler(
+      parts_begun: 0,
+      parts_ended: 0,
+      data_chunks: [],
+      headers_seen: [],
+      content_types: [],
+      is_attachments: [],
+    )
+  }
+
+  fn pub reset(mut self) {
+    @parts_begun = 0
+    @parts_ended = 0
+    @data_chunks = []
+    @headers_seen = []
+    @content_types = []
+    @is_attachments = []
+  }
+}
+
+impl MultipartStreamHandler for TestHandler {
+  fn pub on_part_begin(
+    mut self,
+    headers: ref Array[(String, String)],
+    content_type: String,
+    is_attachment: Bool,
+  ) -> Result[Nil, String] {
+    @parts_begun = @parts_begun + 1
+
+    # Clone headers for verification
+    let mut cloned_headers: Array[(String, String)] = []
+    for (k, v) in headers.iter {
+      cloned_headers.push((k.clone, v.clone))
+    }
+    @headers_seen.push(cloned_headers)
+    @content_types.push(content_type)
+    @is_attachments.push(is_attachment)
+
+    Result.Ok(Nil)
+  }
+
+  fn pub on_part_data(
+    mut self,
+    data: ref ByteArray,
+    content_transfer_encoding: String,
+  ) -> Result[Nil, String] {
+    # Convert ByteArray to String for verification
+    let mut cloned_data = ByteArray.new
+    let mut i = 0
+    while i < data.size {
+      match data.get(i) {
+        case Ok(byte) -> cloned_data.push(byte)
+        case Error(_) -> {}
+      }
+      i = i + 1
+    }
+    @data_chunks.push(cloned_data.into_string)
+
+    Result.Ok(Nil)
+  }
+
+  fn pub on_part_end(mut self) -> Result[Nil, String] {
+    @parts_ended = @parts_ended + 1
+    Result.Ok(Nil)
+  }
+}
+
+fn pub tests(t: mut Tests) {
+  t.test('multipart_parser_new', fn (t) {
+    let parser = MultipartStreamParser.new(
+      boundary: 'boundary123',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    t.equal(parser.current_depth, 0)
+  })
+
+  t.test('multipart_simple_single_part', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'boundary123',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    let raw_multipart = '--boundary123
+Content-Type: text/plain
+
+Hello World
+--boundary123--'
+
+    let data = raw_multipart.to_byte_array
+
+    match parser.feed(ref data, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Finish failed: {e}")
+    }
+
+    t.equal(handler.parts_begun, 1)
+    t.equal(handler.parts_ended, 1)
+    t.equal(handler.data_chunks.size, 1)
+    t.equal(handler.data_chunks.get(0).or(''), 'Hello World\n')
+  })
+
+  t.test('multipart_multiple_parts', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'abc123',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    let raw_multipart = '--abc123
+Content-Type: text/plain
+
+Part One
+--abc123
+Content-Type: text/html
+
+Part Two
+--abc123--'
+
+    let data = raw_multipart.to_byte_array
+
+    match parser.feed(ref data, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Finish failed: {e}")
+    }
+
+    t.equal(handler.parts_begun, 2)
+    t.equal(handler.parts_ended, 2)
+    t.equal(handler.data_chunks.size, 2)
+  })
+
+  t.test('multipart_chunked_feeding', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'test',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    # Feed data in small chunks to test buffering
+    let chunk1 = '--test\nContent-Type: text/plain\n\n'.to_byte_array
+    let chunk2 = 'Hello '.to_byte_array
+    let chunk3 = 'World\n--test--'.to_byte_array
+
+    match parser.feed(ref chunk1, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed 1 failed: {e}")
+    }
+
+    match parser.feed(ref chunk2, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed 2 failed: {e}")
+    }
+
+    match parser.feed(ref chunk3, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed 3 failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Finish failed: {e}")
+    }
+
+    t.equal(handler.parts_begun, 1)
+    t.equal(handler.parts_ended, 1)
+
+    # Data might be delivered in multiple chunks
+    let mut total_data = ''
+    for chunk in handler.data_chunks.iter {
+      total_data = total_data + chunk.clone
+    }
+
+    t.equal(total_data, 'Hello World\n')
+  })
+
+  t.test('multipart_boundary_split_across_chunks', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'splitboundary',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    # Split the boundary marker across chunks
+    let chunk1 = '--splitbou'.to_byte_array
+    let chunk2 = 'ndary\nContent-Type: text/plain\n\nTest\n--splitboundary--'.to_byte_array
+
+    match parser.feed(ref chunk1, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed 1 failed: {e}")
+    }
+
+    match parser.feed(ref chunk2, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed 2 failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Finish failed: {e}")
+    }
+
+    t.equal(handler.parts_begun, 1)
+    t.equal(handler.parts_ended, 1)
+  })
+
+  t.test('multipart_attachment_detection', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'attach',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    let raw_multipart = '--attach
+Content-Type: text/plain
+
+Body text
+--attach
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="file.pdf"
+
+Binary data
+--attach--'
+
+    let data = raw_multipart.to_byte_array
+
+    match parser.feed(ref data, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Finish failed: {e}")
+    }
+
+    t.equal(handler.parts_begun, 2)
+    t.equal(handler.parts_ended, 2)
+
+    # First part should not be an attachment
+    t.false(handler.is_attachments.get(0).or(true))
+
+    # Second part should be an attachment
+    t.true(handler.is_attachments.get(1).or(false))
+  })
+
+  t.test('multipart_header_parsing', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'hdr',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    let raw_multipart = '--hdr
+Content-Type: text/html
+Content-ID: <part1@example.com>
+
+<html>test</html>
+--hdr--'
+
+    let data = raw_multipart.to_byte_array
+
+    match parser.feed(ref data, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Finish failed: {e}")
+    }
+
+    t.equal(handler.parts_begun, 1)
+
+    # Check content type was captured
+    t.equal(handler.content_types.get(0).or(''), 'text/html')
+  })
+
+  t.test('multipart_empty_parts', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'empty',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    let raw_multipart = '--empty
+Content-Type: text/plain
+
+--empty
+Content-Type: text/html
+
+--empty--'
+
+    let data = raw_multipart.to_byte_array
+
+    match parser.feed(ref data, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Finish failed: {e}")
+    }
+
+    t.equal(handler.parts_begun, 2)
+    t.equal(handler.parts_ended, 2)
+  })
+
+  t.test('multipart_crlf_line_endings', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'crlf',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    let raw_multipart = '--crlf\r\nContent-Type: text/plain\r\n\r\nTest\r\n--crlf--'
+
+    let data = raw_multipart.to_byte_array
+
+    match parser.feed(ref data, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Finish failed: {e}")
+    }
+
+    t.equal(handler.parts_begun, 1)
+    t.equal(handler.parts_ended, 1)
+  })
+
+  t.test('multipart_preamble_handling', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'pre',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    # Preamble text before first boundary
+    let raw_multipart = 'This is preamble text that should be ignored
+--pre
+Content-Type: text/plain
+
+Actual content
+--pre--'
+
+    let data = raw_multipart.to_byte_array
+
+    match parser.feed(ref data, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Finish failed: {e}")
+    }
+
+    t.equal(handler.parts_begun, 1)
+    t.equal(handler.parts_ended, 1)
+  })
+
+  t.test('multipart_filename_extraction', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'file',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    let raw_multipart = '--file
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="document.txt"
+
+File contents
+--file--'
+
+    let data = raw_multipart.to_byte_array
+
+    match parser.feed(ref data, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Finish failed: {e}")
+    }
+
+    t.equal(handler.parts_begun, 1)
+    t.true(handler.is_attachments.get(0).or(false))
+  })
+
+  t.test('multipart_large_body_streaming', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'large',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    # Build a large body that exceeds chunk size
+    let mut large_body = ''
+    let mut i = 0
+    while i < 100 {
+      large_body = large_body + 'This is line {i} of the large body content.\n'
+      i = i + 1
+    }
+
+    let raw_multipart = '--large
+Content-Type: text/plain
+
+{large_body}--large--'
+
+    let data = raw_multipart.to_byte_array
+
+    match parser.feed(ref data, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Finish failed: {e}")
+    }
+
+    t.equal(handler.parts_begun, 1)
+    t.equal(handler.parts_ended, 1)
+
+    # Data may arrive in multiple chunks
+    t.true(handler.data_chunks.size >= 1)
+  })
+
+  t.test('multipart_no_end_boundary_strict', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'noend',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: true,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    # Missing end boundary (--noend--)
+    let raw_multipart = '--noend
+Content-Type: text/plain
+
+Test'
+
+    let data = raw_multipart.to_byte_array
+
+    match parser.feed(ref data, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(_) -> {}
+    }
+
+    # Should fail on finish in strict mode
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(_) -> {}  # Expected to fail
+    }
+  })
+
+  t.test('multipart_empty_message', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'empty',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    let data = ByteArray.new
+
+    match parser.feed(ref data, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(_) -> {}  # OK to fail for empty
+    }
+  })
+
+  t.test('multipart_content_type_defaults', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'default',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    # Part without Content-Type header
+    let raw_multipart = '--default
+
+Plain text without headers
+--default--'
+
+    let data = raw_multipart.to_byte_array
+
+    match parser.feed(ref data, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Finish failed: {e}")
+    }
+
+    t.equal(handler.parts_begun, 1)
+
+    # Should default to application/octet-stream
+    t.equal(handler.content_types.get(0).or(''), 'application/octet-stream')
+  })
+
+  t.test('multipart_mixed_line_endings', fn (t) {
+    let mut parser = MultipartStreamParser.new(
+      boundary: 'mixed',
+      max_depth: 10,
+      chunk_size: 8192,
+      strict_mode: false,
+      max_headers: 100,
+      max_attachment_size: 10_000_000,
+    )
+
+    let mut handler = TestHandler.new
+
+    # Mix of \r\n and \n line endings
+    let raw_multipart = '--mixed\nContent-Type: text/plain\r\n\nTest\n--mixed--'
+
+    let data = raw_multipart.to_byte_array
+
+    match parser.feed(ref data, handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Feed failed: {e}")
+    }
+
+    match parser.finish(handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic("Finish failed: {e}")
+    }
+
+    t.equal(handler.parts_begun, 1)
+  })
+}

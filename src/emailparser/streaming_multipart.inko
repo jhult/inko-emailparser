@@ -1,0 +1,717 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Streaming Multipart Parser with State Machine
+#
+# Implements boundary-aware async multipart parsing that scans for boundaries
+# incrementally without loading entire parts into memory. Uses a state machine
+# to track parsing progress through multipart structure.
+
+import std.bytes (ByteArray)
+import std.option (Option)
+import std.result (Result)
+
+# Parser states for multipart boundary scanning
+type pub enum MultipartState {
+  # Reading content before first boundary (usually empty)
+  case Preamble
+
+  # At a boundary marker, ready to read part headers
+  case AtBoundary
+
+  # Reading MIME headers for current part
+  case ReadingHeaders
+
+  # Reading body content for current part
+  case ReadingBody
+
+  # At the final boundary marker (--boundary--)
+  case AtEndBoundary
+
+  # Parsing complete
+  case Done
+}
+
+# Current part context for tracking active part metadata
+type pub CurrentPartContext {
+  let pub @index: Int
+  let pub @headers: Array[(String, String)]
+  let pub @content_type: String
+  let pub @content_disposition: String
+  let pub @content_transfer_encoding: String
+  let pub @is_attachment: Bool
+  let pub @filename: Option[String]
+  let pub @content_id: Option[String]
+  let pub @bytes_read: Int
+}
+
+# Context stack entry for nested multipart handling
+type pub ContextStackEntry {
+  let pub @boundary: String
+  let pub @depth: Int
+  let pub @parent_context: Option[CurrentPartContext]
+}
+
+# Handler trait for multipart streaming events
+#
+# Implement this trait to process multipart data incrementally.
+trait pub MultipartStreamHandler {
+  # Called when a new part begins (after headers are parsed)
+  fn pub on_part_begin(
+    headers: ref Array[(String, String)],
+    content_type: String,
+    is_attachment: Bool,
+  ) -> Result[Nil, String]
+
+  # Called when part body data is available
+  fn pub on_part_data(
+    data: ref ByteArray,
+    content_transfer_encoding: String,
+  ) -> Result[Nil, String]
+
+  # Called when a part ends (before next boundary)
+  fn pub on_part_end -> Result[Nil, String]
+}
+
+# Multipart streaming parser with state machine
+#
+# Processes multipart MIME content incrementally, emitting callbacks as
+# parts are discovered. Supports nested multipart with configurable depth limits.
+type pub MultipartStreamParser {
+  let mut @state: MultipartState
+  let @boundary: String
+  let mut @buffer: ByteArray
+  let @max_depth: Int
+  let @chunk_size: Int
+  let @strict_mode: Bool
+  let @max_headers: Int
+  let @max_attachment_size: Int
+  let mut @current_context: Option[CurrentPartContext]
+  let mut @context_stack: Array[ContextStackEntry]
+  let mut @bytes_processed: Int
+}
+
+impl MultipartStreamParser {
+  # Create a new multipart streaming parser
+  #
+  # Parameters:
+  # - boundary: The boundary string (without leading --)
+  # - max_depth: Maximum nesting depth (default 10)
+  # - chunk_size: Chunk size for reading (default 65536)
+  # - strict_mode: Enable strict MIME validation
+  # - max_headers: Maximum number of headers per part
+  # - max_attachment_size: Maximum attachment size in bytes
+  fn pub static new(
+    boundary: String,
+    max_depth: Int,
+    chunk_size: Int,
+    strict_mode: Bool,
+    max_headers: Int,
+    max_attachment_size: Int,
+  ) -> MultipartStreamParser {
+    MultipartStreamParser(
+      state: MultipartState.Preamble,
+      boundary: boundary,
+      buffer: ByteArray.new,
+      max_depth: max_depth,
+      chunk_size: chunk_size,
+      strict_mode: strict_mode,
+      max_headers: max_headers,
+      max_attachment_size: max_attachment_size,
+      current_context: Option.None,
+      context_stack: [],
+      bytes_processed: 0,
+    )
+  }
+
+  # Get current nesting depth
+  fn pub current_depth -> Int {
+    @context_stack.size
+  }
+
+  # Feed data to the parser
+  #
+  # Processes incoming data and emits handler callbacks as parts are discovered.
+  # Returns Ok(Nil) on success, Error(String) on parse errors.
+  fn pub mut feed(
+    data: ref ByteArray,
+    handler: ref mut MultipartStreamHandler,
+    default_encoding: String,
+  ) -> Result[Nil, String] {
+    # Append new data to buffer
+    let mut i = 0
+    while i < data.size {
+      match data.get(i) {
+        case Ok(byte) -> @buffer.push(byte)
+        case Error(_) -> {}
+      }
+      i = i + 1
+    }
+
+    # Process buffer according to current state
+    match @state {
+      case Preamble -> process_preamble(self, handler)
+      case AtBoundary -> process_at_boundary(self, handler)
+      case ReadingHeaders -> process_reading_headers(self, handler, default_encoding)
+      case ReadingBody -> process_reading_body(self, handler, default_encoding)
+      case AtEndBoundary -> Result.Ok(Nil)
+      case Done -> Result.Ok(Nil)
+    }
+  }
+
+  # Finalize parsing
+  #
+  # Must be called after all data has been fed to ensure proper validation
+  # and cleanup. Returns Ok(Nil) if parsing completed successfully.
+  fn pub mut finish(
+    handler: ref mut MultipartStreamHandler,
+  ) -> Result[Nil, String] {
+    # Ensure we're in a valid end state
+    match @state {
+      case AtEndBoundary -> Result.Ok(Nil)
+      case Done -> Result.Ok(Nil)
+      case Preamble -> {
+        # No parts found - could be valid for empty multipart
+        if @strict_mode {
+          Result.Error('No parts found in multipart message')
+        } else {
+          Result.Ok(Nil)
+        }
+      }
+      case AtBoundary -> {
+        # Parser stopped at boundary - incomplete
+        Result.Error('Incomplete multipart message: stopped at boundary')
+      }
+      case ReadingHeaders -> {
+        # Parser stopped while reading headers
+        Result.Error('Incomplete multipart message: stopped while reading headers')
+      }
+      case ReadingBody -> {
+        # Parser stopped while reading body - try to finalize current part
+        match @current_context {
+          case Some(_) -> {
+            match handler.on_part_end {
+              case Ok(_) -> Result.Ok(Nil)
+              case Error(e) -> Result.Error("Handler on_part_end failed: {e}")
+            }
+          }
+          case None -> Result.Ok(Nil)
+        }
+      }
+    }
+  }
+}
+
+# Process Preamble state
+#
+# Scans buffer for first boundary marker. Preamble content is typically
+# discarded as it's not part of any MIME part.
+fn process_preamble(
+  parser: mut MultipartStreamParser,
+  handler: ref mut MultipartStreamHandler,
+) -> Result[Nil, String] {
+  let boundary_marker = '--' + parser.boundary
+  let boundary_bytes = boundary_marker.to_byte_array
+
+  # Scan for first boundary
+  match find_boundary_in_buffer(ref parser.buffer, ref boundary_bytes) {
+    case Some(pos) -> {
+      # Found boundary - advance to AtBoundary state
+      # Remove everything up to and including the boundary
+      let new_buffer = ByteArray.new
+      let skip_to = pos + boundary_bytes.size
+
+      # Skip past boundary and any trailing whitespace (CRLF)
+      let mut i = skip_to
+      while i < parser.buffer.size {
+        match parser.buffer.get(i) {
+          case Ok(byte) -> {
+            if byte == 13 || byte == 10 {
+              # Skip CR or LF
+              i = i + 1
+            } else {
+              break
+            }
+          }
+          case Error(_) -> break
+        }
+      }
+
+      # Copy remaining data to new buffer
+      while i < parser.buffer.size {
+        match parser.buffer.get(i) {
+          case Ok(byte) -> new_buffer.push(byte)
+          case Error(_) -> {}
+        }
+        i = i + 1
+      }
+
+      parser.buffer = new_buffer
+      parser.state = MultipartState.AtBoundary
+      Result.Ok(Nil)
+    }
+    case None -> {
+      # Boundary not found yet - keep buffering
+      # Trim buffer if it grows too large (keep last boundary_marker.size * 2)
+      let max_preamble = boundary_marker.size * 2
+      if parser.buffer.size > max_preamble {
+        let keep_size = boundary_marker.size
+        let skip_size = parser.buffer.size - keep_size
+        let new_buffer = ByteArray.new
+
+        let mut i = skip_size
+        while i < parser.buffer.size {
+          match parser.buffer.get(i) {
+            case Ok(byte) -> new_buffer.push(byte)
+            case Error(_) -> {}
+          }
+          i = i + 1
+        }
+        parser.buffer = new_buffer
+      }
+      Result.Ok(Nil)
+    }
+  }
+}
+
+# Process AtBoundary state
+#
+# At this point we're positioned right after a boundary marker.
+# Transition to reading headers for the next part.
+fn process_at_boundary(
+  parser: mut MultipartStreamParser,
+  handler: ref mut MultipartStreamHandler,
+) -> Result[Nil, String] {
+  # Check if this is the end boundary (--boundary--)
+  let end_marker = '--'.to_byte_array
+
+  if parser.buffer.size >= 2 {
+    match parser.buffer.get(0) {
+      case Ok(b1) -> {
+        match parser.buffer.get(1) {
+          case Ok(b2) -> {
+            if b1 == 45 && b2 == 45 {
+              # This is the end boundary
+              parser.state = MultipartState.AtEndBoundary
+              return Result.Ok(Nil)
+            }
+          }
+          case Error(_) -> {}
+        }
+      }
+      case Error(_) -> {}
+    }
+  }
+
+  # Not an end boundary - start reading headers
+  parser.state = MultipartState.ReadingHeaders
+  Result.Ok(Nil)
+}
+
+# Process ReadingHeaders state
+#
+# Reads MIME headers for current part. Headers end with double CRLF.
+fn process_reading_headers(
+  parser: mut MultipartStreamParser,
+  handler: ref mut MultipartStreamHandler,
+  default_encoding: String,
+) -> Result[Nil, String] {
+  # Look for double newline indicating end of headers
+  let header_end = find_double_newline(ref parser.buffer)
+
+  match header_end {
+    case Some(end_pos) -> {
+      # Extract header bytes
+      let mut header_bytes = ByteArray.new
+      let mut i = 0
+      while i < end_pos {
+        match parser.buffer.get(i) {
+          case Ok(byte) -> header_bytes.push(byte)
+          case Error(_) -> {}
+        }
+        i = i + 1
+      }
+
+      # Parse headers
+      let headers_string = header_bytes.into_string
+      let headers = match parse_part_headers(headers_string, parser.max_headers) {
+        case Ok(h) -> h
+        case Error(e) -> return Result.Error(e)
+      }
+
+      # Extract key header values
+      let content_type = get_header_value(ref headers, 'Content-Type').or('application/octet-stream')
+      let content_disposition = get_header_value(ref headers, 'Content-Disposition').or('')
+      let content_transfer_encoding = get_header_value(ref headers, 'Content-Transfer-Encoding').or(default_encoding)
+      let content_id = get_header_value(ref headers, 'Content-ID')
+
+      # Determine if attachment
+      let is_attachment = content_disposition.starts_with?('attachment')
+
+      # Extract filename if present
+      let filename = if is_attachment {
+        extract_filename_from_disposition(content_disposition)
+      } else {
+        Option.None
+      }
+
+      # Create part context
+      let context = CurrentPartContext(
+        index: 0,  # TODO: track actual index
+        headers: headers,
+        content_type: content_type,
+        content_disposition: content_disposition,
+        content_transfer_encoding: content_transfer_encoding,
+        is_attachment: is_attachment,
+        filename: filename,
+        content_id: content_id,
+        bytes_read: 0,
+      )
+
+      parser.current_context = Option.Some(context)
+
+      # Notify handler
+      match handler.on_part_begin(ref headers, content_type, is_attachment) {
+        case Ok(_) -> {}
+        case Error(e) -> return Result.Error("Handler on_part_begin failed: {e}")
+      }
+
+      # Remove headers from buffer (including double newline)
+      let new_buffer = ByteArray.new
+      let skip_to = end_pos + 2  # Skip \n\n
+
+      let mut j = skip_to
+      while j < parser.buffer.size {
+        match parser.buffer.get(j) {
+          case Ok(byte) -> new_buffer.push(byte)
+          case Error(_) -> {}
+        }
+        j = j + 1
+      }
+
+      parser.buffer = new_buffer
+      parser.state = MultipartState.ReadingBody
+      Result.Ok(Nil)
+    }
+    case None -> {
+      # Headers not complete yet - keep buffering
+      # Check buffer size to prevent excessive memory use
+      if parser.buffer.size > 65536 {
+        return Result.Error('Part headers exceed maximum size')
+      }
+      Result.Ok(Nil)
+    }
+  }
+}
+
+# Process ReadingBody state
+#
+# Reads body content until next boundary is found.
+fn process_reading_body(
+  parser: mut MultipartStreamParser,
+  handler: ref mut MultipartStreamHandler,
+  default_encoding: String,
+) -> Result[Nil, String] {
+  let boundary_marker = '--' + parser.boundary
+  let boundary_bytes = boundary_marker.to_byte_array
+
+  # Scan for next boundary
+  match find_boundary_in_buffer(ref parser.buffer, ref boundary_bytes) {
+    case Some(pos) -> {
+      # Found boundary - emit body data before it
+      if pos > 0 {
+        let mut body_data = ByteArray.new
+        let mut i = 0
+
+        # Copy body data up to boundary (excluding trailing CRLF before boundary)
+        let body_end = if pos >= 2 {
+          # Check if there's CRLF before boundary
+          match parser.buffer.get(pos - 2) {
+            case Ok(b1) -> {
+              match parser.buffer.get(pos - 1) {
+                case Ok(b2) -> {
+                  if b1 == 13 && b2 == 10 {
+                    pos - 2
+                  } else if b2 == 10 {
+                    pos - 1
+                  } else {
+                    pos
+                  }
+                }
+                case Error(_) -> pos
+              }
+            }
+            case Error(_) -> pos
+          }
+        } else {
+          pos
+        }
+
+        while i < body_end {
+          match parser.buffer.get(i) {
+            case Ok(byte) -> body_data.push(byte)
+            case Error(_) -> {}
+          }
+          i = i + 1
+        }
+
+        # Emit body data
+        if body_data.size > 0 {
+          match parser.current_context {
+            case Some(ctx) -> {
+              match handler.on_part_data(ref body_data, ctx.content_transfer_encoding) {
+                case Ok(_) -> {}
+                case Error(e) -> return Result.Error("Handler on_part_data failed: {e}")
+              }
+            }
+            case None -> {}
+          }
+        }
+      }
+
+      # Notify end of part
+      match handler.on_part_end {
+        case Ok(_) -> {}
+        case Error(e) -> return Result.Error("Handler on_part_end failed: {e}")
+      }
+
+      # Remove body and boundary from buffer
+      let new_buffer = ByteArray.new
+      let skip_to = pos + boundary_bytes.size
+
+      # Skip past boundary and trailing CRLF
+      let mut j = skip_to
+      while j < parser.buffer.size {
+        match parser.buffer.get(j) {
+          case Ok(byte) -> {
+            if byte == 13 || byte == 10 {
+              j = j + 1
+            } else {
+              break
+            }
+          }
+          case Error(_) -> break
+        }
+      }
+
+      while j < parser.buffer.size {
+        match parser.buffer.get(j) {
+          case Ok(byte) -> new_buffer.push(byte)
+          case Error(_) -> {}
+        }
+        j = j + 1
+      }
+
+      parser.buffer = new_buffer
+      parser.current_context = Option.None
+      parser.state = MultipartState.AtBoundary
+      Result.Ok(Nil)
+    }
+    case None -> {
+      # Boundary not found - emit available data except for safety buffer
+      let boundary_size = boundary_bytes.size
+      let safety_buffer = boundary_size + 10  # Keep extra bytes in case boundary is split
+
+      if parser.buffer.size > safety_buffer {
+        let emit_size = parser.buffer.size - safety_buffer
+        let mut body_data = ByteArray.new
+
+        let mut i = 0
+        while i < emit_size {
+          match parser.buffer.get(i) {
+            case Ok(byte) -> body_data.push(byte)
+            case Error(_) -> {}
+          }
+          i = i + 1
+        }
+
+        # Emit body data
+        match parser.current_context {
+          case Some(ctx) -> {
+            match handler.on_part_data(ref body_data, ctx.content_transfer_encoding) {
+              case Ok(_) -> {}
+              case Error(e) -> return Result.Error("Handler on_part_data failed: {e}")
+            }
+          }
+          case None -> {}
+        }
+
+        # Remove emitted data from buffer
+        let new_buffer = ByteArray.new
+        let mut j = emit_size
+        while j < parser.buffer.size {
+          match parser.buffer.get(j) {
+            case Ok(byte) -> new_buffer.push(byte)
+            case Error(_) -> {}
+          }
+          j = j + 1
+        }
+        parser.buffer = new_buffer
+      }
+
+      Result.Ok(Nil)
+    }
+  }
+}
+
+# Find boundary marker in buffer
+#
+# Returns the position where boundary starts, or None if not found.
+fn find_boundary_in_buffer(
+  buffer: ref ByteArray,
+  boundary: ref ByteArray,
+) -> Option[Int] {
+  if buffer.size < boundary.size {
+    return Option.None
+  }
+
+  let mut i = 0
+  while i <= buffer.size - boundary.size {
+    let mut match_found = true
+    let mut j = 0
+
+    while j < boundary.size {
+      match buffer.get(i + j) {
+        case Ok(buf_byte) -> {
+          match boundary.get(j) {
+            case Ok(bound_byte) -> {
+              if buf_byte != bound_byte {
+                match_found = false
+                break
+              }
+            }
+            case Error(_) -> {
+              match_found = false
+              break
+            }
+          }
+        }
+        case Error(_) -> {
+          match_found = false
+          break
+        }
+      }
+      j = j + 1
+    }
+
+    if match_found {
+      return Option.Some(i)
+    }
+
+    i = i + 1
+  }
+
+  Option.None
+}
+
+# Find double newline in buffer (header/body separator)
+fn find_double_newline(buffer: ref ByteArray) -> Option[Int] {
+  if buffer.size < 2 {
+    return Option.None
+  }
+
+  let mut i = 0
+  while i < buffer.size - 1 {
+    match buffer.get(i) {
+      case Ok(b1) -> {
+        match buffer.get(i + 1) {
+          case Ok(b2) -> {
+            # Look for \n\n
+            if b1 == 10 && b2 == 10 {
+              return Option.Some(i)
+            }
+          }
+          case Error(_) -> {}
+        }
+      }
+      case Error(_) -> {}
+    }
+    i = i + 1
+  }
+
+  Option.None
+}
+
+# Parse part headers
+fn parse_part_headers(
+  headers_raw: String,
+  max_headers: Int,
+) -> Result[Array[(String, String)], String] {
+  import emailparser.header (parse_headers_impl)
+
+  match parse_headers_impl(headers_raw, false, 100000, max_headers) {
+    case Ok(headers) -> Result.Ok(headers)
+    case Error(e) -> Result.Error(e.to_message)
+  }
+}
+
+# Get header value by name (case-insensitive)
+fn get_header_value(
+  headers: ref Array[(String, String)],
+  name: String,
+) -> Option[String] {
+  for (key, value) in headers.iter {
+    if eq_ignore_case(key.clone, name) {
+      return Option.Some(value.clone)
+    }
+  }
+  Option.None
+}
+
+# Case-insensitive string comparison
+fn eq_ignore_case(a: String, b: String) -> Bool {
+  a.to_lower == b.to_lower
+}
+
+# Extract filename from Content-Disposition header
+fn extract_filename_from_disposition(disposition: String) -> Option[String] {
+  let filename_key = 'filename='
+
+  match disposition.index_of(filename_key, 0) {
+    case Some(pos) -> {
+      let start = pos + filename_key.size
+      if start >= disposition.size {
+        return Option.None
+      }
+
+      # Check for quoted filename
+      match disposition.get(start) {
+        case Ok(byte) -> {
+          if byte == 34 {  # '"'
+            # Quoted filename
+            match disposition.index_of('"', start + 1) {
+              case Some(end) -> {
+                if end > start + 1 {
+                  return Option.Some(disposition.substring(start + 1, end))
+                }
+              }
+              case None -> {}
+            }
+          } else {
+            # Unquoted filename - read until space or semicolon
+            let mut end = start
+            while end < disposition.size {
+              match disposition.get(end) {
+                case Ok(b) -> {
+                  if b == 32 || b == 59 {  # space or ;
+                    break
+                  }
+                  end = end + 1
+                }
+                case Error(_) -> break
+              }
+            }
+            if end > start {
+              return Option.Some(disposition.substring(start, end))
+            }
+          }
+        }
+        case Error(_) -> {}
+      }
+    }
+    case None -> {}
+  }
+
+  Option.None
+}
