@@ -23,8 +23,8 @@ type pub MemoryBufferingHandler {
   let mut @text_body: String
   let mut @html_body: String
   let mut @headers: Array[(String, String)]
-  let mut @attachments: Array[(mut AttachmentInfo, ByteArray)]
-  let mut @current_attachment: Option[mut AttachmentInfo]
+  let mut @attachments: Array[(AttachmentInfo, ByteArray)]
+  let mut @current_attachment: Option[AttachmentInfo]
   let mut @current_attachment_data: ByteArray
   let mut @errors: Array[String]
   let mut @begin_called: Bool
@@ -56,7 +56,7 @@ impl MemoryBufferingHandler {
     @html_body
   }
 
-  fn pub mut get_attachments -> mut Array[(mut AttachmentInfo, ByteArray)] {
+  fn pub mut get_attachments -> mut Array[(AttachmentInfo, ByteArray)] {
     @attachments
   }
 
@@ -89,15 +89,31 @@ impl StreamHandler for MemoryBufferingHandler {
     Result.Ok(0) 
   }
 
-  fn pub mut on_attachment_begin(info: mut AttachmentInfo)   -> Result[Int, String] {
-    @current_attachment = Option.Some(info)
+  fn pub mut on_attachment_begin(info: ref AttachmentInfo)   -> Result[Int, String] {
+    # Create a new AttachmentInfo with the same values
+    let info_copy = AttachmentInfo(
+      index: info.index,
+      content_type: info.content_type.clone(),
+      filename: match info.filename {
+        case Some(f) -> Option.Some(f.clone())
+        case None -> Option.None
+      },
+      content_disposition: info.content_disposition.clone(),
+      content_id: match info.content_id {
+        case Some(id) -> Option.Some(id.clone())
+        case None -> Option.None
+      },
+      size: info.size,
+      transfer_encoding: info.transfer_encoding.clone(),
+    )
+    @current_attachment = Option.Some(info_copy)
     @current_attachment_data = recover ByteArray.new
     Result.Ok(0)
   }
 
   fn pub mut on_attachment_chunk(
     chunk: ByteArray,
-    info: mut AttachmentInfo,
+    info: ref AttachmentInfo,
   )   -> Result[Int, String] {
     let mut i = 0
     while i < chunk.size {
@@ -110,16 +126,29 @@ impl StreamHandler for MemoryBufferingHandler {
     Result.Ok(0)
   }
 
-  fn pub mut on_attachment_end(info: mut AttachmentInfo)   -> Result[Int, String] {
-    match @current_attachment {
-      case Some(att) -> {
-        @attachments.push((att, @current_attachment_data.clone()))
-      }
-      case None -> {}
-    }
+  fn pub mut on_attachment_end(info: ref AttachmentInfo)   -> Result[Int, String] {
+    # Use the info parameter instead of stored attachment
+    # Create a copy to store
+    let info_copy = AttachmentInfo(
+      index: info.index,
+      content_type: info.content_type.clone(),
+      filename: match info.filename {
+        case Some(f) -> Option.Some(f.clone())
+        case None -> Option.None
+      },
+      content_disposition: info.content_disposition.clone(),
+      content_id: match info.content_id {
+        case Some(id) -> Option.Some(id.clone())
+        case None -> Option.None
+      },
+      size: info.size,
+      transfer_encoding: info.transfer_encoding.clone(),
+    )
+    @attachments.push((info_copy, @current_attachment_data.clone()))
+
     @current_attachment = Option.None
     @current_attachment_data = recover ByteArray.new
-    Result.Ok(0) 
+    Result.Ok(0)
   }
 
   fn pub mut on_end   -> Result[Int, String] {

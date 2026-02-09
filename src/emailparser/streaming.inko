@@ -131,13 +131,13 @@ trait pub StreamHandler {
   fn pub mut on_html_chunk(chunk: String) -> Result[Int, String]
   
   # Called when an attachment header is parsed (metadata only)
-  fn pub mut on_attachment_begin(info: mut AttachmentInfo) -> Result[Int, String]
-  
+  fn pub mut on_attachment_begin(info: ref AttachmentInfo) -> Result[Int, String]
+
   # Called when attachment data is available (in chunks)
-  fn pub mut on_attachment_chunk(chunk: ByteArray, info: mut AttachmentInfo) -> Result[Int, String]
-  
+  fn pub mut on_attachment_chunk(chunk: ByteArray, info: ref AttachmentInfo) -> Result[Int, String]
+
   # Called when attachment is complete
-  fn pub mut on_attachment_end(info: mut AttachmentInfo) -> Result[Int, String]
+  fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String]
   
   # Called when parsing completes successfully
   fn pub mut on_end -> Result[Int, String]
@@ -1401,53 +1401,77 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
   }
   
   fn pub mut on_part_end {
+    # Collect decoded data before calling handler methods
+    let mut base64_decoded: Option[ByteArray] = Option.None
+    let mut qp_decoded: Option[ByteArray] = Option.None
+
+    # Finish base64 decoder if present
+    match @base64_decoder {
+      case Some(mut d) -> {
+        match d.finish {
+          case Ok(decoded) -> {
+            if decoded.size > 0 {
+              base64_decoded = Option.Some(decoded)
+            }
+          }
+          case Error(_) -> {}
+        }
+      }
+      case None -> {}
+    }
+    @base64_decoder = Option.None
+
+    # Finish quoted-printable decoder if present
+    match @qp_decoder {
+      case Some(mut d) -> {
+        match d.finish {
+          case Ok(decoded) -> {
+            if decoded.size > 0 {
+              qp_decoded = Option.Some(decoded)
+            }
+          }
+          case Error(_) -> {}
+        }
+      }
+      case None -> {}
+    }
+    @qp_decoder = Option.None
+
+    # Now pass decoded data to handler with info reference
     match @current_info {
       case Some(info) -> {
-        match @base64_decoder {
-          case Some(mut d) -> {
-            match d.finish {
-              case Ok(decoded) -> {
-                if decoded.size > 0 {
-                  match @handler.on_attachment_chunk(decoded, info) {
-                    case Ok(_) -> {}
-                    case Error(_) -> {}
-                  }
-                }
-              }
+        match base64_decoded {
+          case Some(data) -> {
+            match @handler.on_attachment_chunk(data, info) {
+              case Ok(_) -> {}
               case Error(_) -> {}
             }
-            @base64_decoder = Option.None
           }
           case None -> {}
         }
-        match @qp_decoder {
-          case Some(mut d) -> {
-            match d.finish {
-              case Ok(decoded) -> {
-                if decoded.size > 0 {
-                  match @handler.on_attachment_chunk(decoded, info) {
-                    case Ok(_) -> {}
-                    case Error(_) -> {}
-                  }
-                }
-              }
+
+        match qp_decoded {
+          case Some(data) -> {
+            match @handler.on_attachment_chunk(data, info) {
+              case Ok(_) -> {}
               case Error(_) -> {}
             }
-            @qp_decoder = Option.None
           }
           case None -> {}
         }
-        
+
         match @handler.on_attachment_end(info) {
           case Ok(_) -> {}
           case Error(_) -> {}
         }
-        
+
         @attachment_count = @attachment_count + 1
-        @current_info = Option.None
       }
       case None -> {}
     }
+
+    # Clear current_info last
+    @current_info = Option.None
   }
 }
 
