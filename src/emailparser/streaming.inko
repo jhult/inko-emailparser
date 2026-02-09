@@ -17,8 +17,8 @@ import emailparser.streaming_reader (AsyncReader)
 import emailparser.header (parse_headers_impl, get_header_value_impl, parse_content_type_impl, get_param_value_impl, eq_ignore_case, extract_extra_headers)
 import emailparser.decoder (decode_body_impl, decode_rfc2047_word)
 import emailparser.address (parse_address_list_impl)
-import emailparser.message_id (parse_message_ids_impl)
 import emailparser.validation (is_valid_boundary)
+import emailparser (parse_message_ids_impl)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
@@ -119,31 +119,31 @@ impl StreamingConfig {
 # Implement this trait to process email data incrementally.
 trait pub StreamHandler {
   # Called when parsing begins
-  fn pub on_begin -> Result[Nil, String]
-
+  fn pub mut on_begin -> Result[Nil, String]
+  
   # Called when headers are parsed
-  fn pub on_headers(headers: ref Array[(String, String)]) -> Result[Nil, String]
-
+  fn pub mut on_headers(headers: ref Array[(String, String)]) -> Result[Nil, String]
+  
   # Called when text body is available (in chunks)
-  fn pub on_text_chunk(chunk: String) -> Result[Nil, String]
-
+  fn pub mut on_text_chunk(chunk: String) -> Result[Nil, String]
+  
   # Called when HTML body is available (in chunks)
-  fn pub on_html_chunk(chunk: String) -> Result[Nil, String]
-
+  fn pub mut on_html_chunk(chunk: String) -> Result[Nil, String]
+  
   # Called when an attachment header is parsed (metadata only)
-  fn pub on_attachment_begin(info: AttachmentInfo) -> Result[Nil, String]
-
+  fn pub mut on_attachment_begin(info: AttachmentInfo) -> Result[Nil, String]
+  
   # Called when attachment data is available (in chunks)
-  fn pub on_attachment_chunk(chunk: ByteArray, info: AttachmentInfo) -> Result[Nil, String]
-
+  fn pub mut on_attachment_chunk(chunk: ByteArray, info: AttachmentInfo) -> Result[Nil, String]
+  
   # Called when attachment is complete
-  fn pub on_attachment_end(info: AttachmentInfo) -> Result[Nil, String]
-
+  fn pub mut on_attachment_end(info: AttachmentInfo) -> Result[Nil, String]
+  
   # Called when parsing completes successfully
-  fn pub on_end -> Result[Nil, String]
-
+  fn pub mut on_end -> Result[Nil, String]
+  
   # Called when an error occurs (optional, errors also propagated to caller)
-  fn pub on_error(error: String) -> Result[Nil, String]
+  fn pub mut on_error(error: String) -> Result[Nil, String]
 }
 
 # Streaming parser for large emails
@@ -354,7 +354,7 @@ impl StreamingParser {
   #
   # This async version of parse_stream allows for async processing of callbacks.
   # Returns the same result as parse_stream but handlers can perform async operations.
-  fn pub async parse_async_raw(
+  fn pub mut parse_async_raw(
     raw: String,
     handler: mut StreamHandler,
   ) -> Result[StreamingResult, String] {
@@ -523,7 +523,7 @@ impl StreamingParser {
   #
   # Reads email data incrementally from an async reader and processes it using callbacks.
   # Ideal for processing large emails from files or network streams.
-  fn pub async parse_async_reader(
+  fn pub mut parse_async_reader(
     reader: AsyncReader,
     handler: mut StreamHandler,
   ) -> Result[StreamingResult, String] {
@@ -1162,7 +1162,7 @@ impl MultipartStreamHandler for MultipartHandlerWrapper {
     @current_encoding = content_transfer_encoding
     let content_id = get_header_value_impl(ref headers, 'Content-ID')
     
-    let is_actual_attachment = content_disposition.starts_with?('attachment') || content_disposition.starts_with?('file')
+    let is_actual_attachment = content_disposition.starts_with('attachment') or content_disposition.starts_with('file')
     
     let filename = if is_actual_attachment {
       extract_filename(content_disposition)
@@ -1520,380 +1520,6 @@ fn parse_multipart_stream(
   Result.Ok(attachment_count)
 }
   
-  # Create a wrapper handler that adapts MultipartStreamHandler to StreamHandler
-  let mut attachment_count = 0
-  let mut current_info: Option[AttachmentInfo] = Option.None
-  let mut base64_decoder: Option[Base64StreamingDecoder] = Option.None
-  let mut qp_decoder: Option[QuotedPrintableStreamingDecoder] = Option.None
-  let mut current_encoding: String = default_encoding
-  
-  type MultipartHandlerWrapper {
-    let @handler: StreamHandler
-    let @attachment_count: ref mut Int
-    let @current_info: ref mut Option[AttachmentInfo]
-    let @base64_decoder: ref mut Option[Base64StreamingDecoder]
-    let @qp_decoder: ref mut Option[QuotedPrintableStreamingDecoder]
-    let @current_encoding: ref mut String
-    let @max_size: Int
-    let @chunk_size: Int
-    let @encoding: String
-  }
-  
-  impl MultipartStreamHandler for MultipartHandlerWrapper {
-    fn pub mut on_part_begin(
-      headers: ref Array[(String, String)],
-      content_type: String,
-      is_attachment: Bool,
-    ) {
-      # Get content disposition to determine if attachment
-      let content_disposition = get_header_value_impl(ref headers, 'Content-Disposition').or('')
-      let content_transfer_encoding = get_header_value_impl(ref headers, 'Content-Transfer-Encoding').or(@encoding)
-      @current_encoding = content_transfer_encoding
-      let content_id = get_header_value_impl(ref headers, 'Content-ID')
-      
-      # Determine if attachment
-      let is_actual_attachment = content_disposition.starts_with?('attachment') || content_disposition.starts_with?('file')
-      
-      # Extract filename if present
-      let filename = if is_actual_attachment {
-        extract_filename_from_disposition(content_disposition)
-      } else {
-        Option.None
-      }
-      
-      if is_actual_attachment {
-        let info = AttachmentInfo(
-          index: @attachment_count,
-          content_type: content_type,
-          filename: filename,
-          content_disposition: content_disposition,
-          content_id: content_id,
-          size: 0,
-          transfer_encoding: content_transfer_encoding,
-        )
-        @current_info = Option.Some(info)
-      }
-    }
-    
-    fn pub mut on_part_data(
-      data: ref ByteArray,
-      content_transfer_encoding: String,
-    ) {
-      let data_str = data.into_string
-      
-      match @current_info.clone {
-        case Some(info) -> {
-          # Stream attachment data
-          let encoding_lower = content_transfer_encoding.to_lower
-          
-          if encoding_lower == 'base64' {
-            match @base64_decoder {
-              case None -> {
-                @base64_decoder = Option.Some(Base64StreamingDecoder.new(@max_size, false))
-              }
-              case Some(_) -> {}
-            }
-            match @base64_decoder {
-              case Some(mut d) -> {
-                match d.feed(data_str) {
-                  case Ok(decoded) -> {
-                    if decoded.size > 0 {
-                      match @handler.on_attachment_chunk(decoded, info) {
-                        case Ok(_) -> {}
-                        case Error(_) -> {}
-                      }
-                    }
-                  }
-                  case Error(_) -> {}
-                }
-              }
-              case None -> {}
-            }
-          } else if encoding_lower == 'quoted-printable' {
-            match @qp_decoder {
-              case None -> {
-                @qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(@max_size, false, false))
-              }
-              case Some(_) -> {}
-            }
-            match @qp_decoder {
-              case Some(mut d) -> {
-                match d.feed(data_str) {
-                  case Ok(decoded) -> {
-                    if decoded.size > 0 {
-                      match @handler.on_attachment_chunk(decoded, info) {
-                        case Ok(_) -> {}
-                        case Error(_) -> {}
-                      }
-                    }
-                  }
-                  case Error(_) -> {}
-                }
-              }
-              case None -> {}
-            }
-          } else {
-            match @handler.on_attachment_chunk(data.clone, info) {
-              case Ok(_) -> {}
-              case Error(_) -> {}
-            }
-          }
-        }
-        case None -> {
-          # Stream body data (text or html)
-          let content_type = get_header_value_impl(ref [], 'Content-Type').or('')
-          let is_text_plain = content_type == 'text/plain'
-          let is_text_html = content_type == 'text/html'
-          
-          if is_text_plain {
-            let encoding_lower = content_transfer_encoding.to_lower
-            if encoding_lower == 'base64' {
-              match @base64_decoder {
-                case None -> {
-                  @base64_decoder = Option.Some(Base64StreamingDecoder.new(@max_size, false))
-                }
-                case Some(_) -> {}
-              }
-              match @base64_decoder {
-                case Some(mut d) -> {
-                  match d.feed(data_str) {
-                    case Ok(decoded) -> {
-                      if decoded.size > 0 {
-                        let decoded_str = decoded.into_string
-                        let mut pos = 0
-                        while pos < decoded_str.size {
-                          let end = if pos + @chunk_size > decoded_str.size {
-                            decoded_str.size
-                          } else {
-                            pos + @chunk_size
-                          }
-                          let chunk = decoded_str.substring(pos, end)
-                          match @handler.on_text_chunk(chunk) {
-                            case Ok(_) -> {}
-                            case Error(_) -> {}
-                          }
-                          pos = end
-                        }
-                      }
-                    }
-                    case Error(_) -> {}
-                  }
-                }
-                case None -> {}
-              }
-            } else if encoding_lower == 'quoted-printable' {
-              match @qp_decoder {
-                case None -> {
-                  @qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(@max_size, false, false))
-                }
-                case Some(_) -> {}
-              }
-              match @qp_decoder {
-                case Some(mut d) -> {
-                  match d.feed(data_str) {
-                    case Ok(decoded) -> {
-                      if decoded.size > 0 {
-                        let decoded_str = decoded.into_string
-                        let mut pos = 0
-                        while pos < decoded_str.size {
-                          let end = if pos + @chunk_size > decoded_str.size {
-                            decoded_str.size
-                          } else {
-                            pos + @chunk_size
-                          }
-                          let chunk = decoded_str.substring(pos, end)
-                          match @handler.on_text_chunk(chunk) {
-                            case Ok(_) -> {}
-                            case Error(_) -> {}
-                          }
-                          pos = end
-                        }
-                      }
-                    }
-                    case Error(_) -> {}
-                  }
-                }
-                case None -> {}
-              }
-            } else {
-              match @handler.on_text_chunk(data_str) {
-                case Ok(_) -> {}
-                case Error(_) -> {}
-              }
-            }
-          } else if is_text_html {
-            let encoding_lower = content_transfer_encoding.to_lower
-            if encoding_lower == 'base64' {
-              match @base64_decoder {
-                case None -> {
-                  @base64_decoder = Option.Some(Base64StreamingDecoder.new(@max_size, false))
-                }
-                case Some(_) -> {}
-              }
-              match @base64_decoder {
-                case Some(mut d) -> {
-                  match d.feed(data_str) {
-                    case Ok(decoded) -> {
-                      if decoded.size > 0 {
-                        let decoded_str = decoded.into_string
-                        let mut pos = 0
-                        while pos < decoded_str.size {
-                          let end = if pos + @chunk_size > decoded_str.size {
-                            decoded_str.size
-                          } else {
-                            pos + @chunk_size
-                          }
-                          let chunk = decoded_str.substring(pos, end)
-                          match @handler.on_html_chunk(chunk) {
-                            case Ok(_) -> {}
-                            case Error(_) -> {}
-                          }
-                          pos = end
-                        }
-                      }
-                    }
-                    case Error(_) -> {}
-                  }
-                }
-                case None -> {}
-              }
-            } else if encoding_lower == 'quoted-printable' {
-              match @qp_decoder {
-                case None -> {
-                  @qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(@max_size, false, false))
-                }
-                case Some(_) -> {}
-              }
-              match @qp_decoder {
-                case Some(mut d) -> {
-                  match d.feed(data_str) {
-                    case Ok(decoded) -> {
-                      if decoded.size > 0 {
-                        let decoded_str = decoded.into_string
-                        let mut pos = 0
-                        while pos < decoded_str.size {
-                          let end = if pos + @chunk_size > decoded_str.size {
-                            decoded_str.size
-                          } else {
-                            pos + @chunk_size
-                          }
-                          let chunk = decoded_str.substring(pos, end)
-                          match @handler.on_html_chunk(chunk) {
-                            case Ok(_) -> {}
-                            case Error(_) -> {}
-                          }
-                          pos = end
-                        }
-                      }
-                    }
-                    case Error(_) -> {}
-                  }
-                }
-                case None -> {}
-              }
-            } else {
-              match @handler.on_html_chunk(data_str) {
-                case Ok(_) -> {}
-                case Error(_) -> {}
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    fn pub mut on_part_end {
-      match @current_info.clone {
-        case Some(info) -> {
-          # Finish attachment decoding
-          match @base64_decoder {
-            case Some(mut d) -> {
-              match d.finish {
-                case Ok(decoded) -> {
-                  if decoded.size > 0 {
-                    match @handler.on_attachment_chunk(decoded, info) {
-                      case Ok(_) -> {}
-                      case Error(_) -> {}
-                    }
-                  }
-                }
-                case Error(_) -> {}
-              }
-              @base64_decoder = Option.None
-            }
-            case None -> {}
-          }
-          match @qp_decoder {
-            case Some(mut d) -> {
-              match d.finish {
-                case Ok(decoded) -> {
-                  if decoded.size > 0 {
-                    match @handler.on_attachment_chunk(decoded, info) {
-                      case Ok(_) -> {}
-                      case Error(_) -> {}
-                    }
-                  }
-                }
-                case Error(_) -> {}
-              }
-              @qp_decoder = Option.None
-            }
-            case None -> {}
-          }
-          
-          # Notify handler of attachment end
-          match @handler.on_attachment_end(info) {
-            case Ok(_) -> {}
-            case Error(_) -> {}
-          }
-          
-          @attachment_count = @attachment_count + 1
-          @current_info = Option.None
-        }
-        case None -> {}
-      }
-    }
-  }
-  
-  # Create the multipart parser
-  let mut parser = MultipartStreamParser.new(
-    boundary,
-    max_depth,
-    chunk_size,
-    false,
-    max_headers,
-    max_size,
-  )
-  
-  # Create the wrapper handler
-  let wrapper = MultipartHandlerWrapper(
-    handler: handler,
-    attachment_count: ref attachment_count,
-    current_info: ref current_info,
-    base64_decoder: ref base64_decoder,
-    qp_decoder: ref qp_decoder,
-    current_encoding: ref current_encoding,
-    max_size: max_size,
-    chunk_size: chunk_size,
-    encoding: default_encoding,
-  )
-  
-  # Feed data to the parser
-  let data = raw.to_byte_array
-  match parser.feed(ref data, wrapper, default_encoding) {
-    case Ok(_) -> {}
-    case Error(e) -> return Result.Error(e)
-  }
-  
-  # Finish parsing
-  match parser.finish(wrapper) {
-    case Ok(_) -> {}
-    case Error(e) -> return Result.Error(e)
-  }
-  
-  Result.Ok(attachment_count)
-}
-
 fn extract_filename(content_disposition: String) -> Option[String] {
   # Simple extraction - looks for filename= parameter
   let filename_key = 'filename='
@@ -1903,32 +1529,40 @@ fn extract_filename(content_disposition: String) -> Option[String] {
       if start >= content_disposition.size {
         return Option.None
       }
-      
+
       # Check for quoted filename
-      if content_disposition.byte_at(start) == 34 { # '"'
-        let end = match content_disposition.index_of('"', start + 1) {
-          case Some(e) -> e
-          case None -> content_disposition.size
-        }
-        if end > start + 1 {
-          return Option.Some(content_disposition.substring(start + 1, end))
-        }
-      } else {
-        # Unquoted filename - read until space or semicolon
-        let mut end = start
-        while end < content_disposition.size {
-          let byte = content_disposition.byte_at(end)
-          if byte == 32 /* space */ || byte == 59 /* ; */ {
-            break
+      match content_disposition.get(start) {
+        case Ok(byte) -> {
+          if byte == 34 {
+            let end = match content_disposition.index_of('"', start + 1) {
+              case Some(e) -> e
+              case None -> content_disposition.size
+            }
+            if end > start + 1 {
+              return Option.Some(content_disposition.substring(start + 1, end))
+            }
+          } else {
+            # Unquoted filename - read until space or semicolon
+            let mut end = start
+            while end < content_disposition.size {
+              match content_disposition.get(end) {
+                case Ok(b) -> {
+                  if b == 32 or b == 59 {
+                    break
+                  }
+                  end = end + 1
+                }
+                case Error(_) -> break
+              }
+            }
+            if end > start {
+              return Option.Some(content_disposition.substring(start, end))
+            }
           }
-          end = end + 1
         }
-        if end > start {
-          return Option.Some(content_disposition.substring(start, end))
-        }
+        case Error(_) -> Option.None
       }
     }
-    case None -> {}
+    case None -> Option.None
   }
-  Option.None
 }

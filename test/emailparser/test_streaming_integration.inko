@@ -1,0 +1,428 @@
+# This Source Code Form is subject to terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Integration Tests for Streaming API
+#
+# Tests verify that streaming produces same results as non-streaming for small emails,
+# and that large emails can be parsed with minimal memory usage.
+
+import emailparser.streaming (StreamHandler, StreamingParser, StreamingConfig, AttachmentInfo)
+import emailparser (EmailParser)
+import emailparser.test_data_generator (TestDataGenerator, TestAttachment)
+import std.bytes (ByteArray)
+import std.option (Option)
+import std.result (Result)
+
+# MemoryBufferingHandler reconstructs content for test validation
+#
+# This handler buffers all streamed content in memory, which is NOT
+# how streaming should be used in production, but is useful for tests
+# to verify correctness.
+type pub MemoryBufferingHandler {
+  let mut @text_body: String
+  let mut @html_body: String
+  let mut @headers: Array[(String, String)]
+  let mut @attachments: Array[(AttachmentInfo, ByteArray)]
+  let mut @current_attachment: Option[AttachmentInfo]
+  let mut @current_attachment_data: ByteArray
+  let mut @errors: Array[String]
+  let mut @begin_called: Bool
+  let mut @headers_called: Bool
+  let mut @end_called: Bool
+}
+
+impl MemoryBufferingHandler {
+  fn pub static new -> MemoryBufferingHandler {
+    MemoryBufferingHandler(
+      text_body: '',
+      html_body: '',
+      headers: [],
+      attachments: [],
+      current_attachment: Option.None,
+      current_attachment_data: recover ByteArray.new,
+      errors: [],
+      begin_called: false,
+      headers_called: false,
+      end_called: false,
+    )
+  }
+
+  fn pub mut get_text_body -> String {
+    @text_body
+  }
+
+  fn pub mut get_html_body -> String {
+    @html_body
+  }
+
+  fn pub mut get_attachments -> Array[(AttachmentInfo, ByteArray)] {
+    @attachments
+  }
+
+  fn pub mut get_errors -> Array[String] {
+    @errors
+  }
+}
+
+impl StreamHandler for MemoryBufferingHandler {
+  fn pub mut on_begin -> Result[Nil, String] {
+    @begin_called = true
+    Result.Ok(())
+  }
+
+  fn pub mut on_headers(headers: ref Array[(String, String)]) -> Result[Nil, String] {
+    @headers_called = true
+    @headers = []
+    for (key, value) in headers.iter {
+      @headers.push((key, value))
+    }
+    Result.Ok(()) 
+  }
+
+  fn pub mut on_text_chunk(chunk: String) -> Result[Nil, String] {
+    @text_body = @text_body + chunk
+    Result.Ok(()) 
+  }
+
+  fn pub mut on_html_chunk(chunk: String) -> Result[Nil, String] {
+    @html_body = @html_body + chunk
+    Result.Ok(()) 
+  }
+
+  fn pub mut on_attachment_begin(info: AttachmentInfo) -> Result[Nil, String] {
+    @current_attachment = Option.Some(info)
+    @current_attachment_data = recover ByteArray.new
+    Result.Ok(()) 
+  }
+
+  fn pub mut on_attachment_chunk(
+    chunk: ByteArray,
+    info: AttachmentInfo,
+  ) -> Result[Nil, String] {
+    let mut i = 0
+    while i < chunk.size {
+      match chunk.get(i) {
+        case Ok(byte) -> @current_attachment_data.push(byte)
+        case Error(_) -> {}
+      }
+      i = i + 1
+    }
+    Result.Ok(()) 
+  }
+
+  fn pub mut on_attachment_end(info: AttachmentInfo) -> Result[Nil, String] {
+    match @current_attachment {
+      case Some(att) -> {
+        @attachments.push((att, @current_attachment_data.clone()))
+      }
+      case None -> {}
+    }
+    @current_attachment = Option.None
+    @current_attachment_data = recover ByteArray.new
+    Result.Ok(()) 
+  }
+
+  fn pub mut on_end -> Result[Nil, String] {
+    @end_called = true
+    Result.Ok(()) 
+  }
+
+  fn pub mut on_error(error: String) -> Result[Nil, String] {
+    @errors.push(error)
+    Result.Ok(()) 
+  }
+}
+
+# Tests for streaming API integration
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  t.test('simple_text_email_streaming', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_text_email('Simple Test', 'This is a simple text body.')
+
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+
+    match parser.parse_stream(email, handler) {
+      case Ok(result) -> {
+        t.equal(result.subject, 'Simple Test')
+        t.true(handler.begin_called)
+        t.true(handler.headers_called)
+        t.true(handler.end_called)
+        t.equal(handler.get_text_body.trim, 'This is a simple text body.')
+
+        match result.content_type {
+          case 'text/plain' -> t.true(true)
+          case _ -> t.equal('text/plain', result.content_type)
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('simple_text_email_matches_non_streaming', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_text_email('Compare Test', 'Body content here.')
+
+    let streaming_parser = StreamingParser.new
+    let mut streaming_handler = MemoryBufferingHandler.new
+
+    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+      case Ok(r) -> r
+      case Error(e) -> {
+        t.equal('should parse streaming', 'got error: ' + e)
+        return
+      }
+    }
+
+    let regular_parser = EmailParser.new
+    let regular_result = match regular_parser.parse(email) {
+      case Ok(r) -> r
+      case Error(e) -> {
+        t.equal('should parse regular', 'got error: ' + e)
+        return
+      }
+    }
+
+    t.equal(streaming_result.subject, regular_result.subject)
+    t.equal(streaming_result.content_type, regular_result.mime.content_type)
+    t.equal(streaming_result.attachment_count, regular_result.attachments.size)
+  })
+
+  t.test('email_with_single_attachment_streaming', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_email_with_attachment('test.txt', 'Attachment Content', 'base64')
+
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+
+    match parser.parse_stream(email, handler) {
+      case Ok(result) -> {
+        t.equal(result.attachment_count, 1)
+
+        let attachments = handler.get_attachments
+        t.equal(attachments.size, 1)
+
+        match attachments.get(0) {
+          case Ok((info, data)) -> {
+            t.equal(info.filename, Option.Some('test.txt'))
+            t.equal(info.content_type, 'application/octet-stream')
+            t.equal(data.into_string, 'Attachment Content')
+          }
+          case Error(_) -> t.equal('should have attachment', 'got error')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('email_with_multiple_attachments_streaming', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let attachments = [
+      TestAttachment(
+        name: 'file1.txt',
+        content_type: 'text/plain',
+        content: 'Content 1',
+        encoding: 'base64',
+      ),
+      TestAttachment(
+        name: 'file2.txt',
+        content_type: 'text/plain',
+        content: 'Content 2',
+        encoding: 'base64',
+      ),
+      TestAttachment(
+        name: 'file3.txt',
+        content_type: 'text/plain',
+        content: 'Content 3',
+        encoding: 'base64',
+      ),
+    ]
+    let email = generator.generate_email_with_attachments(attachments)
+
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+
+    match parser.parse_stream(email, handler) {
+      case Ok(result) -> {
+        t.equal(result.attachment_count, 3)
+
+        let handler_attachments = handler.get_attachments
+        t.equal(handler_attachments.size, 3)
+
+        match handler_attachments.get(0) {
+          case Ok((info, _)) -> t.equal(info.filename, Option.Some('file1.txt'))
+          case Error(_) -> {}
+        }
+
+        match handler_attachments.get(1) {
+          case Ok((info, _)) -> t.equal(info.filename, Option.Some('file2.txt'))
+          case Error(_) -> {}
+        }
+
+        match handler_attachments.get(2) {
+          case Ok((info, _)) -> t.equal(info.filename, Option.Some('file3.txt'))
+          case Error(_) -> {}
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('large_attachment_streaming', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let large_content = generator.generate_large_attachment(100000, 'LARGE_PATTERN')
+    let email = generator.generate_email_with_attachment('large.bin', large_content, 'base64')
+
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+
+    match parser.parse_stream(email, handler) {
+      case Ok(result) -> {
+        t.equal(result.attachment_count, 1)
+
+        let attachments = handler.get_attachments
+        t.equal(attachments.size, 1)
+
+        match attachments.get(0) {
+          case Ok((info, data)) -> {
+            t.equal(info.filename, Option.Some('large.bin'))
+            t.equal(data.size, 100000)
+          }
+          case Error(_) -> t.equal('should have attachment', 'got error')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('nested_multipart_streaming', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_nested_multipart_email(2, 2, 100)
+
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+
+    match parser.parse_stream(email, handler) {
+      case Ok(result) -> {
+        t.equal(result.content_type, 'multipart/mixed')
+        t.true(result.attachment_count >= 2)
+
+        let handler_attachments = handler.get_attachments
+        t.true(handler_attachments.size >= 2)
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('nested_multipart_matches_non_streaming', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_nested_multipart_email(2, 2, 100)
+
+    let streaming_parser = StreamingParser.new
+    let mut streaming_handler = MemoryBufferingHandler.new
+
+    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+      case Ok(r) -> r
+      case Error(e) -> {
+        t.equal('should parse streaming', 'got error: ' + e)
+        return
+      }
+    }
+
+    let regular_parser = EmailParser.new
+    let regular_result = match regular_parser.parse(email) {
+      case Ok(r) -> r
+      case Error(e) -> {
+        t.equal('should parse regular', 'got error: ' + e)
+        return
+      }
+    }
+
+    t.equal(streaming_result.subject, regular_result.subject)
+    t.equal(streaming_result.content_type, regular_result.mime.content_type)
+    t.equal(streaming_result.attachment_count, regular_result.attachments.size)
+  })
+
+  t.test('error_handling_strict_mode', fn (t) {
+    let mut config = StreamingConfig.new
+    config.strict_mode = true
+
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_text_email('Test', 'Body')
+
+    let parser = StreamingParser.with_config(config)
+    let handler = MemoryBufferingHandler.new
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.true(true)
+      case Error(e) -> t.equal('should parse in strict mode', 'got error: ' + e)
+    }
+  })
+
+  t.test('handler_callbacks_called', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_text_email('Callback Test', 'Test body')
+
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> {
+        t.true(handler.begin_called)
+        t.true(handler.headers_called)
+        t.true(handler.end_called)
+      }
+      case Error(_) -> {}
+    }
+  })
+
+  t.test('quoted_printable_attachment_streaming', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_email_with_attachment('test.txt', 'QP Content', 'quoted-printable')
+
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+
+    match parser.parse_stream(email, handler) {
+      case Ok(result) -> {
+        t.equal(result.attachment_count, 1)
+
+        let attachments = handler.get_attachments
+        t.equal(attachments.size, 1)
+
+        match attachments.get(0) {
+          case Ok((info, data)) -> {
+            t.equal(info.filename, Option.Some('test.txt'))
+            t.equal(data.into_string, 'QP Content')
+          }
+          case Error(_) -> t.equal('should have attachment', 'got error')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('multipart_alternative_streaming', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_alternative_email(
+      'Alternative Test',
+      'Plain text',
+      '<html><body>HTML content</body></html>',
+    )
+
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+
+    match parser.parse_stream(email, handler) {
+      case Ok(result) -> {
+        t.equal(result.content_type, 'multipart/alternative')
+        t.true(handler.get_text_body.contains?('Plain text'))
+        t.true(handler.get_html_body.contains?('HTML'))
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+}

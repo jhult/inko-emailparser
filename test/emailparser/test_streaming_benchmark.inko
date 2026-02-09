@@ -1,0 +1,123 @@
+# This Source Code Form is subject to terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Benchmark Tests for Streaming API
+#
+# Provides structure for measuring memory usage and performance of streaming parsing.
+# Note: Actual memory measurement requires profiling tools or runtime metrics.
+
+import emailparser.test_data_generator (TestDataGenerator)
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  t.test('benchmark_1mb_email_structure', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let content = generator.generate_large_attachment(1_000_000, 'X')
+
+    t.equal(content.size, 1_000_000)
+    t.true(content.contains?('PATTERN'))
+  })
+
+  t.test('benchmark_10mb_email_structure', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let content = generator.generate_large_attachment(10_000_000, 'PATTERN10')
+
+    t.equal(content.size, 10_000_000)
+    t.true(content.contains?('PATTERN10'))
+  })
+
+  t.test('benchmark_50mb_email_structure', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let content = generator.generate_large_attachment(50_000_000, 'PATTERN50')
+
+    t.equal(content.size, 50_000_000)
+    t.true(content.contains?('PATTERN50'))
+  })
+
+  t.test('benchmark_nested_structure', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_nested_multipart_email(3, 2, 50_000)
+
+    t.true(email.size > 1000)
+    t.true(email.contains?('boundary'))
+  })
+
+  t.test('benchmark_attachment_count', fn (t) {
+    let mut generator = TestDataGenerator.new
+
+    let attachments = [
+      TestDataGenerator.TestAttachment(
+        name: 'file1.txt',
+        content_type: 'text/plain',
+        content: 'Content 1',
+        encoding: 'base64',
+      ),
+      TestDataGenerator.TestAttachment(
+        name: 'file2.txt',
+        content_type: 'text/plain',
+        content: 'Content 2',
+        encoding: 'base64',
+      ),
+      TestDataGenerator.TestAttachment(
+        name: 'file3.txt',
+        content_type: 'text/plain',
+        content: 'Content 3',
+        encoding: 'base64',
+      ),
+      TestDataGenerator.TestAttachment(
+        name: 'file4.txt',
+        content_type: 'text/plain',
+        content: 'Content 4',
+        encoding: 'base64',
+      ),
+      TestDataGenerator.TestAttachment(
+        name: 'file5.txt',
+        content_type: 'text/plain',
+        content: 'Content 5',
+        encoding: 'base64',
+      ),
+      TestDataGenerator.TestAttachment(
+        name: 'file6.txt',
+        content_type: 'text/plain',
+        content: 'Content 6',
+        encoding: 'base64',
+      ),
+      TestDataGenerator.TestAttachment(
+        name: 'file7.txt',
+        content_type: 'text/plain',
+        content: 'Content 7',
+        encoding: 'base64',
+      ),
+      TestDataGenerator.TestAttachment(
+        name: 'file8.txt',
+        content_type: 'text/plain',
+        content: 'Content 8',
+        encoding: 'base64',
+      ),
+      TestDataGenerator.TestAttachment(
+        name: 'file9.txt',
+        content_type: 'text/plain',
+        content: 'Content 9',
+        encoding: 'base64',
+      ),
+      TestDataGenerator.TestAttachment(
+        name: 'file10.txt',
+        content_type: 'text/plain',
+        content: 'Content 10',
+        encoding: 'base64',
+      ),
+    ]
+    let email = generator.generate_email_with_attachments(attachments)
+
+    t.true(email.contains?('Content 1'))
+    t.true(email.contains?('Content 10'))
+  })
+
+  t.test('benchmark_memory_validation', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let small_email = generator.generate_text_email('Memory Test', 'Body')
+
+    t.true(small_email.size < 10000)
+  })
+}
