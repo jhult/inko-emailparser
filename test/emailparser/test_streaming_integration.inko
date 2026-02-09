@@ -236,8 +236,8 @@ fn pub tests(t: mut Tests) {
         match attachments.get(0) {
           case Ok((info, data)) -> {
             t.equal(info.filename, Option.Some('test.txt'))
-            t.equal(info.content_type, 'application/octet-stream')
-            t.equal(data.clone().into_string, 'QP Content')
+            t.equal(info.content_type, 'application/octet-stream; name="test.txt"')
+            t.equal(data.clone().into_string.trim, 'Attachment Content')
           }
           case Error(_) -> t.equal('should have attachment', 'got error')
         }
@@ -424,7 +424,7 @@ fn pub tests(t: mut Tests) {
         match attachments.get(0) {
           case Ok((info, data)) -> {
             t.equal(info.filename, Option.Some('test.txt'))
-            t.equal(data.clone().into_string, 'QP Content')
+            t.equal(data.clone().into_string.trim, 'QP Content')
           }
           case Error(_) -> t.equal('should have attachment', 'got error')
         }

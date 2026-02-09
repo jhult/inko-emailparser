@@ -810,12 +810,12 @@ fn is_multipart(content_type: String) -> Bool {
 
 # Check if content type is text/plain
 fn is_text_plain(content_type: String) -> Bool {
-  content_type == 'text/plain'
+  content_type.starts_with?('text/plain')
 }
 
 # Check if content type is text/html
 fn is_text_html(content_type: String) -> Bool {
-  content_type == 'text/html'
+  content_type.starts_with?('text/html')
 }
 
 # Parse body with streaming callbacks
@@ -1437,7 +1437,7 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
     }
     @qp_decoder = Option.None
 
-    # Now pass decoded data to handler with info reference
+    # Now pass decoded data to handler
     match @current_info {
       case Some(info) -> {
         match base64_decoded {
@@ -1467,7 +1467,94 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
 
         @attachment_count = @attachment_count + 1
       }
-      case None -> {}
+      case None -> {
+        # Handle text/HTML parts without attachment info
+        if is_text_plain(@current_content_type) {
+          match base64_decoded {
+            case Some(data) -> {
+              let decoded_str = data.into_string
+              let mut pos = 0
+              while pos < decoded_str.size {
+                let end = if pos + @chunk_size > decoded_str.size {
+                  decoded_str.size
+                } else {
+                  pos + @chunk_size
+                }
+                let chunk = decoded_str.substring(pos, end)
+                match @handler.on_text_chunk(chunk) {
+                  case Ok(_) -> {}
+                  case Error(_) -> {}
+                }
+                pos = end
+              }
+            }
+            case None -> {}
+          }
+
+          match qp_decoded {
+            case Some(data) -> {
+              let decoded_str = data.into_string
+              let mut pos = 0
+              while pos < decoded_str.size {
+                let end = if pos + @chunk_size > decoded_str.size {
+                  decoded_str.size
+                } else {
+                  pos + @chunk_size
+                }
+                let chunk = decoded_str.substring(pos, end)
+                match @handler.on_text_chunk(chunk) {
+                  case Ok(_) -> {}
+                  case Error(_) -> {}
+                }
+                pos = end
+              }
+            }
+            case None -> {}
+          }
+        } else if is_text_html(@current_content_type) {
+          match base64_decoded {
+            case Some(data) -> {
+              let decoded_str = data.into_string
+              let mut pos = 0
+              while pos < decoded_str.size {
+                let end = if pos + @chunk_size > decoded_str.size {
+                  decoded_str.size
+                } else {
+                  pos + @chunk_size
+                }
+                let chunk = decoded_str.substring(pos, end)
+                match @handler.on_html_chunk(chunk) {
+                  case Ok(_) -> {}
+                  case Error(_) -> {}
+                }
+                pos = end
+              }
+            }
+            case None -> {}
+          }
+
+          match qp_decoded {
+            case Some(data) -> {
+              let decoded_str = data.into_string
+              let mut pos = 0
+              while pos < decoded_str.size {
+                let end = if pos + @chunk_size > decoded_str.size {
+                  decoded_str.size
+                } else {
+                  pos + @chunk_size
+                }
+                let chunk = decoded_str.substring(pos, end)
+                match @handler.on_html_chunk(chunk) {
+                  case Ok(_) -> {}
+                  case Error(_) -> {}
+                }
+                pos = end
+              }
+            }
+            case None -> {}
+          }
+        }
+      }
     }
 
     # Clear current_info last
@@ -1508,7 +1595,7 @@ fn parse_multipart_stream[H: mut + StreamHandler](
     max_size,
   )
   
-  let wrapper = MultipartHandlerWrapper(
+  let mut wrapper = MultipartHandlerWrapper(
     handler: handler,
     attachment_count: attachment_count,
     current_info: current_info,
@@ -1519,19 +1606,19 @@ fn parse_multipart_stream[H: mut + StreamHandler](
     max_size: max_size,
     chunk_size: chunk_size,
   )
-  
+
   let data = raw.to_byte_array
   match parser.feed(ref data, wrapper, default_encoding) {
     case Ok(_) -> {}
     case Error(e) -> return Result.Error(e)
   }
-  
+
   match parser.finish(wrapper) {
     case Ok(_) -> {}
     case Error(e) -> return Result.Error(e)
   }
-  
-  Result.Ok(attachment_count)
+
+  Result.Ok(wrapper.attachment_count)
 }
   
 fn extract_filename(content_disposition: String) -> Option[String] {
