@@ -289,21 +289,8 @@ fn process_preamble[H: mut + MultipartStreamHandler](
       let new_buffer = ByteArray.new
       let skip_to = pos + boundary_bytes.size
 
-        # Skip past boundary and any trailing whitespace (CRLF)
+      # Skip past boundary (but keep all newlines - they are part of headers)
       let mut i = skip_to
-      while i < parser.buffer.size {
-        match parser.buffer.get(i) {
-          case Ok(byte) -> {
-            if byte == 13 or byte == 10 {
-              # Skip CR or LF
-              i = i + 1
-            } else {
-              break
-            }
-          }
-          case Error(_) -> break
-        }
-      }
 
       # Copy remaining data to new buffer
       while i < parser.buffer.size {
@@ -392,8 +379,25 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
   match header_end {
     case Some(end_pos) -> {
       # Extract header bytes
+      # Note: buffer starts with a newline from after the boundary
+      # We need to skip it to get the actual headers
+      let header_start = if parser.buffer.size >= 1 {
+        match parser.buffer.get(0) {
+          case Ok(b) -> {
+            if b == 10 or b == 13 {
+              1  # Skip leading newline
+            } else {
+              0
+            }
+          }
+          case Error(_) -> 0
+        }
+      } else {
+        0
+      }
+
       let mut header_bytes = ByteArray.new
-      let mut i = 0
+      let mut i = header_start
       while i < end_pos {
         match parser.buffer.get(i) {
           case Ok(byte) -> header_bytes.push(byte)
@@ -443,9 +447,37 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
 
       parser.current_context = Option.Some(context)
 
-      # Remove headers from buffer (including double newline)
+      # Remove headers from buffer (including leading newline and double newline)
+      # Determine skip length based on what we found (\n\n or \r\n\r\n)
+      let mut skip_len = 2
+      if parser.buffer.size >= (end_pos + 4) {
+        match parser.buffer.get(end_pos) {
+          case Ok(b1) -> {
+            match parser.buffer.get(end_pos + 1) {
+              case Ok(b2) -> {
+                match parser.buffer.get(end_pos + 2) {
+                  case Ok(b3) -> {
+                    match parser.buffer.get(end_pos + 3) {
+                      case Ok(b4) -> {
+                        if b1 == 13 and b2 == 10 and b3 == 13 and b4 == 10 {
+                          skip_len = 4
+                        }
+                      }
+                      case Error(_) -> {}
+                    }
+                  }
+                  case Error(_) -> {}
+                }
+              }
+              case Error(_) -> {}
+            }
+          }
+          case Error(_) -> {}
+        }
+      }
+
       let new_buffer = ByteArray.new
-      let skip_to = end_pos + 2  # Skip \n\n
+      let skip_to = end_pos + skip_len
 
       let mut j = skip_to
       while j < parser.buffer.size {
@@ -643,6 +675,7 @@ fn find_boundary_in_buffer(
 }
 
 # Find double newline in buffer (header/body separator)
+# Handles both \n\n and \r\n\r\n line endings
 fn find_double_newline(buffer: ref ByteArray) -> Option[Int] {
   if buffer.size < 2 {
     return Option.None
@@ -658,6 +691,22 @@ fn find_double_newline(buffer: ref ByteArray) -> Option[Int] {
             # Look for \n\n
             if b1 == 10 and b2 == 10 {
               return Option.Some(i)
+            }
+            # Look for \r\n\r\n - need at least 4 bytes
+            if buffer.size >= (i + 4) {
+              match buffer.get(i + 2) {
+                case Ok(b3) -> {
+                  match buffer.get(i + 3) {
+                    case Ok(b4) -> {
+                      if b1 == 13 and b2 == 10 and b3 == 13 and b4 == 10 {
+                        return Option.Some(i)
+                      }
+                    }
+                    case Error(_) -> {}
+                  }
+                }
+                case Error(_) -> {}
+              }
             }
           }
           case Error(_) -> {}
