@@ -7,7 +7,7 @@
 # Provides structure for measuring memory usage and performance of streaming parsing.
 # Note: Actual memory measurement requires profiling tools or runtime metrics.
 
-import emailparser.test_data_generator (TestDataGenerator)
+import emailparser.test_data_generator (TestDataGenerator, TestAttachment)
 import std.test (Tests)
 
 fn pub tests(t: mut Tests) {
@@ -47,61 +47,61 @@ fn pub tests(t: mut Tests) {
     let mut generator = TestDataGenerator.new
 
     let attachments = [
-      TestDataGenerator.TestAttachment(
+      TestAttachment(
         name: 'file1.txt',
         content_type: 'text/plain',
         content: 'Content 1',
         encoding: 'base64',
       ),
-      TestDataGenerator.TestAttachment(
+      TestAttachment(
         name: 'file2.txt',
         content_type: 'text/plain',
         content: 'Content 2',
         encoding: 'base64',
       ),
-      TestDataGenerator.TestAttachment(
+      TestAttachment(
         name: 'file3.txt',
         content_type: 'text/plain',
         content: 'Content 3',
         encoding: 'base64',
       ),
-      TestDataGenerator.TestAttachment(
+      TestAttachment(
         name: 'file4.txt',
         content_type: 'text/plain',
         content: 'Content 4',
         encoding: 'base64',
       ),
-      TestDataGenerator.TestAttachment(
+      TestAttachment(
         name: 'file5.txt',
         content_type: 'text/plain',
         content: 'Content 5',
         encoding: 'base64',
       ),
-      TestDataGenerator.TestAttachment(
+      TestAttachment(
         name: 'file6.txt',
         content_type: 'text/plain',
         content: 'Content 6',
         encoding: 'base64',
       ),
-      TestDataGenerator.TestAttachment(
+      TestAttachment(
         name: 'file7.txt',
         content_type: 'text/plain',
         content: 'Content 7',
         encoding: 'base64',
       ),
-      TestDataGenerator.TestAttachment(
+      TestAttachment(
         name: 'file8.txt',
         content_type: 'text/plain',
         content: 'Content 8',
         encoding: 'base64',
       ),
-      TestDataGenerator.TestAttachment(
+      TestAttachment(
         name: 'file9.txt',
         content_type: 'text/plain',
         content: 'Content 9',
         encoding: 'base64',
       ),
-      TestDataGenerator.TestAttachment(
+      TestAttachment(
         name: 'file10.txt',
         content_type: 'text/plain',
         content: 'Content 10',

@@ -23,8 +23,8 @@ type pub MemoryBufferingHandler {
   let mut @text_body: String
   let mut @html_body: String
   let mut @headers: Array[(String, String)]
-  let mut @attachments: Array[(AttachmentInfo, ByteArray)]
-  let mut @current_attachment: Option[AttachmentInfo]
+  let mut @attachments: Array[(mut AttachmentInfo, ByteArray)]
+  let mut @current_attachment: Option[mut AttachmentInfo]
   let mut @current_attachment_data: ByteArray
   let mut @errors: Array[String]
   let mut @begin_called: Bool
@@ -56,50 +56,49 @@ impl MemoryBufferingHandler {
     @html_body
   }
 
-  fn pub mut get_attachments -> Array[(AttachmentInfo, ByteArray)] {
+  fn pub mut get_attachments -> mut Array[(mut AttachmentInfo, ByteArray)] {
     @attachments
   }
 
-  fn pub mut get_errors -> Array[String] {
+  fn pub mut get_errors -> mut Array[String] {
     @errors
   }
 }
 
 impl StreamHandler for MemoryBufferingHandler {
-  fn pub mut on_begin -> Result[Nil, String] {
+  fn pub mut on_begin   -> Result[Int, String] {
     @begin_called = true
-    Result.Ok(())
-  }
+    Result.Ok(0)  }
 
-  fn pub mut on_headers(headers: ref Array[(String, String)]) -> Result[Nil, String] {
+  fn pub mut on_headers(headers: ref Array[(String, String)])   -> Result[Int, String] {
     @headers_called = true
     @headers = []
     for (key, value) in headers.iter {
       @headers.push((key, value))
     }
-    Result.Ok(()) 
+    Result.Ok(0)
   }
 
-  fn pub mut on_text_chunk(chunk: String) -> Result[Nil, String] {
+  fn pub mut on_text_chunk(chunk: String)   -> Result[Int, String] {
     @text_body = @text_body + chunk
-    Result.Ok(()) 
+    Result.Ok(0) 
   }
 
-  fn pub mut on_html_chunk(chunk: String) -> Result[Nil, String] {
+  fn pub mut on_html_chunk(chunk: String)   -> Result[Int, String] {
     @html_body = @html_body + chunk
-    Result.Ok(()) 
+    Result.Ok(0) 
   }
 
-  fn pub mut on_attachment_begin(info: AttachmentInfo) -> Result[Nil, String] {
+  fn pub mut on_attachment_begin(info: mut AttachmentInfo)   -> Result[Int, String] {
     @current_attachment = Option.Some(info)
     @current_attachment_data = recover ByteArray.new
-    Result.Ok(()) 
+    Result.Ok(0)
   }
 
   fn pub mut on_attachment_chunk(
     chunk: ByteArray,
-    info: AttachmentInfo,
-  ) -> Result[Nil, String] {
+    info: mut AttachmentInfo,
+  )   -> Result[Int, String] {
     let mut i = 0
     while i < chunk.size {
       match chunk.get(i) {
@@ -108,10 +107,10 @@ impl StreamHandler for MemoryBufferingHandler {
       }
       i = i + 1
     }
-    Result.Ok(()) 
+    Result.Ok(0)
   }
 
-  fn pub mut on_attachment_end(info: AttachmentInfo) -> Result[Nil, String] {
+  fn pub mut on_attachment_end(info: mut AttachmentInfo)   -> Result[Int, String] {
     match @current_attachment {
       case Some(att) -> {
         @attachments.push((att, @current_attachment_data.clone()))
@@ -120,17 +119,17 @@ impl StreamHandler for MemoryBufferingHandler {
     }
     @current_attachment = Option.None
     @current_attachment_data = recover ByteArray.new
-    Result.Ok(()) 
+    Result.Ok(0) 
   }
 
-  fn pub mut on_end -> Result[Nil, String] {
+  fn pub mut on_end   -> Result[Int, String] {
     @end_called = true
-    Result.Ok(()) 
+    Result.Ok(0) 
   }
 
-  fn pub mut on_error(error: String) -> Result[Nil, String] {
+  fn pub mut on_error(error: String)   -> Result[Int, String] {
     @errors.push(error)
-    Result.Ok(()) 
+    Result.Ok(0) 
   }
 }
 
@@ -209,7 +208,7 @@ fn pub tests(t: mut Tests) {
           case Ok((info, data)) -> {
             t.equal(info.filename, Option.Some('test.txt'))
             t.equal(info.content_type, 'application/octet-stream')
-            t.equal(data.into_string, 'Attachment Content')
+            t.equal(data.clone().into_string, 'QP Content')
           }
           case Error(_) -> t.equal('should have attachment', 'got error')
         }
@@ -396,7 +395,7 @@ fn pub tests(t: mut Tests) {
         match attachments.get(0) {
           case Ok((info, data)) -> {
             t.equal(info.filename, Option.Some('test.txt'))
-            t.equal(data.into_string, 'QP Content')
+            t.equal(data.clone().into_string, 'QP Content')
           }
           case Error(_) -> t.equal('should have attachment', 'got error')
         }
