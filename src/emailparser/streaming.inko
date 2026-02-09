@@ -11,6 +11,14 @@
 # See docs/streaming-api.md for complete design documentation.
 
 import emailparser.address (EmailAddress)
+import emailparser.streaming_multipart (MultipartStreamParser, MultipartStreamHandler)
+import emailparser.streaming_decoder (Base64StreamingDecoder, QuotedPrintableStreamingDecoder)
+import emailparser.streaming_reader (AsyncReader)
+import emailparser.header (parse_headers_impl, get_header_value_impl, parse_content_type_impl, get_param_value_impl, eq_ignore_case, extract_extra_headers)
+import emailparser.decoder (decode_body_impl, decode_rfc2047_word)
+import emailparser.address (parse_address_list_impl)
+import emailparser.message_id (parse_message_ids_impl)
+import emailparser.validation (is_valid_boundary)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
@@ -49,6 +57,7 @@ type pub StreamingResult {
 # Streaming configuration
 type pub StreamingConfig {
   let pub mut @strict_mode: Bool
+  let pub mut @fail_fast: Bool
   let pub mut @max_email_size: Int
   let pub mut @max_attachment_size: Int
   let pub mut @max_multipart_depth: Int
@@ -60,6 +69,7 @@ impl StreamingConfig {
   fn pub static new -> StreamingConfig {
     StreamingConfig(
       strict_mode: false,
+      fail_fast: false,
       max_email_size: 50_000_000,
       max_attachment_size: 25_000_000,
       max_multipart_depth: 10,
@@ -70,6 +80,11 @@ impl StreamingConfig {
 
   fn pub mut with_strict_mode(strict: Bool) -> mut Self {
     @strict_mode = strict
+    self
+  }
+
+  fn pub mut with_fail_fast(fail: Bool) -> mut Self {
+    @fail_fast = fail
     self
   }
 
@@ -102,34 +117,33 @@ impl StreamingConfig {
 # Trait for handling streaming parser events
 #
 # Implement this trait to process email data incrementally.
-# All callbacks receive !! Error for panic propagation.
 trait pub StreamHandler {
   # Called when parsing begins
-  fn pub on_begin(!! Error) -> Result[Nil, String]
+  fn pub on_begin -> Result[Nil, String]
 
   # Called when headers are parsed
-  fn pub on_headers(!! Error, headers: ref Array[(String, String)]) -> Result[Nil, String]
+  fn pub on_headers(headers: ref Array[(String, String)]) -> Result[Nil, String]
 
   # Called when text body is available (in chunks)
-  fn pub on_text_chunk(!! Error, chunk: String) -> Result[Nil, String]
+  fn pub on_text_chunk(chunk: String) -> Result[Nil, String]
 
   # Called when HTML body is available (in chunks)
-  fn pub on_html_chunk(!! Error, chunk: String) -> Result[Nil, String]
+  fn pub on_html_chunk(chunk: String) -> Result[Nil, String]
 
   # Called when an attachment header is parsed (metadata only)
-  fn pub on_attachment_begin(!! Error, info: AttachmentInfo) -> Result[Nil, String]
+  fn pub on_attachment_begin(info: AttachmentInfo) -> Result[Nil, String]
 
   # Called when attachment data is available (in chunks)
-  fn pub on_attachment_chunk(!! Error, chunk: ByteArray, info: AttachmentInfo) -> Result[Nil, String]
+  fn pub on_attachment_chunk(chunk: ByteArray, info: AttachmentInfo) -> Result[Nil, String]
 
   # Called when attachment is complete
-  fn pub on_attachment_end(!! Error, info: AttachmentInfo) -> Result[Nil, String]
+  fn pub on_attachment_end(info: AttachmentInfo) -> Result[Nil, String]
 
   # Called when parsing completes successfully
-  fn pub on_end(!! Error) -> Result[Nil, String]
+  fn pub on_end -> Result[Nil, String]
 
   # Called when an error occurs (optional, errors also propagated to caller)
-  fn pub on_error(!! Error, error: String) -> Result[Nil, String]
+  fn pub on_error(error: String) -> Result[Nil, String]
 }
 
 # Streaming parser for large emails
@@ -154,10 +168,9 @@ impl StreamingParser {
   # This method parses the email incrementally, calling the handler's
   # callbacks as data becomes available. Only metadata is returned;
   # content is delivered via callbacks.
-  fn pub parse_stream(
-    mut self,
+  fn pub mut parse_stream(
     raw: String,
-    handler: ref mut StreamHandler,
+    handler: mut StreamHandler,
   ) -> Result[StreamingResult, String] {
     # Notify handler that parsing is beginning
     match handler.on_begin {
@@ -194,9 +207,6 @@ impl StreamingParser {
       }
     }
 
-    # Import header parsing function
-    import emailparser.header (parse_headers_impl)
-
     # Parse headers
     let headers = match parse_headers_impl(
       headers_raw,
@@ -217,15 +227,10 @@ impl StreamingParser {
     # Notify handler of headers
     match handler.on_headers(ref headers) {
       case Ok(_) -> {}
-      case Error(e) => return Result.Error("Handler on_headers failed: ${e}")
+      case Error(e) -> return Result.Error("Handler on_headers failed: ${e}")
     }
 
     # Extract metadata for result
-    import emailparser.header (
-      get_header_value_impl, parse_content_type_impl,
-      get_param_value_impl, eq_ignore_case
-    )
-    import emailparser.address (parse_address_list_impl)
 
     # Parse addresses
     let from_raw = get_header_value_impl(ref headers, 'From')
@@ -253,7 +258,6 @@ impl StreamingParser {
     )
 
     # Extract basic headers
-    import emailparser.decoder (decode_rfc2047_word)
     let subject = decode_header_value_stream(
       get_header_value_impl(ref headers, 'Subject').or(''),
     )
@@ -261,7 +265,6 @@ impl StreamingParser {
     let message_id = get_header_value_impl(ref headers, 'Message-ID').or('')
 
     # Extract threading headers
-    import emailparser.message_id (parse_message_ids_impl)
     let in_reply_to = get_header_value_impl(ref headers, 'In-Reply-To')
     let references = parse_message_ids_impl(
       get_header_value_impl(ref headers, 'References').or(''),
@@ -279,13 +282,12 @@ impl StreamingParser {
     let content_type_raw = get_header_value_impl(ref headers, 'Content-Type').or('text/plain')
     let (ct_main, ct_params) = match parse_content_type_impl(content_type_raw) {
       case Ok(result) -> result
-      case Error(e) => return Result.Error(e.to_message)
+      case Error(e) -> return Result.Error(e.to_message)
     }
     let content_transfer_encoding = get_header_value_impl(ref headers, 'Content-Transfer-Encoding').or('7bit')
     let charset = get_param_value_impl(ref ct_params, 'charset')
 
     # Parse body based on content type
-    import emailparser.validation (is_valid_boundary)
     let boundary = extract_boundary_from_params(ref ct_params)
 
     # Validate boundary if multipart
@@ -296,7 +298,7 @@ impl StreamingParser {
             return Result.Error("Invalid boundary string")
           }
         }
-        case None => return Result.Error("Multipart content type requires boundary parameter")
+        case None -> return Result.Error("Multipart content type requires boundary parameter")
       }
     }
 
@@ -309,27 +311,418 @@ impl StreamingParser {
       handler,
       @config,
     ) {
-      case Ok(count) => count
-      case Error(e) => {
+      case Ok(count) -> count
+      case Error(e) -> {
         match handler.on_error(e) {
           case Ok(_) -> {}
-          case Error(err) => return Result.Error("Handler on_error failed: ${err}")
+          case Error(err) -> return Result.Error("Handler on_error failed: ${err}")
         }
         return Result.Error(e)
       }
     }
 
     # Extract extra headers
-    import emailparser.header (extract_extra_headers)
     let extra_headers = extract_extra_headers(headers)
 
     # Notify handler that parsing is complete
     match handler.on_end {
       case Ok(_) -> {}
-      case Error(e) => return Result.Error("Handler on_end failed: ${e}")
+      case Error(e) -> return Result.Error("Handler on_end failed: ${e}")
     }
 
     # Return streaming result with metadata
+    Result.Ok(StreamingResult(
+      from: from,
+      to: to,
+      cc: cc,
+      bcc: bcc,
+      subject: subject,
+      date: date,
+      message_id: message_id,
+      in_reply_to: in_reply_to,
+      references: references,
+      thread_id: thread_id,
+      content_type: ct_main,
+      content_transfer_encoding: content_transfer_encoding,
+      charset: charset,
+      extra_headers: extra_headers,
+      attachment_count: attachment_count,
+    ))
+  }
+
+  # Parse an email using streaming callbacks from async source
+  #
+  # This async version of parse_stream allows for async processing of callbacks.
+  # Returns the same result as parse_stream but handlers can perform async operations.
+  fn pub async parse_async_raw(
+    raw: String,
+    handler: mut StreamHandler,
+  ) -> Result[StreamingResult, String] {
+    match handler.on_begin {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error("Handler on_begin failed: ${e}")
+    }
+
+    let normalized = normalize_line_endings_stream(raw)
+    let email_size = normalized.size
+
+    if email_size > @config.max_email_size {
+      match handler.on_error("Email size exceeds maximum") {
+        case Ok(_) -> {}
+        case Error(e) -> return Result.Error("Handler on_error failed: ${e}")
+      }
+      return Result.Error("Email size ${email_size} exceeds maximum ${@config.max_email_size}")
+    }
+
+    let split_pos = normalized.index_of('\n\n', 0)
+
+    let (headers_raw, body_raw) = match split_pos {
+      case Some(pos) -> {
+        (
+          normalized.substring(0, pos),
+          normalized.substring(pos + 2, normalized.size),
+        )
+      }
+      case None -> {
+        (normalized.clone(), '')
+      }
+    }
+
+
+    let headers = match parse_headers_impl(
+      headers_raw,
+      @config.strict_mode,
+      @config.max_email_size,
+      @config.max_headers,
+    ) {
+      case Ok(h) -> h
+      case Error(e) -> {
+        match handler.on_error(e.to_message) {
+          case Ok(_) -> {}
+          case Error(err) -> return Result.Error("Handler on_error failed: ${err}")
+        }
+        return Result.Error(e.to_message)
+      }
+    }
+
+    match handler.on_headers(ref headers) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error("Handler on_headers failed: ${e}")
+    }
+
+
+    let from_raw = get_header_value_impl(ref headers, 'From')
+    let from_list = parse_address_list_impl(ref from_raw, from_raw.or(''))
+    let from = if from_list.empty? {
+      EmailAddress(name: Option.None, address: '', raw: '')
+    } else {
+      match from_list.into_iter.next {
+        case Some(addr) -> addr
+        case None -> EmailAddress(name: Option.None, address: '', raw: '')
+      }
+    }
+
+    let to = parse_address_list_impl(
+      ref get_header_value_impl(ref headers, 'To'),
+      get_header_value_impl(ref headers, 'To').or(''),
+    )
+    let cc = parse_address_list_impl(
+      ref get_header_value_impl(ref headers, 'Cc'),
+      get_header_value_impl(ref headers, 'Cc').or(''),
+    )
+    let bcc = parse_address_list_impl(
+      ref get_header_value_impl(ref headers, 'Bcc'),
+      get_header_value_impl(ref headers, 'Bcc').or(''),
+    )
+
+    let subject = decode_header_value_stream(
+      get_header_value_impl(ref headers, 'Subject').or(''),
+    )
+    let date = get_header_value_impl(ref headers, 'Date').or('')
+    let message_id = get_header_value_impl(ref headers, 'Message-ID').or('')
+
+    let in_reply_to = get_header_value_impl(ref headers, 'In-Reply-To')
+    let references = parse_message_ids_impl(
+      get_header_value_impl(ref headers, 'References').or(''),
+    )
+    let thread_id = if references.empty? {
+      message_id
+    } else {
+      match references.get(0) {
+        case Ok(r) -> r
+        case Error(_) -> message_id
+      }
+    }
+
+    let content_type_raw = get_header_value_impl(ref headers, 'Content-Type').or('text/plain')
+    let (ct_main, ct_params) = match parse_content_type_impl(content_type_raw) {
+      case Ok(result) -> result
+      case Error(e) -> return Result.Error(e.to_message)
+    }
+    let content_transfer_encoding = get_header_value_impl(ref headers, 'Content-Transfer-Encoding').or('7bit')
+    let charset = get_param_value_impl(ref ct_params, 'charset')
+
+    let boundary = extract_boundary_from_params(ref ct_params)
+
+    if is_multipart(ct_main) {
+      match boundary.clone {
+        case Some(b) -> {
+          if !is_valid_boundary(b.clone) {
+            return Result.Error("Invalid boundary string")
+          }
+        }
+        case None -> return Result.Error("Multipart content type requires boundary parameter")
+      }
+    }
+
+    let attachment_count = match parse_body_stream(
+      body_raw,
+      ct_main,
+      boundary,
+      content_transfer_encoding,
+      handler,
+      @config,
+    ) {
+      case Ok(count) -> count
+      case Error(e) -> {
+        match handler.on_error(e) {
+          case Ok(_) -> {}
+          case Error(err) -> return Result.Error("Handler on_error failed: ${err}")
+        }
+        return Result.Error(e)
+      }
+    }
+
+    let extra_headers = extract_extra_headers(headers)
+
+    match handler.on_end {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error("Handler on_end failed: ${e}")
+    }
+
+    Result.Ok(StreamingResult(
+      from: from,
+      to: to,
+      cc: cc,
+      bcc: bcc,
+      subject: subject,
+      date: date,
+      message_id: message_id,
+      in_reply_to: in_reply_to,
+      references: references,
+      thread_id: thread_id,
+      content_type: ct_main,
+      content_transfer_encoding: content_transfer_encoding,
+      charset: charset,
+      extra_headers: extra_headers,
+      attachment_count: attachment_count,
+    ))
+  }
+
+  # Parse an email from an async reader using streaming callbacks
+  #
+  # Reads email data incrementally from an async reader and processes it using callbacks.
+  # Ideal for processing large emails from files or network streams.
+  fn pub async parse_async_reader(
+    reader: AsyncReader,
+    handler: mut StreamHandler,
+  ) -> Result[StreamingResult, String] {
+    match handler.on_begin {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error("Handler on_begin failed: ${e}")
+    }
+
+    let mut buffer = ByteArray.new
+    let mut headers_parsed = false
+    let mut headers: Array[(String, String)] = []
+    let mut body: ByteArray = ByteArray.new
+
+    let chunk_size = @config.stream_chunk_size
+    let mut total_bytes = 0
+
+    loop {
+      match reader.read(chunk_size) {
+        case Ok(chunk) -> {
+          if chunk.size == 0 {
+            break
+          }
+
+          total_bytes = total_bytes + chunk.size
+
+          if total_bytes > @config.max_email_size {
+            match handler.on_error("Email size exceeds maximum") {
+              case Ok(_) -> {}
+              case Error(e) -> return Result.Error("Handler on_error failed: ${e}")
+            }
+            return Result.Error("Email size ${total_bytes} exceeds maximum ${@config.max_email_size}")
+          }
+
+          if !headers_parsed {
+            let mut i = 0
+            while i < chunk.size {
+              match chunk.get(i) {
+                case Ok(byte) -> buffer.push(byte)
+                case Error(_) -> {}
+              }
+              i = i + 1
+            }
+
+            let buffer_str = buffer.clone.into_string
+            let double_newline_pos = buffer_str.index_of('\n\n', 0)
+
+            match double_newline_pos {
+              case Some(pos) -> {
+                let headers_raw = buffer_str.substring(0, pos)
+                headers = match parse_headers_impl(
+                  headers_raw,
+                  @config.strict_mode,
+                  @config.max_email_size,
+                  @config.max_headers,
+                ) {
+                  case Ok(h) -> h
+                  case Error(e) -> {
+                    match handler.on_error(e.to_message) {
+                      case Ok(_) -> {}
+                      case Error(err) -> return Result.Error("Handler on_error failed: ${err}")
+                    }
+                    return Result.Error(e.to_message)
+                  }
+                }
+
+                match handler.on_headers(ref headers) {
+                  case Ok(_) -> {}
+                  case Error(e) -> return Result.Error("Handler on_headers failed: ${e}")
+                }
+
+                headers_parsed = true
+
+                let mut j = pos + 2
+                while j < buffer.size {
+                  match buffer.get(j) {
+                    case Ok(byte) -> body.push(byte)
+                    case Error(_) -> {}
+                  }
+                  j = j + 1
+                }
+                buffer = ByteArray.new
+              }
+              case None -> {
+                if buffer.size > 10000 {
+                  return Result.Error("Headers too large or malformed")
+                }
+              }
+            }
+          } else {
+            let mut i = 0
+            while i < chunk.size {
+              match chunk.get(i) {
+                case Ok(byte) -> body.push(byte)
+                case Error(_) -> {}
+              }
+              i = i + 1
+            }
+          }
+        }
+        case Error(e) -> {
+          match handler.on_error(e) {
+            case Ok(_) -> {}
+            case Error(err) -> return Result.Error("Handler on_error failed: ${err}")
+          }
+          return Result.Error(e)
+        }
+      }
+    }
+
+    let from_raw = get_header_value_impl(ref headers, 'From')
+    let from_list = parse_address_list_impl(ref from_raw, from_raw.or(''))
+    let from = if from_list.empty? {
+      EmailAddress(name: Option.None, address: '', raw: '')
+    } else {
+      match from_list.into_iter.next {
+        case Some(addr) -> addr
+        case None -> EmailAddress(name: Option.None, address: '', raw: '')
+      }
+    }
+
+    let to = parse_address_list_impl(
+      ref get_header_value_impl(ref headers, 'To'),
+      get_header_value_impl(ref headers, 'To').or(''),
+    )
+    let cc = parse_address_list_impl(
+      ref get_header_value_impl(ref headers, 'Cc'),
+      get_header_value_impl(ref headers, 'Cc').or(''),
+    )
+    let bcc = parse_address_list_impl(
+      ref get_header_value_impl(ref headers, 'Bcc'),
+      get_header_value_impl(ref headers, 'Bcc').or(''),
+    )
+
+    let subject = decode_header_value_stream(
+      get_header_value_impl(ref headers, 'Subject').or(''),
+    )
+    let date = get_header_value_impl(ref headers, 'Date').or('')
+    let message_id = get_header_value_impl(ref headers, 'Message-ID').or('')
+
+    let in_reply_to = get_header_value_impl(ref headers, 'In-Reply-To')
+    let references = parse_message_ids_impl(
+      get_header_value_impl(ref headers, 'References').or(''),
+    )
+    let thread_id = if references.empty? {
+      message_id
+    } else {
+      match references.get(0) {
+        case Ok(r) -> r
+        case Error(_) -> message_id
+      }
+    }
+
+    let content_type_raw = get_header_value_impl(ref headers, 'Content-Type').or('text/plain')
+    let (ct_main, ct_params) = match parse_content_type_impl(content_type_raw) {
+      case Ok(result) -> result
+      case Error(e) -> return Result.Error(e.to_message)
+    }
+    let content_transfer_encoding = get_header_value_impl(ref headers, 'Content-Transfer-Encoding').or('7bit')
+    let charset = get_param_value_impl(ref ct_params, 'charset')
+
+    let boundary = extract_boundary_from_params(ref ct_params)
+
+    if is_multipart(ct_main) {
+      match boundary.clone {
+        case Some(b) -> {
+          if !is_valid_boundary(b.clone) {
+            return Result.Error("Invalid boundary string")
+          }
+        }
+        case None -> return Result.Error("Multipart content type requires boundary parameter")
+      }
+    }
+
+    let body_str = body.into_string
+    let attachment_count = match parse_body_stream(
+      body_str,
+      ct_main,
+      boundary,
+      content_transfer_encoding,
+      handler,
+      @config,
+    ) {
+      case Ok(count) -> count
+      case Error(e) -> {
+        match handler.on_error(e) {
+          case Ok(_) -> {}
+          case Error(err) -> return Result.Error("Handler on_error failed: ${err}")
+        }
+        return Result.Error(e)
+      }
+    }
+
+    let extra_headers = extract_extra_headers(headers)
+
+    match handler.on_end {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error("Handler on_end failed: ${e}")
+    }
+
     Result.Ok(StreamingResult(
       from: from,
       to: to,
@@ -359,7 +752,6 @@ fn normalize_line_endings_stream(text: String) -> String {
 
 # Decode header value for streaming (simplified version)
 fn decode_header_value_stream(raw: String) -> String {
-  import emailparser.decoder (decode_rfc2047_word)
   
   let mut result = ByteArray.new
   let mut pos = 0
@@ -432,7 +824,7 @@ fn parse_body_stream(
   ct_main: String,
   boundary: Option[String],
   content_transfer_encoding: String,
-  handler: ref mut StreamHandler,
+  handler: mut StreamHandler,
   config: StreamingConfig,
 ) -> Result[Int, String] {
   if is_multipart(ct_main) {
@@ -453,11 +845,9 @@ fn parse_body_stream(
       case None -> Result.Ok(0)
     }
   } else if is_text_plain(ct_main) {
-    # Stream text body
     stream_text_body(body_raw, content_transfer_encoding, config.stream_chunk_size, handler)
     Result.Ok(0)
   } else if is_text_html(ct_main) {
-    # Stream HTML body
     stream_html_body(body_raw, content_transfer_encoding, config.stream_chunk_size, handler)
     Result.Ok(0)
   } else {
@@ -470,30 +860,139 @@ fn stream_text_body(
   body_raw: String,
   encoding: String,
   chunk_size: Int,
-  handler: ref mut StreamHandler,
+  handler: mut StreamHandler,
 ) {
-  import emailparser.decoder (decode_body_impl)
   
-  # For simplicity, decode the entire body and stream in chunks
-  # A full implementation would decode incrementally
-  match decode_body_impl(body_raw, encoding, 50_000_000) {
-    case Ok(decoded) -> {
-      let mut pos = 0
-      while pos < decoded.size {
-        let end = if pos + chunk_size > decoded.size {
-          decoded.size
-        } else {
-          pos + chunk_size
+  let mut decoder: Option[Base64StreamingDecoder] = Option.None
+  let mut qp_decoder: Option[QuotedPrintableStreamingDecoder] = Option.None
+  let encoding_lower = encoding.to_lower
+  
+  if encoding_lower == 'base64' {
+    decoder = Option.Some(Base64StreamingDecoder.new(50_000_000, false))
+  } else if encoding_lower == 'quoted-printable' {
+    qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(50_000_000, false, false))
+  }
+  
+  match decoder {
+    case Some(mut d) -> {
+      match d.feed(body_raw) {
+        case Ok(decoded) -> {
+          if decoded.size > 0 {
+            let decoded_str = decoded.into_string
+            let mut pos = 0
+            while pos < decoded_str.size {
+              let end = if pos + chunk_size > decoded_str.size {
+                decoded_str.size
+              } else {
+                pos + chunk_size
+              }
+              let chunk = decoded_str.substring(pos, end)
+              match handler.on_text_chunk(chunk) {
+                case Ok(_) -> {}
+                case Error(_) -> return
+              }
+              pos = end
+            }
+          }
+          match d.finish {
+            case Ok(decoded) -> {
+              if decoded.size > 0 {
+                let decoded_str = decoded.into_string
+                let mut pos = 0
+                while pos < decoded_str.size {
+                  let end = if pos + chunk_size > decoded_str.size {
+                    decoded_str.size
+                  } else {
+                    pos + chunk_size
+                  }
+                  let chunk = decoded_str.substring(pos, end)
+                  match handler.on_text_chunk(chunk) {
+                    case Ok(_) -> {}
+                    case Error(_) -> return
+                  }
+                  pos = end
+                }
+              }
+            }
+            case Error(_) -> {}
+          }
         }
-        let chunk = decoded.substring(pos, end)
-        match handler.on_text_chunk(chunk) {
-          case Ok(_) -> {}
-          case Error(e) -> return
-        }
-        pos = end
+        case Error(_) -> {}
       }
     }
-    case Error(_) -> {}
+    case None -> {}
+  }
+  
+  match qp_decoder {
+    case Some(mut d) -> {
+      match d.feed(body_raw) {
+        case Ok(decoded) -> {
+          if decoded.size > 0 {
+            let decoded_str = decoded.into_string
+            let mut pos = 0
+            while pos < decoded_str.size {
+              let end = if pos + chunk_size > decoded_str.size {
+                decoded_str.size
+              } else {
+                pos + chunk_size
+              }
+              let chunk = decoded_str.substring(pos, end)
+              match handler.on_text_chunk(chunk) {
+                case Ok(_) -> {}
+                case Error(_) -> return
+              }
+              pos = end
+            }
+          }
+          match d.finish {
+            case Ok(decoded) -> {
+              if decoded.size > 0 {
+                let decoded_str = decoded.into_string
+                let mut pos = 0
+                while pos < decoded_str.size {
+                  let end = if pos + chunk_size > decoded_str.size {
+                    decoded_str.size
+                  } else {
+                    pos + chunk_size
+                  }
+                  let chunk = decoded_str.substring(pos, end)
+                  match handler.on_text_chunk(chunk) {
+                    case Ok(_) -> {}
+                    case Error(_) -> return
+                  }
+                  pos = end
+                }
+              }
+            }
+            case Error(_) -> {}
+          }
+        }
+        case Error(_) -> {}
+      }
+    }
+    case None -> {}
+  }
+  
+  if decoder.is_none and qp_decoder.is_none {
+    match decode_body_impl(body_raw, encoding, 50_000_000) {
+      case Ok(decoded) -> {
+        let mut pos = 0
+        while pos < decoded.size {
+          let end = if pos + chunk_size > decoded.size {
+            decoded.size
+          } else {
+            pos + chunk_size
+          }
+          let chunk = decoded.substring(pos, end)
+          match handler.on_text_chunk(chunk) {
+            case Ok(_) -> {}
+            case Error(_) -> return
+          }
+          pos = end
+        }
+      }
+      case Error(_) -> {}
+    }
   }
 }
 
@@ -502,34 +1001,467 @@ fn stream_html_body(
   body_raw: String,
   encoding: String,
   chunk_size: Int,
-  handler: ref mut StreamHandler,
+  handler: mut StreamHandler,
 ) {
-  import emailparser.decoder (decode_body_impl)
   
-  # For simplicity, decode the entire body and stream in chunks
-  # A full implementation would decode incrementally
-  match decode_body_impl(body_raw, encoding, 50_000_000) {
-    case Ok(decoded) -> {
-      let mut pos = 0
-      while pos < decoded.size {
-        let end = if pos + chunk_size > decoded.size {
-          decoded.size
-        } else {
-          pos + chunk_size
+  let mut decoder: Option[Base64StreamingDecoder] = Option.None
+  let mut qp_decoder: Option[QuotedPrintableStreamingDecoder] = Option.None
+  let encoding_lower = encoding.to_lower
+  
+  if encoding_lower == 'base64' {
+    decoder = Option.Some(Base64StreamingDecoder.new(50_000_000, false))
+  } else if encoding_lower == 'quoted-printable' {
+    qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(50_000_000, false, false))
+  }
+  
+  match decoder {
+    case Some(mut d) -> {
+      match d.feed(body_raw) {
+        case Ok(decoded) -> {
+          if decoded.size > 0 {
+            let decoded_str = decoded.into_string
+            let mut pos = 0
+            while pos < decoded_str.size {
+              let end = if pos + chunk_size > decoded_str.size {
+                decoded_str.size
+              } else {
+                pos + chunk_size
+              }
+              let chunk = decoded_str.substring(pos, end)
+              match handler.on_html_chunk(chunk) {
+                case Ok(_) -> {}
+                case Error(_) -> return
+              }
+              pos = end
+            }
+          }
+          match d.finish {
+            case Ok(decoded) -> {
+              if decoded.size > 0 {
+                let decoded_str = decoded.into_string
+                let mut pos = 0
+                while pos < decoded_str.size {
+                  let end = if pos + chunk_size > decoded_str.size {
+                    decoded_str.size
+                  } else {
+                    pos + chunk_size
+                  }
+                  let chunk = decoded_str.substring(pos, end)
+                  match handler.on_html_chunk(chunk) {
+                    case Ok(_) -> {}
+                    case Error(_) -> return
+                  }
+                  pos = end
+                }
+              }
+            }
+            case Error(_) -> {}
+          }
         }
-        let chunk = decoded.substring(pos, end)
-        match handler.on_html_chunk(chunk) {
-          case Ok(_) -> {}
-          case Error(e) -> return
-        }
-        pos = end
+        case Error(_) -> {}
       }
     }
-    case Error(_) -> {}
+    case None -> {}
+  }
+  
+  match qp_decoder {
+    case Some(mut d) -> {
+      match d.feed(body_raw) {
+        case Ok(decoded) -> {
+          if decoded.size > 0 {
+            let decoded_str = decoded.into_string
+            let mut pos = 0
+            while pos < decoded_str.size {
+              let end = if pos + chunk_size > decoded_str.size {
+                decoded_str.size
+              } else {
+                pos + chunk_size
+              }
+              let chunk = decoded_str.substring(pos, end)
+              match handler.on_html_chunk(chunk) {
+                case Ok(_) -> {}
+                case Error(_) -> return
+              }
+              pos = end
+            }
+          }
+          match d.finish {
+            case Ok(decoded) -> {
+              if decoded.size > 0 {
+                let decoded_str = decoded.into_string
+                let mut pos = 0
+                while pos < decoded_str.size {
+                  let end = if pos + chunk_size > decoded_str.size {
+                    decoded_str.size
+                  } else {
+                    pos + chunk_size
+                  }
+                  let chunk = decoded_str.substring(pos, end)
+                  match handler.on_html_chunk(chunk) {
+                    case Ok(_) -> {}
+                    case Error(_) -> return
+                  }
+                  pos = end
+                }
+              }
+            }
+            case Error(_) -> {}
+          }
+        }
+        case Error(_) -> {}
+      }
+    }
+    case None -> {}
+  }
+  
+  if decoder.is_none and qp_decoder.is_none {
+    match decode_body_impl(body_raw, encoding, 50_000_000) {
+      case Ok(decoded) -> {
+        let mut pos = 0
+        while pos < decoded.size {
+          let end = if pos + chunk_size > decoded.size {
+            decoded.size
+          } else {
+            pos + chunk_size
+          }
+          let chunk = decoded.substring(pos, end)
+          match handler.on_html_chunk(chunk) {
+            case Ok(_) -> {}
+            case Error(_) -> return
+          }
+          pos = end
+        }
+      }
+      case Error(_) -> {}
+    }
   }
 }
 
-# Parse multipart with streaming (simplified implementation)
+# Helper type for multipart streaming parser
+type pub MultipartHandlerWrapper {
+  let @handler: mut StreamHandler
+  let @attachment_count: Int
+  let @current_info: Option[AttachmentInfo]
+  let @base64_decoder: Option[Base64StreamingDecoder]
+  let @qp_decoder: Option[QuotedPrintableStreamingDecoder]
+  let @current_encoding: String
+  let @current_content_type: String
+  let @max_size: Int
+  let @chunk_size: Int
+}
+
+impl MultipartStreamHandler for MultipartHandlerWrapper {
+  fn pub mut on_part_begin(
+    headers: ref Array[(String, String)],
+    content_type: String,
+    is_attachment: Bool,
+  ) {
+    @current_content_type = content_type
+    let content_disposition = get_header_value_impl(ref headers, 'Content-Disposition').or('')
+    let content_transfer_encoding = get_header_value_impl(ref headers, 'Content-Transfer-Encoding').or('7bit')
+    @current_encoding = content_transfer_encoding
+    let content_id = get_header_value_impl(ref headers, 'Content-ID')
+    
+    let is_actual_attachment = content_disposition.starts_with?('attachment') || content_disposition.starts_with?('file')
+    
+    let filename = if is_actual_attachment {
+      extract_filename(content_disposition)
+    } else {
+      Option.None
+    }
+    
+    if is_actual_attachment {
+      let info = AttachmentInfo(
+        index: @attachment_count,
+        content_type: content_type,
+        filename: filename,
+        content_disposition: content_disposition,
+        content_id: content_id,
+        size: 0,
+        transfer_encoding: content_transfer_encoding,
+      )
+      @current_info = Option.Some(info)
+      match @handler.on_attachment_begin(info) {
+        case Ok(_) -> {}
+        case Error(_) -> {}
+      }
+    }
+  }
+  
+  fn pub mut on_part_data(
+    data: ref ByteArray,
+    content_transfer_encoding: String,
+  ) {
+    @current_encoding = content_transfer_encoding
+    let data_str = data.clone
+    
+    match @current_info.clone {
+      case Some(info) -> {
+        let encoding_lower = content_transfer_encoding.to_lower
+        
+        if encoding_lower == 'base64' {
+          match @base64_decoder {
+            case None -> {
+              @base64_decoder = Option.Some(Base64StreamingDecoder.new(@max_size, false))
+            }
+            case Some(_) -> {}
+          }
+          match @base64_decoder {
+            case Some(mut d) -> {
+              match d.feed(data_str.into_string) {
+                case Ok(decoded) -> {
+                  if decoded.size > 0 {
+                    match @handler.on_attachment_chunk(decoded, info) {
+                      case Ok(_) -> {}
+                      case Error(_) -> {}
+                    }
+                  }
+                }
+                case Error(_) -> {}
+              }
+            }
+            case None -> {}
+          }
+        } else if encoding_lower == 'quoted-printable' {
+          match @qp_decoder {
+            case None -> {
+              @qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(@max_size, false, false))
+            }
+            case Some(_) -> {}
+          }
+          match @qp_decoder {
+            case Some(mut d) -> {
+              match d.feed(data_str.into_string) {
+                case Ok(decoded) -> {
+                  if decoded.size > 0 {
+                    match @handler.on_attachment_chunk(decoded, info) {
+                      case Ok(_) -> {}
+                      case Error(_) -> {}
+                    }
+                  }
+                }
+                case Error(_) -> {}
+              }
+            }
+            case None -> {}
+          }
+        } else {
+          match @handler.on_attachment_chunk(data_str, info) {
+            case Ok(_) -> {}
+            case Error(_) -> {}
+          }
+        }
+      }
+      case None -> {
+        if is_text_plain(@current_content_type) {
+          let encoding_lower = content_transfer_encoding.to_lower
+          if encoding_lower == 'base64' {
+            match @base64_decoder {
+              case None -> {
+                @base64_decoder = Option.Some(Base64StreamingDecoder.new(@max_size, false))
+              }
+              case Some(_) -> {}
+            }
+            match @base64_decoder {
+              case Some(mut d) -> {
+                match d.feed(data_str.into_string) {
+                  case Ok(decoded) -> {
+                    if decoded.size > 0 {
+                      let decoded_str = decoded.into_string
+                      let mut pos = 0
+                      while pos < decoded_str.size {
+                        let end = if pos + @chunk_size > decoded_str.size {
+                          decoded_str.size
+                        } else {
+                          pos + @chunk_size
+                        }
+                        let chunk = decoded_str.substring(pos, end)
+                        match @handler.on_text_chunk(chunk) {
+                          case Ok(_) -> {}
+                          case Error(_) -> {}
+                        }
+                        pos = end
+                      }
+                    }
+                  }
+                  case Error(_) -> {}
+                }
+              }
+              case None -> {}
+            }
+          } else if encoding_lower == 'quoted-printable' {
+            match @qp_decoder {
+              case None -> {
+                @qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(@max_size, false, false))
+              }
+              case Some(_) -> {}
+            }
+            match @qp_decoder {
+              case Some(mut d) -> {
+                match d.feed(data_str.into_string) {
+                  case Ok(decoded) -> {
+                    if decoded.size > 0 {
+                      let decoded_str = decoded.into_string
+                      let mut pos = 0
+                      while pos < decoded_str.size {
+                        let end = if pos + @chunk_size > decoded_str.size {
+                          decoded_str.size
+                        } else {
+                          pos + @chunk_size
+                        }
+                        let chunk = decoded_str.substring(pos, end)
+                        match @handler.on_text_chunk(chunk) {
+                          case Ok(_) -> {}
+                          case Error(_) -> {}
+                        }
+                        pos = end
+                      }
+                    }
+                  }
+                  case Error(_) -> {}
+                }
+              }
+              case None -> {}
+            }
+          } else {
+            match @handler.on_text_chunk(data_str.into_string) {
+              case Ok(_) -> {}
+              case Error(_) -> {}
+            }
+          }
+        } else if is_text_html(@current_content_type) {
+          let encoding_lower = content_transfer_encoding.to_lower
+          if encoding_lower == 'base64' {
+            match @base64_decoder {
+              case None -> {
+                @base64_decoder = Option.Some(Base64StreamingDecoder.new(@max_size, false))
+              }
+              case Some(_) -> {}
+            }
+            match @base64_decoder {
+              case Some(mut d) -> {
+                match d.feed(data_str.into_string) {
+                  case Ok(decoded) -> {
+                    if decoded.size > 0 {
+                      let decoded_str = decoded.into_string
+                      let mut pos = 0
+                      while pos < decoded_str.size {
+                        let end = if pos + @chunk_size > decoded_str.size {
+                          decoded_str.size
+                        } else {
+                          pos + @chunk_size
+                        }
+                        let chunk = decoded_str.substring(pos, end)
+                        match @handler.on_html_chunk(chunk) {
+                          case Ok(_) -> {}
+                          case Error(_) -> {}
+                        }
+                        pos = end
+                      }
+                    }
+                  }
+                  case Error(_) -> {}
+                }
+              }
+              case None -> {}
+            }
+          } else if encoding_lower == 'quoted-printable' {
+            match @qp_decoder {
+              case None -> {
+                @qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(@max_size, false, false))
+              }
+              case Some(_) -> {}
+            }
+            match @qp_decoder {
+              case Some(mut d) -> {
+                match d.feed(data_str.into_string) {
+                  case Ok(decoded) -> {
+                    if decoded.size > 0 {
+                      let decoded_str = decoded.into_string
+                      let mut pos = 0
+                      while pos < decoded_str.size {
+                        let end = if pos + @chunk_size > decoded_str.size {
+                          decoded_str.size
+                        } else {
+                          pos + @chunk_size
+                        }
+                        let chunk = decoded_str.substring(pos, end)
+                        match @handler.on_html_chunk(chunk) {
+                          case Ok(_) -> {}
+                          case Error(_) -> {}
+                        }
+                        pos = end
+                      }
+                    }
+                  }
+                  case Error(_) -> {}
+                }
+              }
+              case None -> {}
+            }
+          } else {
+            match @handler.on_html_chunk(data_str.into_string) {
+              case Ok(_) -> {}
+              case Error(_) -> {}
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  fn pub mut on_part_end {
+    match @current_info.clone {
+      case Some(info) -> {
+        match @base64_decoder {
+          case Some(mut d) -> {
+            match d.finish {
+              case Ok(decoded) -> {
+                if decoded.size > 0 {
+                  match @handler.on_attachment_chunk(decoded, info) {
+                    case Ok(_) -> {}
+                    case Error(_) -> {}
+                  }
+                }
+              }
+              case Error(_) -> {}
+            }
+            @base64_decoder = Option.None
+          }
+          case None -> {}
+        }
+        match @qp_decoder {
+          case Some(mut d) -> {
+            match d.finish {
+              case Ok(decoded) -> {
+                if decoded.size > 0 {
+                  match @handler.on_attachment_chunk(decoded, info) {
+                    case Ok(_) -> {}
+                    case Error(_) -> {}
+                  }
+                }
+              }
+              case Error(_) -> {}
+            }
+            @qp_decoder = Option.None
+          }
+          case None -> {}
+        }
+        
+        match @handler.on_attachment_end(info) {
+          case Ok(_) -> {}
+          case Error(_) -> {}
+        }
+        
+        @attachment_count = @attachment_count + 1
+        @current_info = Option.None
+      }
+      case None -> {}
+    }
+  }
+}
+
+# Parse multipart with streaming using MultipartStreamParser
 fn parse_multipart_stream(
   raw: String,
   boundary: String,
@@ -539,144 +1471,429 @@ fn parse_multipart_stream(
   max_size: Int,
   max_headers: Int,
   chunk_size: Int,
-  handler: ref mut StreamHandler,
+  handler: mut StreamHandler,
 ) -> Result[Int, String] {
-  import emailparser.header (parse_headers_impl, get_header_value_impl, parse_content_type_impl, get_param_value_impl, eq_ignore_case)
-  import emailparser.decoder (decode_body_impl)
   
   if current_depth >= max_depth {
     return Result.Error("Maximum multipart depth exceeded")
   }
   
-  let boundary_marker = '--' + boundary
-  let end_marker = '--' + boundary + '--'
-  
   let mut attachment_count = 0
-  let mut pos = 0
+  let mut current_info: Option[AttachmentInfo] = Option.None
+  let mut base64_decoder: Option[Base64StreamingDecoder] = Option.None
+  let mut qp_decoder: Option[QuotedPrintableStreamingDecoder] = Option.None
+  let mut current_encoding: String = default_encoding
+  let mut current_content_type: String = 'text/plain'
   
-  # Find first boundary
-  match raw.index_of(boundary_marker, 0) {
-    case Some(first_pos) -> pos = first_pos + boundary_marker.size
-    case None -> return Result.Ok(0)
+  let mut parser = MultipartStreamParser.new(
+    boundary,
+    max_depth,
+    chunk_size,
+    false,
+    max_headers,
+    max_size,
+  )
+  
+  let wrapper = MultipartHandlerWrapper(
+    handler: handler,
+    attachment_count: ref attachment_count,
+    current_info: ref current_info,
+    base64_decoder: ref base64_decoder,
+    qp_decoder: ref qp_decoder,
+    current_encoding: ref current_encoding,
+    current_content_type: ref current_content_type,
+    max_size: max_size,
+    chunk_size: chunk_size,
+  )
+  
+  let data = raw.to_byte_array
+  match parser.feed(ref data, wrapper, default_encoding) {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
   }
   
-  # Process each part
-  while pos < raw.size {
-    # Skip whitespace after boundary
-    while pos < raw.size && (raw.byte_at(pos) == 10 /* \n */ || raw.byte_at(pos) == 13 /* \r */) {
-      pos = pos + 1
-    }
-    
-    # Check for end marker
-    if pos + end_marker.size <= raw.size {
-      let substring = raw.substring(pos, pos + end_marker.size)
-      if substring == end_marker {
-        break
+  match parser.finish(wrapper) {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
+  }
+  
+  Result.Ok(attachment_count)
+}
+  
+  # Create a wrapper handler that adapts MultipartStreamHandler to StreamHandler
+  let mut attachment_count = 0
+  let mut current_info: Option[AttachmentInfo] = Option.None
+  let mut base64_decoder: Option[Base64StreamingDecoder] = Option.None
+  let mut qp_decoder: Option[QuotedPrintableStreamingDecoder] = Option.None
+  let mut current_encoding: String = default_encoding
+  
+  type MultipartHandlerWrapper {
+    let @handler: StreamHandler
+    let @attachment_count: ref mut Int
+    let @current_info: ref mut Option[AttachmentInfo]
+    let @base64_decoder: ref mut Option[Base64StreamingDecoder]
+    let @qp_decoder: ref mut Option[QuotedPrintableStreamingDecoder]
+    let @current_encoding: ref mut String
+    let @max_size: Int
+    let @chunk_size: Int
+    let @encoding: String
+  }
+  
+  impl MultipartStreamHandler for MultipartHandlerWrapper {
+    fn pub mut on_part_begin(
+      headers: ref Array[(String, String)],
+      content_type: String,
+      is_attachment: Bool,
+    ) {
+      # Get content disposition to determine if attachment
+      let content_disposition = get_header_value_impl(ref headers, 'Content-Disposition').or('')
+      let content_transfer_encoding = get_header_value_impl(ref headers, 'Content-Transfer-Encoding').or(@encoding)
+      @current_encoding = content_transfer_encoding
+      let content_id = get_header_value_impl(ref headers, 'Content-ID')
+      
+      # Determine if attachment
+      let is_actual_attachment = content_disposition.starts_with?('attachment') || content_disposition.starts_with?('file')
+      
+      # Extract filename if present
+      let filename = if is_actual_attachment {
+        extract_filename_from_disposition(content_disposition)
+      } else {
+        Option.None
+      }
+      
+      if is_actual_attachment {
+        let info = AttachmentInfo(
+          index: @attachment_count,
+          content_type: content_type,
+          filename: filename,
+          content_disposition: content_disposition,
+          content_id: content_id,
+          size: 0,
+          transfer_encoding: content_transfer_encoding,
+        )
+        @current_info = Option.Some(info)
       }
     }
     
-    # Find next boundary
-    let next_boundary = match raw.index_of(boundary_marker, pos) {
-      case Some(p) -> p
-      case None => raw.size
+    fn pub mut on_part_data(
+      data: ref ByteArray,
+      content_transfer_encoding: String,
+    ) {
+      let data_str = data.into_string
+      
+      match @current_info.clone {
+        case Some(info) -> {
+          # Stream attachment data
+          let encoding_lower = content_transfer_encoding.to_lower
+          
+          if encoding_lower == 'base64' {
+            match @base64_decoder {
+              case None -> {
+                @base64_decoder = Option.Some(Base64StreamingDecoder.new(@max_size, false))
+              }
+              case Some(_) -> {}
+            }
+            match @base64_decoder {
+              case Some(mut d) -> {
+                match d.feed(data_str) {
+                  case Ok(decoded) -> {
+                    if decoded.size > 0 {
+                      match @handler.on_attachment_chunk(decoded, info) {
+                        case Ok(_) -> {}
+                        case Error(_) -> {}
+                      }
+                    }
+                  }
+                  case Error(_) -> {}
+                }
+              }
+              case None -> {}
+            }
+          } else if encoding_lower == 'quoted-printable' {
+            match @qp_decoder {
+              case None -> {
+                @qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(@max_size, false, false))
+              }
+              case Some(_) -> {}
+            }
+            match @qp_decoder {
+              case Some(mut d) -> {
+                match d.feed(data_str) {
+                  case Ok(decoded) -> {
+                    if decoded.size > 0 {
+                      match @handler.on_attachment_chunk(decoded, info) {
+                        case Ok(_) -> {}
+                        case Error(_) -> {}
+                      }
+                    }
+                  }
+                  case Error(_) -> {}
+                }
+              }
+              case None -> {}
+            }
+          } else {
+            match @handler.on_attachment_chunk(data.clone, info) {
+              case Ok(_) -> {}
+              case Error(_) -> {}
+            }
+          }
+        }
+        case None -> {
+          # Stream body data (text or html)
+          let content_type = get_header_value_impl(ref [], 'Content-Type').or('')
+          let is_text_plain = content_type == 'text/plain'
+          let is_text_html = content_type == 'text/html'
+          
+          if is_text_plain {
+            let encoding_lower = content_transfer_encoding.to_lower
+            if encoding_lower == 'base64' {
+              match @base64_decoder {
+                case None -> {
+                  @base64_decoder = Option.Some(Base64StreamingDecoder.new(@max_size, false))
+                }
+                case Some(_) -> {}
+              }
+              match @base64_decoder {
+                case Some(mut d) -> {
+                  match d.feed(data_str) {
+                    case Ok(decoded) -> {
+                      if decoded.size > 0 {
+                        let decoded_str = decoded.into_string
+                        let mut pos = 0
+                        while pos < decoded_str.size {
+                          let end = if pos + @chunk_size > decoded_str.size {
+                            decoded_str.size
+                          } else {
+                            pos + @chunk_size
+                          }
+                          let chunk = decoded_str.substring(pos, end)
+                          match @handler.on_text_chunk(chunk) {
+                            case Ok(_) -> {}
+                            case Error(_) -> {}
+                          }
+                          pos = end
+                        }
+                      }
+                    }
+                    case Error(_) -> {}
+                  }
+                }
+                case None -> {}
+              }
+            } else if encoding_lower == 'quoted-printable' {
+              match @qp_decoder {
+                case None -> {
+                  @qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(@max_size, false, false))
+                }
+                case Some(_) -> {}
+              }
+              match @qp_decoder {
+                case Some(mut d) -> {
+                  match d.feed(data_str) {
+                    case Ok(decoded) -> {
+                      if decoded.size > 0 {
+                        let decoded_str = decoded.into_string
+                        let mut pos = 0
+                        while pos < decoded_str.size {
+                          let end = if pos + @chunk_size > decoded_str.size {
+                            decoded_str.size
+                          } else {
+                            pos + @chunk_size
+                          }
+                          let chunk = decoded_str.substring(pos, end)
+                          match @handler.on_text_chunk(chunk) {
+                            case Ok(_) -> {}
+                            case Error(_) -> {}
+                          }
+                          pos = end
+                        }
+                      }
+                    }
+                    case Error(_) -> {}
+                  }
+                }
+                case None -> {}
+              }
+            } else {
+              match @handler.on_text_chunk(data_str) {
+                case Ok(_) -> {}
+                case Error(_) -> {}
+              }
+            }
+          } else if is_text_html {
+            let encoding_lower = content_transfer_encoding.to_lower
+            if encoding_lower == 'base64' {
+              match @base64_decoder {
+                case None -> {
+                  @base64_decoder = Option.Some(Base64StreamingDecoder.new(@max_size, false))
+                }
+                case Some(_) -> {}
+              }
+              match @base64_decoder {
+                case Some(mut d) -> {
+                  match d.feed(data_str) {
+                    case Ok(decoded) -> {
+                      if decoded.size > 0 {
+                        let decoded_str = decoded.into_string
+                        let mut pos = 0
+                        while pos < decoded_str.size {
+                          let end = if pos + @chunk_size > decoded_str.size {
+                            decoded_str.size
+                          } else {
+                            pos + @chunk_size
+                          }
+                          let chunk = decoded_str.substring(pos, end)
+                          match @handler.on_html_chunk(chunk) {
+                            case Ok(_) -> {}
+                            case Error(_) -> {}
+                          }
+                          pos = end
+                        }
+                      }
+                    }
+                    case Error(_) -> {}
+                  }
+                }
+                case None -> {}
+              }
+            } else if encoding_lower == 'quoted-printable' {
+              match @qp_decoder {
+                case None -> {
+                  @qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(@max_size, false, false))
+                }
+                case Some(_) -> {}
+              }
+              match @qp_decoder {
+                case Some(mut d) -> {
+                  match d.feed(data_str) {
+                    case Ok(decoded) -> {
+                      if decoded.size > 0 {
+                        let decoded_str = decoded.into_string
+                        let mut pos = 0
+                        while pos < decoded_str.size {
+                          let end = if pos + @chunk_size > decoded_str.size {
+                            decoded_str.size
+                          } else {
+                            pos + @chunk_size
+                          }
+                          let chunk = decoded_str.substring(pos, end)
+                          match @handler.on_html_chunk(chunk) {
+                            case Ok(_) -> {}
+                            case Error(_) -> {}
+                          }
+                          pos = end
+                        }
+                      }
+                    }
+                    case Error(_) -> {}
+                  }
+                }
+                case None -> {}
+              }
+            } else {
+              match @handler.on_html_chunk(data_str) {
+                case Ok(_) -> {}
+                case Error(_) -> {}
+              }
+            }
+          }
+        }
+      }
     }
     
-    # Extract part content
-    let part_content = raw.substring(pos, next_boundary)
-    
-    # Split part headers and body
-    let part_split = part_content.index_of('\n\n', 0)
-    match part_split {
-      case Some(split_pos) => {
-        let part_headers_raw = part_content.substring(0, split_pos)
-        let part_body_raw = part_content.substring(split_pos + 2, part_content.size)
-        
-        # Parse part headers
-        match parse_headers_impl(part_headers_raw, false, max_size, max_headers) {
-          case Ok(part_headers) => {
-            # Get content disposition to determine if attachment
-            let content_disposition = get_header_value_impl(ref part_headers, 'Content-Disposition').or('')
-            let content_type = get_header_value_impl(ref part_headers, 'Content-Type').or('application/octet-stream')
-            let content_transfer_encoding = get_header_value_impl(ref part_headers, 'Content-Transfer-Encoding').or(default_encoding)
-            
-            # Check if this is an attachment
-            if content_disposition.starts_with?('attachment') || content_disposition.starts_with?('file') {
-              # Extract attachment info
-              let filename = extract_filename(content_disposition)
-              
-              let info = AttachmentInfo(
-                index: attachment_count,
-                content_type: content_type,
-                filename: filename,
-                content_disposition: content_disposition,
-                content_id: get_header_value_impl(ref part_headers, 'Content-ID'),
-                size: part_body_raw.size,
-                transfer_encoding: content_transfer_encoding,
-              )
-              
-              # Notify handler of attachment begin
-              match handler.on_attachment_begin(info) {
-                case Ok(_) -> {}
-                case Error(e) => return Result.Error("Handler on_attachment_begin failed: ${e}")
-              }
-              
-              # Decode and stream attachment
-              match decode_body_impl(part_body_raw, content_transfer_encoding, max_size) {
+    fn pub mut on_part_end {
+      match @current_info.clone {
+        case Some(info) -> {
+          # Finish attachment decoding
+          match @base64_decoder {
+            case Some(mut d) -> {
+              match d.finish {
                 case Ok(decoded) -> {
-                  # Stream in chunks
-                  let mut chunk_pos = 0
-                  while chunk_pos < decoded.size {
-                    let chunk_end = if chunk_pos + chunk_size > decoded.size {
-                      decoded.size
-                    } else {
-                      chunk_pos + chunk_size
-                    }
-                    let chunk = decoded.substring(chunk_pos, chunk_end).to_byte_array
-                    match handler.on_attachment_chunk(chunk, info) {
+                  if decoded.size > 0 {
+                    match @handler.on_attachment_chunk(decoded, info) {
                       case Ok(_) -> {}
-                      case Error(e) => return Result.Error("Handler on_attachment_chunk failed: ${e}")
+                      case Error(_) -> {}
                     }
-                    chunk_pos = chunk_end
                   }
                 }
                 case Error(_) -> {}
               }
-              
-              # Notify handler of attachment end
-              match handler.on_attachment_end(info) {
-                case Ok(_) -> {}
-                case Error(e) => return Result.Error("Handler on_attachment_end failed: ${e}")
-              }
-              
-              attachment_count = attachment_count + 1
-            } else {
-              # Check if text/plain or text/html body
-              if is_text_plain(content_type) {
-                stream_text_body(part_body_raw, content_transfer_encoding, chunk_size, handler)
-              } else if is_text_html(content_type) {
-                stream_html_body(part_body_raw, content_transfer_encoding, chunk_size, handler)
-              }
+              @base64_decoder = Option.None
             }
+            case None -> {}
           }
-          case Error(e) => {}
+          match @qp_decoder {
+            case Some(mut d) -> {
+              match d.finish {
+                case Ok(decoded) -> {
+                  if decoded.size > 0 {
+                    match @handler.on_attachment_chunk(decoded, info) {
+                      case Ok(_) -> {}
+                      case Error(_) -> {}
+                    }
+                  }
+                }
+                case Error(_) -> {}
+              }
+              @qp_decoder = Option.None
+            }
+            case None -> {}
+          }
+          
+          # Notify handler of attachment end
+          match @handler.on_attachment_end(info) {
+            case Ok(_) -> {}
+            case Error(_) -> {}
+          }
+          
+          @attachment_count = @attachment_count + 1
+          @current_info = Option.None
         }
+        case None -> {}
       }
-      case None => {}
     }
-    
-    # Move to next part
-    pos = next_boundary
-    if pos + boundary_marker.size <= raw.size {
-      pos = pos + boundary_marker.size
-    } else {
-      break
-    }
+  }
+  
+  # Create the multipart parser
+  let mut parser = MultipartStreamParser.new(
+    boundary,
+    max_depth,
+    chunk_size,
+    false,
+    max_headers,
+    max_size,
+  )
+  
+  # Create the wrapper handler
+  let wrapper = MultipartHandlerWrapper(
+    handler: handler,
+    attachment_count: ref attachment_count,
+    current_info: ref current_info,
+    base64_decoder: ref base64_decoder,
+    qp_decoder: ref qp_decoder,
+    current_encoding: ref current_encoding,
+    max_size: max_size,
+    chunk_size: chunk_size,
+    encoding: default_encoding,
+  )
+  
+  # Feed data to the parser
+  let data = raw.to_byte_array
+  match parser.feed(ref data, wrapper, default_encoding) {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
+  }
+  
+  # Finish parsing
+  match parser.finish(wrapper) {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
   }
   
   Result.Ok(attachment_count)
 }
 
-# Extract filename from content disposition
 fn extract_filename(content_disposition: String) -> Option[String] {
   # Simple extraction - looks for filename= parameter
   let filename_key = 'filename='
@@ -690,8 +1907,8 @@ fn extract_filename(content_disposition: String) -> Option[String] {
       # Check for quoted filename
       if content_disposition.byte_at(start) == 34 { # '"'
         let end = match content_disposition.index_of('"', start + 1) {
-          case Some(e) => e
-          case None => content_disposition.size
+          case Some(e) -> e
+          case None -> content_disposition.size
         }
         if end > start + 1 {
           return Option.Some(content_disposition.substring(start + 1, end))
