@@ -16,7 +16,7 @@
 import emailparser.address (EmailAddress, parse_address_list_impl)
 import emailparser.address (is_valid_email_format)
 import emailparser.attachment (EmailAttachment)
-import emailparser.decoder (decode_body_impl, decode_rfc2047_word)
+import emailparser.decoder (ContentDecoder, DefaultContentDecoder, decode_body_impl, decode_rfc2047_word)
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.header (

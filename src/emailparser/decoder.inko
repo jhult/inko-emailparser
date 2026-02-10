@@ -370,3 +370,25 @@ fn pub decode_rfc2047_quoted_printable(text: String) -> String {
     preserve_equals_on_error: false,
   )
 }
+
+# Trait for content decoder implementations
+#
+# Allows swapping decoder implementations for testing and extensibility
+trait pub ContentDecoder {
+  fn decode(input: String, encoding: String, max_size: Int) -> Result[String, Error]
+}
+
+# Default content decoder implementation
+type pub DefaultContentDecoder {}
+
+impl ContentDecoder for DefaultContentDecoder {
+  fn decode(input: String, encoding: String, max_size: Int) -> Result[String, Error] {
+    decode_body_impl(input, encoding, max_size)
+  }
+}
+
+impl DefaultContentDecoder {
+  fn pub static new -> DefaultContentDecoder {
+    DefaultContentDecoder()
+  }
+}
