@@ -101,11 +101,7 @@ fn decode_body_impl(
       0
     }
 
-    let estimated_size = if cleaned_size >= BASE64_CHUNK_SIZE {
-      ((cleaned_size - padding) / BASE64_CHUNK_SIZE) * BASE64_DECODED_SIZE
-    } else {
-      0
-    }
+    let estimated_size = ((cleaned_size - padding) * BASE64_DECODED_SIZE) / BASE64_CHUNK_SIZE
 
     if estimated_size > max_size {
       return Result.Error(

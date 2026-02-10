@@ -288,6 +288,9 @@ fn pub is_valid_boundary(boundary: String) -> Bool {
   # RFC 2046 Section 5.1.1: boundary must be 1-70 characters
   if boundary.empty? or boundary.size > MAX_BOUNDARY_LENGTH { return false }
 
+  # RFC 2046 Section 5.1.1: boundary must not start or end with space
+  if boundary.starts_with?(' ') or boundary.ends_with?(' ') { return false }
+
   # RFC 2046 specifies boundaries should consist of:
   # - Alphanumeric characters (a-z, A-Z, 0-9)
   # - Limited set of special characters: ' ( ) + _ , - . / : = ?

@@ -37,11 +37,22 @@ impl Base64StreamingDecoder {
           if byte == ASCII_LF or byte == ASCII_CR or byte == ASCII_SPACE or byte == ASCII_HT {
             i = i + 1
           } else if is_valid_base64_char(byte) {
-            @buffer.push(byte)
-            if byte == ASCII_EQUALS {
-              has_padding = true
+            # Check for padding in wrong position
+            if has_padding and byte != ASCII_EQUALS {
+              # Non-padding character after padding is invalid
+              if @strict_mode {
+                return Result.Error('Padding appears before end of data')
+              } else {
+                # In lax mode, skip this character
+                i = i + 1
+              }
+            } else {
+              @buffer.push(byte)
+              if byte == ASCII_EQUALS {
+                has_padding = true
+              }
+              i = i + 1
             }
-            i = i + 1
           } else {
             # Invalid character
             if @strict_mode {
