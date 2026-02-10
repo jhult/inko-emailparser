@@ -260,6 +260,25 @@ fn pub is_valid_mime_subtype(subtype: String) -> Bool {
   true
 }
 
+# Helper predicate for boundary character validation
+fn is_valid_boundary_char(byte: Int) -> Bool {
+  let is_valid = is_alnum(byte)
+    or byte == ASCII_SPACE
+    or byte == ASCII_APOSTROPHE
+    or byte == ASCII_LPAREN
+    or byte == ASCII_RPAREN
+    or byte == ASCII_PLUS
+    or byte == ASCII_UNDERSCORE
+    or byte == ASCII_COMMA
+    or byte == ASCII_HYPHEN
+    or byte == ASCII_DOT
+    or byte == ASCII_SLASH
+    or byte == ASCII_COLON
+    or byte == ASCII_EQUALS
+    or byte == ASCII_QUESTION
+  is_valid
+}
+
 # Check if a string is a valid MIME type (e.g., "text/plain")
 # This validates just the type/subtype part, NOT parameters
 fn pub is_valid_mime_type(content_type: String) -> Bool {
@@ -301,38 +320,21 @@ fn pub is_valid_boundary(boundary: String) -> Bool {
   let mut has_non_space = false
 
   while i < boundary.size {
-    match boundary.get(i) {
-      case Ok(byte) -> {
-        # Reject control characters (including newlines, tabs, null, DEL)
-        if is_control_char(byte) or byte == ASCII_DEL { return false }
+     match boundary.get(i) {
+       case Ok(byte) -> {
+         # Reject control characters (including newlines, tabs, null, DEL)
+         if is_control_char(byte) or byte == ASCII_DEL { return false }
 
-        # Allow alphanumeric characters
-        let is_valid = is_alnum(byte)
+         # Validate character using helper predicate
+         if !is_valid_boundary_char(byte) { return false }
 
-        # Allow limited special characters from RFC 2046
-          or byte == ASCII_APOSTROPHE
-          or byte == ASCII_LPAREN
-          or byte == ASCII_RPAREN
-          or byte == ASCII_PLUS
-          or byte == ASCII_UNDERSCORE
-          or byte == ASCII_COMMA
-          or byte == ASCII_HYPHEN
-          or byte == ASCII_DOT
-          or byte == ASCII_SLASH
-          or byte == ASCII_COLON
-          or byte == ASCII_EQUALS
-          or byte == ASCII_QUESTION
-          or byte == ASCII_SPACE
+         # Track if we have at least one non-space character
+         if byte != ASCII_SPACE { has_non_space = true }
 
-        if !is_valid { return false }
-
-        # Track if we have at least one non-space character
-        if byte != ASCII_SPACE { has_non_space = true }
-
-        i = i + 1
-      }
-      case Error(_) -> return false
-    }
+         i = i + 1
+       }
+       case Error(_) -> return false
+     }
   }
 
   # Boundary must contain at least one non-space character
