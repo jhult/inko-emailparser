@@ -55,6 +55,7 @@ import emailparser.ascii (
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.hex (parse_hex_byte, two_bytes_to_hex_string)
+import emailparser.size_tracker (SizeTracker)
 import std.base64 (Decoder)
 import std.bytes (ByteArray)
 import std.result (Result)
@@ -104,18 +105,9 @@ fn decode_body_impl(
 
     let estimated_size = ((cleaned_size - padding) * BASE64_DECODED_SIZE) / BASE64_CHUNK_SIZE
 
-    if estimated_size > max_size {
-      return Result.Error(
-        Error.DecodedSizeTooLarge(
-          Severity.Error,
-          estimated_size,
-          max_size,
-          encoding,
-          Option.None,
-          Option.None,
-          Option.None,
-        ),
-      )
+    match SizeTracker.check_allocation(0, estimated_size, max_size) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e)
     }
 
     let decoder = Decoder.new
@@ -144,52 +136,21 @@ fn decode_body_impl(
     # Use QP_SAFETY_FACTOR (4) for conservative estimate
     let estimated_size = raw.size / QP_SAFETY_FACTOR
 
-    if estimated_size > max_size {
-      return Result.Error(
-        Error.DecodedSizeTooLarge(
-          Severity.Error,
-          estimated_size,
-          max_size,
-          encoding,
-          Option.None,
-          Option.None,
-          Option.None,
-        ),
-      )
+    match SizeTracker.check_allocation(0, estimated_size, max_size) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e)
     }
 
     let decoded = decode_quoted_printable_impl(raw)
 
-    if decoded.size > max_size {
-      Result.Error(
-        Error.DecodedSizeTooLarge(
-          Severity.Error,
-          decoded.size,
-          max_size,
-          encoding,
-          Option.None,
-          Option.None,
-          Option.None,
-        ),
-      )
-    } else {
-      Result.Ok(decoded)
+    match SizeTracker.check_allocation(0, decoded.size, max_size) {
+      case Ok(_) -> Result.Ok(decoded)
+      case Error(e) -> Result.Error(e)
     }
   } else {
-    if raw.size > max_size {
-      Result.Error(
-        Error.DecodedSizeTooLarge(
-          Severity.Error,
-          raw.size,
-          max_size,
-          encoding,
-          Option.None,
-          Option.None,
-          Option.None,
-        ),
-      )
-    } else {
-      Result.Ok(raw)
+    match SizeTracker.check_allocation(0, raw.size, max_size) {
+      case Ok(_) -> Result.Ok(raw)
+      case Error(e) -> Result.Error(e)
     }
   }
 }

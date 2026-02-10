@@ -18,6 +18,7 @@ import emailparser.ascii (
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.limits (MAX_FILENAME_SIZE, MAX_HEADER_VALUE_LENGTH)
+import emailparser.size_tracker (SizeTracker)
 import emailparser.validation (is_quoted_string, is_valid_mime_type)
 import std.option (Option)
 import std.result (Result)
@@ -211,20 +212,23 @@ fn parse_headers_impl(
 
         let new_size = current_value.size + 1 + line_str.trim.size
 
-        if new_size > MAX_HEADER_VALUE_LENGTH {
-          if strict_mode {
-            return Result.Error(
-              Error.HeaderValueTooLarge(
-                Severity.Error,
-                new_size,
-                MAX_HEADER_VALUE_LENGTH,
-                Option.Some(line_number),
-                Option.None,
-                Option.Some(line_str.clone),
-              ),
-            )
-          } else {
-            break
+        match SizeTracker.check_allocation(0, new_size, MAX_HEADER_VALUE_LENGTH) {
+          case Ok(_) -> {}
+          case Error(_) -> {
+            if strict_mode {
+              return Result.Error(
+                Error.HeaderValueTooLarge(
+                  Severity.Error,
+                  new_size,
+                  MAX_HEADER_VALUE_LENGTH,
+                  Option.Some(line_number),
+                  Option.None,
+                  Option.Some(line_str.clone),
+                ),
+              )
+            } else {
+              break
+            }
           }
         }
 
@@ -273,23 +277,26 @@ fn parse_headers_impl(
           }
 
           # Check header value size limit
-          if current_value.size > MAX_HEADER_VALUE_LENGTH {
-            if strict_mode {
-              return Result.Error(
-                Error.HeaderValueTooLarge(
-                  Severity.Error,
-                  current_value.size,
+          match SizeTracker.check_allocation(0, current_value.size, MAX_HEADER_VALUE_LENGTH) {
+            case Ok(_) -> {}
+            case Error(_) -> {
+              if strict_mode {
+                return Result.Error(
+                  Error.HeaderValueTooLarge(
+                    Severity.Error,
+                    current_value.size,
+                    MAX_HEADER_VALUE_LENGTH,
+                    Option.Some(line_number),
+                    Option.None,
+                    Option.Some(current_value.clone),
+                  ),
+                )
+              } else {
+                current_value = current_value.substring(
+                  0,
                   MAX_HEADER_VALUE_LENGTH,
-                  Option.Some(line_number),
-                  Option.None,
-                  Option.Some(current_value.clone),
-                ),
-              )
-            } else {
-              current_value = current_value.substring(
-                0,
-                MAX_HEADER_VALUE_LENGTH,
-              )
+                )
+              }
             }
           }
 
