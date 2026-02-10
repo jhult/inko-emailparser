@@ -91,6 +91,7 @@ type pub MultipartStreamParser {
   let mut @current_context: Option[CurrentPartContext]
   let mut @context_stack: Array[ContextStackEntry]
   let mut @bytes_processed: Int
+  let mut @attachment_count: Int
 }
 
 impl MultipartStreamParser {
@@ -122,7 +123,8 @@ impl MultipartStreamParser {
       max_attachment_size: max_attachment_size,
       current_context: Option.None,
       context_stack: [],
-      bytes_processed: 0,
+      bytes_processed:0,
+      attachment_count: 0,
     )
   }
 
@@ -429,12 +431,24 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
         Option.None
       }
 
+      # Get attachment index for this part
+      let att_index = if is_attachment {
+        parser.attachment_count
+      } else {
+        -1
+      }
+
+      # Increment attachment counter if this is an attachment
+      if is_attachment {
+        parser.attachment_count = parser.attachment_count + 1
+      }
+
       # Notify handler before creating context (to avoid moving headers)
       handler.on_part_begin(ref headers, content_type.clone, is_attachment)
 
       # Create part context
       let context = CurrentPartContext(
-        index: 0,  # TODO: track actual index
+        index: att_index,
         headers: headers,
         content_type: content_type,
         content_disposition: content_disposition,
