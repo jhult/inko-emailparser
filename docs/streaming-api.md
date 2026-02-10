@@ -12,11 +12,15 @@ This document outlines a comprehensive streaming API design for processing large
 4. [API Design](#api-design)
 5. [Memory-Efficient Parsing](#memory-efficient-parsing)
 6. [Callback Architecture](#callback-architecture)
-7. [Error Handling](#error-handling)
-8. [Backward Compatibility](#backward-compatibility)
-9. [Trade-offs and Considerations](#trade-offs-and-considerations)
-10. [Implementation Phases](#implementation-phases)
-11. [Proof of Concept Examples](#proof-of-concept-examples)
+7. [Incremental Decoders](#incremental-decoders)
+8. [Async Reader Interface](#async-reader-interface)
+9. [Async API Guide](#async-api-guide)
+10. [Configuration Guide](#configuration-guide)
+11. [Error Handling](#error-handling)
+12. [Backward Compatibility](#backward-compatibility)
+13. [Trade-offs and Considerations](#trade-offs-and-considerations)
+14. [Implementation Phases](#implementation-phases)
+15. [Proof of Concept Examples](#proof-of-concept-examples)
 
 ---
 
@@ -798,6 +802,520 @@ impl StreamingAttachmentHandler {
     }
   }
 }
+```
+
+---
+
+## Incremental Decoders
+
+The streaming API uses incremental decoders that can process data in chunks without loading entire encoded bodies into memory. Two decoders are implemented:
+
+### Base64StreamingDecoder
+
+Processes Base64-encoded data incrementally, handling chunk boundaries gracefully.
+
+**Key Features:**
+- Buffers input until padding (`=`) is detected
+- Filters whitespace (CR, LF, space, tab) automatically
+- Supports strict mode (rejects invalid characters) and lax mode (skips them)
+- Tracks decoded bytes against `max_size` limit
+- Returns empty `ByteArray` until a complete encoded block is available
+
+**Usage Example:**
+
+```inko
+import emailparser.streaming_decoder (Base64StreamingDecoder)
+
+let mut decoder = Base64StreamingDecoder.new(50_000_000, false)
+
+# Feed data in chunks
+let chunk1 = "SGVsbG8gV29ybGQ="
+match decoder.feed(chunk1) {
+  case Ok(decoded) -> {
+    # Process decoded chunk
+    if decoded.size > 0 {
+      Stdout.new.print("Got ${decoded.size.to_string} bytes")
+    }
+  }
+  case Error(e) -> Stderr.new.print("Error: ${e}")
+}
+
+# Call finish to get any remaining data
+match decoder.finish {
+  case Ok(final) -> {
+    # Process final chunk
+  }
+  case Error(e) -> Stderr.new.print("Error: ${e}")
+}
+```
+
+**Chunk Boundary Handling:**
+
+Base64 encodes 3 bytes into 4 characters. Chunk boundaries can occur anywhere in the encoded stream. The decoder handles this by:
+
+1. Accumulating input in an internal buffer
+2. Only decoding when complete quads (4 characters) are found or padding is present
+3. Returning any decoded data immediately when available
+4. Buffering incomplete quads for the next chunk
+
+**Example of chunked input:**
+```
+Chunk 1: "SGVsbG8g" (decodes to "Hello")
+Chunk 2: "V29ybGQ=" (decodes to "World")
+```
+
+### QuotedPrintableStreamingDecoder
+
+Processes Quoted-Printable encoded data, handling soft line breaks and incomplete sequences.
+
+**Key Features:**
+- Buffers incomplete sequences (`=XX` split across chunks)
+- Handles soft line breaks (`=\r\n` or `=\n`)
+- Supports underscore-as-space mode (RFC 2047 encoded-word)
+- Configurable error handling (`preserve_equals_on_error`)
+- Tracks decoded size against `max_size` limit
+
+**Usage Example:**
+
+```inko
+import emailparser.streaming_decoder (QuotedPrintableStreamingDecoder)
+
+let mut decoder = QuotedPrintableStreamingDecoder.new(50_000_000, false, false)
+
+# Feed data in chunks
+let chunk1 = "Hello=20"
+match decoder.feed(chunk1) {
+  case Ok(decoded) -> {
+    # Process decoded chunk
+  }
+  case Error(e) -> Stderr.new.print("Error: ${e}")
+}
+```
+
+**Chunk Boundary Handling:**
+
+Quoted-Printable sequences can be split across chunks. The decoder handles this by:
+
+1. Detecting incomplete sequences (`=` at end, `=X`, `=\r`)
+2. Buffering everything until a complete sequence is available
+3. Returning empty result when data is incomplete
+4. Processing complete sequences in the next chunk
+
+**Example of chunked input:**
+```
+Chunk 1: "Hello=" (incomplete - buffers all)
+Chunk 2: "20World" (completes "=20" and decodes "Hello World")
+```
+
+**Special Cases:**
+
+- `=` followed by `=`: Treated as literal `=` (common in encoded-words)
+- `=\r\n` or `=\n`: Soft line break - removed from output
+- Underscore-as-space: Converts `_` to space when enabled (RFC 2047)
+
+### Decoder Comparison
+
+| Feature | Base64StreamingDecoder | QuotedPrintableStreamingDecoder |
+|---------|----------------------|-------------------------------|
+| Output size | 75% of input | Similar to input |
+| Chunk boundaries | Buffered until quad complete | Buffered until sequence complete |
+| Whitespace | Filtered automatically | Preserved (except soft breaks) |
+| Strict mode | Invalid char check | N/A |
+| Max size | Truncates on exceed | Returns error on exceed |
+
+---
+
+## Async Reader Interface
+
+The `AsyncReader` trait provides a generic interface for reading data incrementally from various sources.
+
+### Trait Definition
+
+```inko
+trait pub AsyncReader {
+  # Read up to size bytes from source
+  #
+  # Returns:
+  # - Ok(ByteArray) with bytes read (may be empty if EOF)
+  # - Error(String) if a read error occurs
+  fn pub mut read(size: Int) -> Result[ByteArray, String]
+}
+```
+
+### ByteArrayReader
+
+A simple implementation that wraps in-memory `ByteArray` for testing and when data is already loaded.
+
+**Features:**
+- Zero-copy reading from existing data
+- Returns empty `ByteArray` on EOF (not error)
+- Never returns `Error` (always `Ok`)
+- Tracks position and size for debugging
+
+**Usage Example:**
+
+```inko
+import emailparser.streaming_reader (AsyncReader, ByteArrayReader)
+
+let data = "email content here".to_byte_array
+let mut reader = ByteArrayReader.new(data)
+
+loop {
+  match reader.read(1024) {
+    case Ok(chunk) -> {
+      if chunk.size == 0 {
+        break
+      }
+      # Process chunk
+    }
+    case Error(e) -> Stderr.new.print("Error: ${e}")
+  }
+}
+```
+
+**Methods:**
+
+```inko
+fn pub static new(data: ByteArray) -> ByteArrayReader
+fn pub static from_string(text: String) -> ByteArrayReader
+fn pub position -> Int
+fn pub size -> Int
+fn pub eof? -> Bool
+```
+
+### Future Reader Implementations
+
+The trait-based design allows for additional implementations:
+
+- **FileReader**: Read from files asynchronously
+- **TcpStreamReader**: Read from network connections
+- **BufferedReader**: Add buffering to any reader
+
+---
+
+## Async API Guide
+
+The streaming API provides three methods for parsing emails:
+
+### 1. parse_stream - Synchronous String Parsing
+
+Parse an email from a complete `String` with streaming callbacks.
+
+**Signature:**
+
+```inko
+fn pub mut parse_stream[H: mut + StreamHandler](
+  raw: String,
+  handler: mut H,
+) -> Result[StreamingResult, String]
+```
+
+**Use When:**
+- Email is already loaded into memory as a `String`
+- You need synchronous processing
+- Testing with in-memory data
+
+**Example:**
+
+```inko
+let parser = StreamingParser.new
+let handler = MyHandler.new
+match parser.parse_stream(email_string, handler) {
+  case Ok(result) -> {
+    # result contains metadata only
+  }
+  case Error(e) -> {
+    # Handle error
+  }
+}
+```
+
+### 2. parse_async_raw - Async String Parsing
+
+Parse an email from a `String` with async processing.
+
+**Signature:**
+
+```inko
+fn pub mut parse_async_raw[H: mut + StreamHandler](
+  raw: String,
+  handler: mut H,
+) -> Result[StreamingResult, String]
+```
+
+**Use When:**
+- Email is in memory but handlers perform async operations
+- Handlers need to await async operations
+- Backpressure handling needed
+
+**Example:**
+
+```inko
+# In an async process
+type async Main {
+  fn async main {
+    let parser = StreamingParser.new
+    let handler = AsyncHandler.new
+    match parser.parse_async_raw(email_string, handler) {
+      case Ok(result) -> {}
+      case Error(e) -> {}
+    }
+  }
+}
+```
+
+### 3. parse_async_reader - Async Reader Parsing
+
+Parse an email incrementally from an `AsyncReader`.
+
+**Signature:**
+
+```inko
+fn pub mut parse_async_reader[H: mut + StreamHandler](
+  reader: AsyncReader,
+  handler: mut H,
+) -> Result[StreamingResult, String]
+```
+
+**Use When:**
+- Reading from files, network, or other incremental sources
+- Email size is too large for memory
+- True streaming (not just chunked processing) is needed
+
+**Example:**
+
+```inko
+import emailparser.streaming_reader (ByteArrayReader)
+
+let reader = ByteArrayReader.from_string(email_string)
+let parser = StreamingParser.new
+let handler = FileSaver.new("output")
+
+match parser.parse_async_reader(reader, handler) {
+  case Ok(result) -> {
+    # Parsed successfully
+  }
+  case Error(e) -> {
+    # Handle error
+  }
+}
+```
+
+### Method Comparison
+
+| Method | Input | Async Handlers | True Streaming | Use Case |
+|--------|-------|---------------|----------------|-----------|
+| `parse_stream` | `String` | No | No | Testing, small emails |
+| `parse_async_raw` | `String` | Yes | No | Async processing |
+| `parse_async_reader` | `AsyncReader` | Yes | Yes | Files, network, large emails |
+
+### Callback Execution
+
+Regardless of parsing method, callbacks are executed synchronously:
+
+- **For `parse_stream`**: Callbacks run synchronously in caller's process
+- **For `parse_async_raw`**: Handlers can use `await` within callbacks
+- **For `parse_async_reader`**: Handlers can use `await` within callbacks
+
+**Note:** The parser itself is synchronous - it waits for callbacks to complete before proceeding.
+
+### Memory Footprint by Method
+
+| Method | Email in Memory | Chunk Size | Peak Memory |
+|--------|-----------------|-------------|--------------|
+| `parse_stream` | Yes (entire email) | Configurable | Email size + chunk size |
+| `parse_async_raw` | Yes (entire email) | Configurable | Email size + chunk size |
+| `parse_async_reader` | No | Configurable | Chunk size only |
+
+---
+
+## Configuration Guide
+
+The `StreamingConfig` type provides fine-grained control over parsing behavior.
+
+### Configuration Options
+
+```inko
+type pub StreamingConfig {
+  let pub mut @strict_mode: Bool
+  let pub mut @fail_fast: Bool
+  let pub mut @max_email_size: Int
+  let pub mut @max_attachment_size: Int
+  let pub mut @max_multipart_depth: Int
+  let pub mut @max_headers: Int
+  let pub mut @stream_chunk_size: Int
+}
+```
+
+### Default Configuration
+
+```inko
+StreamingConfig(
+  strict_mode: false,
+  fail_fast: false,
+  max_email_size: 50_000_000,      # 50MB
+  max_attachment_size: 25_000_000,   # 25MB
+  max_multipart_depth: 10,
+  max_headers: 1000,
+  stream_chunk_size: 65536,          # 64KB
+)
+```
+
+### strict_mode
+
+**Controls validation strictness.**
+
+- `false` (default): Lax parsing, recovers from common errors
+- `true`: Strict RFC compliance, rejects malformed emails
+
+**Impact:**
+- Base64: Invalid characters (lax: skip, strict: error)
+- Multipart: Missing boundaries (lax: attempt recovery, strict: error)
+
+**Recommendation:**
+- Use `false` for production (handle real-world emails)
+- Use `true` for validation/testing
+
+```inko
+let config = StreamingConfig.new
+config.strict_mode = true
+let parser = StreamingParser.with_config(config)
+```
+
+### fail_fast
+
+**Controls error propagation to handlers.**
+
+- `false` (default): Errors returned to caller, handler's `on_error` called
+- `true`: Parsing stops immediately on first error
+
+**Impact:**
+- Handler `on_error` always called regardless of setting
+- With `fail_fast=false`, parser may continue after non-fatal errors
+- With `fail_fast=true`, any error aborts parsing
+
+**Recommendation:**
+- Use `false` when you want to collect multiple errors
+- Use `true` for critical applications where any error is unacceptable
+
+```inko
+let config = StreamingConfig.new
+config.fail_fast = true
+```
+
+### max_email_size
+
+**Maximum allowed email size in bytes.**
+
+**Default:** `50_000_000` (50MB)
+
+**Impact:**
+- Prevents memory exhaustion
+- Rejects emails larger than limit with clear error message
+
+**Recommendation:**
+- Increase if you need to handle larger emails (up to available RAM)
+- Decrease for constrained environments (embedded, cloud functions)
+
+```inko
+let config = StreamingConfig.new
+config.max_email_size = 100_000_000  # 100MB
+```
+
+### max_attachment_size
+
+**Maximum decoded attachment size in bytes.**
+
+**Default:** `25_000_000` (25MB)
+
+**Impact:**
+- Enforced per attachment
+- Decoders truncate or error when exceeded
+
+**Recommendation:**
+- Set based on your storage capacity
+- Consider Base64 expansion (33%) when setting limit
+
+```inko
+let config = StreamingConfig.new
+config.max_attachment_size = 50_000_000  # 50MB per attachment
+```
+
+### max_multipart_depth
+
+**Maximum nesting level for multipart messages.**
+
+**Default:** `10`
+
+**Impact:**
+- Prevents stack overflow from deeply nested multipart
+- Rejects emails exceeding depth
+
+**Recommendation:**
+- Rarely need to increase (10 is very generous)
+- Decrease for stricter validation
+
+```inko
+let config = StreamingConfig.new
+config.max_multipart_depth = 5
+```
+
+### max_headers
+
+**Maximum number of headers per part.**
+
+**Default:** `1000`
+
+**Impact:**
+- Prevents header flood attacks
+- Rejects parts with excessive headers
+
+**Recommendation:**
+- Rarely need to adjust
+- Decrease for stricter validation
+
+```inko
+let config = StreamingConfig.new
+config.max_headers = 500
+```
+
+### stream_chunk_size
+
+**Size of chunks delivered to callbacks in bytes.**
+
+**Default:** `65536` (64KB)
+
+**Impact:**
+- Smaller chunks: Lower latency, more callbacks
+- Larger chunks: Higher throughput, fewer callbacks
+- Trade-off: Callback overhead vs responsiveness
+
+**Recommendations:**
+
+| Scenario | Chunk Size | Reason |
+|----------|-------------|---------|
+| Small emails | 16KB | Lower latency |
+| Large attachments | 256KB - 1MB | Higher throughput |
+| Network I/O | 8KB - 16KB | Match TCP segment size |
+| Default | 64KB | Balanced |
+
+```inko
+let config = StreamingConfig.new
+config.stream_chunk_size = 131072  # 128KB
+```
+
+### Builder Pattern
+
+`StreamingConfig` provides fluent builder methods:
+
+```inko
+let config = StreamingConfig.new
+  .with_strict_mode(true)
+  .with_fail_fast(false)
+  .with_max_email_size(100_000_000)
+  .with_stream_chunk_size(131072)
+
+let parser = StreamingParser.with_config(config)
 ```
 
 ---
