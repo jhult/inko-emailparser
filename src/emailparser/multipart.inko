@@ -66,6 +66,7 @@
 import emailparser.attachment (EmailAttachment)
 import emailparser.decoder (decode_body_impl)
 import emailparser.error (Error)
+import emailparser.error (Severity)
 import emailparser.header (
   get_header_value_impl, parse_content_disposition_impl,
   parse_content_type_impl, parse_headers_impl, sanitize_filename,
@@ -210,6 +211,7 @@ fn parse_multipart_impl(
   if depth > max_depth {
     return Result.Error(
       Error.MultipartDepthExceeded(
+        Severity.Error,
         depth,
         max_depth,
         Option.None,
@@ -222,6 +224,7 @@ fn parse_multipart_impl(
   if !is_valid_boundary(boundary) {
     return Result.Error(
       Error.InvalidBoundary(
+        Severity.Error,
         'contains disallowed characters',
         Option.None,
         Option.None,
@@ -267,6 +270,7 @@ fn parse_multipart_impl(
   if !has_valid_part {
     return Result.Error(
       Error.MultipartWithoutParts(
+        Severity.Error,
         Option.None,
         Option.None,
         Option.Some(raw.clone),
@@ -394,7 +398,7 @@ fn pub split_multipart_body(
     let fragment = if raw.size > 50 { raw.substring(0, 50) } else { raw.clone }
 
     return Result.Error(
-      Error.BoundaryNotFound(Option.None, Option.None, Option.Some(fragment)),
+      Error.BoundaryNotFound(Severity.Error, Option.None, Option.None, Option.Some(fragment)),
     )
   }
 
@@ -567,7 +571,7 @@ fn pub parse_single_multipart_part(
       }
 
       Result.Error(
-        Error.NoBodyInPart(Option.None, Option.None, Option.Some(fragment)),
+        Error.NoBodyInPart(Severity.Error, Option.None, Option.None, Option.Some(fragment)),
       )
     }
   }

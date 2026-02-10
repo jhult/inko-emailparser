@@ -53,6 +53,7 @@ import emailparser.ascii (
   UNICODE_REPLACEMENT_CHAR_UTF8,
 )
 import emailparser.error (Error)
+import emailparser.error (Severity)
 import emailparser.hex (parse_hex_byte, two_bytes_to_hex_string)
 import std.base64 (Decoder)
 import std.bytes (ByteArray)
@@ -106,6 +107,7 @@ fn decode_body_impl(
     if estimated_size > max_size {
       return Result.Error(
         Error.DecodedSizeTooLarge(
+          Severity.Error,
           estimated_size,
           max_size,
           encoding,
@@ -124,6 +126,7 @@ fn decode_body_impl(
       case Error(_) -> {
         Result.Error(
           Error.DecodingFailed(
+            Severity.Error,
             encoding,
             'base64 decoding failed',
             Option.None,
@@ -144,6 +147,7 @@ fn decode_body_impl(
     if estimated_size > max_size {
       return Result.Error(
         Error.DecodedSizeTooLarge(
+          Severity.Error,
           estimated_size,
           max_size,
           encoding,
@@ -159,6 +163,7 @@ fn decode_body_impl(
     if decoded.size > max_size {
       Result.Error(
         Error.DecodedSizeTooLarge(
+          Severity.Error,
           decoded.size,
           max_size,
           encoding,
@@ -174,6 +179,7 @@ fn decode_body_impl(
     if raw.size > max_size {
       Result.Error(
         Error.DecodedSizeTooLarge(
+          Severity.Error,
           raw.size,
           max_size,
           encoding,

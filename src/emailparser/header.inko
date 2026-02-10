@@ -16,6 +16,7 @@ import emailparser.ascii (
   ASCII_COLON, ASCII_EXCLAMATION, ASCII_TILDE, is_uppercase,
 )
 import emailparser.error (Error)
+import emailparser.error (Severity)
 import emailparser.limits (MAX_FILENAME_SIZE, MAX_HEADER_VALUE_LENGTH)
 import emailparser.validation (is_quoted_string, is_valid_mime_type)
 import std.option (Option)
@@ -117,6 +118,7 @@ fn parse_headers_impl(
   if raw.size > max_size {
     return Result.Error(
       Error.EmailSizeTooLarge(
+        Severity.Error,
         raw.size,
         max_size,
         Option.None,
@@ -194,6 +196,7 @@ fn parse_headers_impl(
               if !has_semicolon_after {
                 return Result.Error(
                   Error.MalformedHeader(
+                    Severity.Error,
                     'suspicious folding in boundary parameter value',
                     Option.Some(line_number),
                     Option.None,
@@ -212,6 +215,7 @@ fn parse_headers_impl(
           if strict_mode {
             return Result.Error(
               Error.HeaderValueTooLarge(
+                Severity.Error,
                 new_size,
                 MAX_HEADER_VALUE_LENGTH,
                 Option.Some(line_number),
@@ -233,6 +237,7 @@ fn parse_headers_impl(
         if headers.size >= max_headers {
           return Result.Error(
             Error.TooManyHeaders(
+              Severity.Error,
               headers.size,
               max_headers,
               Option.Some(line_number),
@@ -258,6 +263,7 @@ fn parse_headers_impl(
           if current_key.empty? {
             return Result.Error(
               Error.InvalidHeaderFieldName(
+                Severity.Error,
                 current_key,
                 Option.Some(line_number),
                 Option.None,
@@ -271,6 +277,7 @@ fn parse_headers_impl(
             if strict_mode {
               return Result.Error(
                 Error.HeaderValueTooLarge(
+                  Severity.Error,
                   current_value.size,
                   MAX_HEADER_VALUE_LENGTH,
                   Option.Some(line_number),
@@ -292,6 +299,7 @@ fn parse_headers_impl(
             if is_valid_field_name(current_key) == false {
               return Result.Error(
                 Error.InvalidHeaderFieldName(
+                  Severity.Error,
                   current_key,
                   Option.Some(line_number),
                   Option.None,
@@ -317,6 +325,7 @@ fn parse_headers_impl(
                   # This looks like "Field1: Field2: value" which is malformed
                   return Result.Error(
                     Error.MalformedHeader(
+                      Severity.Error,
                       'possible missing newline',
                       Option.Some(line_number),
                       Option.None,
@@ -336,6 +345,7 @@ fn parse_headers_impl(
               if k == lower_key {
                 return Result.Error(
                   Error.DuplicateHeader(
+                    Severity.Warning,
                     current_key,
                     Option.Some(line_number),
                     Option.None,
@@ -352,6 +362,7 @@ fn parse_headers_impl(
           # RFC 5322 requires colon separator - reject even in non-strict mode
           return Result.Error(
             Error.HeaderWithoutColon(
+              Severity.Error,
               Option.Some(line_number),
               Option.None,
               Option.Some(line_str.clone),
@@ -368,6 +379,7 @@ fn parse_headers_impl(
     if headers.size >= max_headers {
       return Result.Error(
         Error.TooManyHeaders(
+          Severity.Error,
           headers.size,
           max_headers,
           Option.Some(line_number),
@@ -457,6 +469,7 @@ fn parse_content_type_impl(
   if !is_valid_mime_type(main_type.clone) {
     return Result.Error(
       Error.InvalidContentType(
+        Severity.Error,
         'invalid MIME type format, expected "type/subtype"',
         Option.None,
         Option.None,
@@ -497,6 +510,7 @@ fn parse_content_type_impl(
                 if raw_value.contains?('\n') or raw_value.contains?('\r') {
                   return Result.Error(
                     Error.InvalidContentType(
+                      Severity.Error,
                       'boundary parameter value contains newline characters',
                       Option.None,
                       Option.None,
@@ -518,6 +532,7 @@ fn parse_content_type_impl(
                 # Parameter without = is malformed
                 return Result.Error(
                   Error.InvalidContentType(
+                    Severity.Error,
                     'invalid parameter format: "' + param + '"',
                     Option.None,
                     Option.None,
@@ -563,6 +578,7 @@ fn parse_content_disposition_impl(
   if disp_type.empty? {
     return Result.Error(
       Error.InvalidContentType(
+        Severity.Error,
         'empty disposition type',
         Option.None,
         Option.None,
@@ -603,6 +619,7 @@ fn parse_content_disposition_impl(
                 if raw_value.contains?('\n') or raw_value.contains?('\r') {
                   return Result.Error(
                     Error.InvalidContentType(
+                      Severity.Error,
                       'parameter value contains newline characters',
                       Option.None,
                       Option.None,
@@ -628,6 +645,7 @@ fn parse_content_disposition_impl(
                 # Parameter without = is malformed
                 return Result.Error(
                   Error.InvalidContentType(
+                    Severity.Error,
                     'invalid parameter format: "' + param + '"',
                     Option.None,
                     Option.None,

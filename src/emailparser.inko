@@ -18,6 +18,7 @@ import emailparser.address (is_valid_email_format)
 import emailparser.attachment (EmailAttachment)
 import emailparser.decoder (decode_body_impl, decode_rfc2047_word)
 import emailparser.error (Error)
+import emailparser.error (Severity)
 import emailparser.header (
   eq_ignore_case, extract_extra_headers, get_header_value_impl,
   get_param_value_impl, is_standard_header_impl, parse_content_type_impl,
@@ -207,6 +208,7 @@ fn validate_address_field(
   if addr.address.size > 0 and !is_valid_email_format(addr.address.clone) {
     return Result.Error(
       Error.InvalidEmailFormat(
+        Severity.Error,
         '${field_name} address has invalid format',
         Option.None,
         Option.None,
@@ -334,6 +336,7 @@ fn validate_required_headers(
       case None -> {
         return Result.Error(
           Error.MissingRequiredHeader(
+            Severity.Error,
             'From',
             Option.None,
             Option.None,
@@ -345,6 +348,7 @@ fn validate_required_headers(
         if value.trim.empty? {
           return Result.Error(
             Error.EmptyRequiredHeader(
+              Severity.Error,
               'From',
               Option.None,
               Option.None,
@@ -377,6 +381,7 @@ fn validate_required_headers(
     if !has_recipient {
       return Result.Error(
         Error.MissingRequiredHeader(
+          Severity.Error,
           'To, Cc, or Bcc',
           Option.None,
           Option.None,
@@ -682,6 +687,7 @@ impl EmailParser {
       return Result.Error(
         Error
           .EmailSizeExceeded(
+            Severity.Error,
             @config.max_email_size,
             email_size,
             Option.None,
@@ -767,6 +773,7 @@ impl EmailParser {
           return Result.Error(
             Error
               .InvalidBoundary(
+                Severity.Error,
                 'boundary string exceeds 70 characters or contains invalid characters',
                 Option.None,
                 Option.None,
@@ -785,6 +792,22 @@ impl EmailParser {
       return Result.Error(
         Error
           .InvalidBoundary(
+            Severity.Error,
+            'missing boundary parameter for multipart Content-Type',
+            Option.None,
+            Option.None,
+            Option.None,
+          )
+          .to_message,
+      )
+    }
+
+    # Validate that multipart Content-Type has boundary parameter
+    if is_multipart(ct_main) and !boundary_valid {
+      return Result.Error(
+        Error
+          .InvalidBoundary(
+            Severity.Error,
             'missing boundary parameter for multipart Content-Type',
             Option.None,
             Option.None,
