@@ -1,0 +1,178 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Size Tracker Module
+#
+# Provides centralized size limit tracking and enforcement for email parsing.
+# This module abstracts away the scattered size limit checks throughout the codebase
+# into a single, auditable location.
+#
+# ## Purpose
+#
+# Size limit checking was previously scattered throughout the codebase:
+# - decode_body_impl checks max_size parameter
+# - parse_headers_impl checks MAX_HEADER_VALUE_LENGTH constant
+# - Streaming decoders track @decoded_size independently
+#
+# This made it difficult to:
+# - Audit all size limit checks
+# - Ensure consistent behavior across different parsers
+# - Add new size checks during refactoring
+# - Understand the overall size limit enforcement strategy
+#
+# ## Solution
+#
+# SizeTracker provides:
+# - check_allocation(current, additional, max) -> Result
+# - track_decoded(amount) -> Result
+# - Centralized error generation for size violations
+#
+# ## Architecture
+#
+# SizeTracker is a stateful object that:
+# - Tracks current usage against a maximum limit
+# - Validates allocations before they happen
+# - Returns appropriate errors when limits would be exceeded
+# - Supports both strict and permissive modes (truncation)
+#
+# ## Usage Pattern
+#
+# For one-time checks (e.g., validating email size before parsing):
+# ```inko
+# match SizeTracker.check_allocation(0, raw_email.size, MAX_EMAIL_SIZE) {
+#   case Ok(_) -> { proceed with parsing }
+#   case Error(e) -> { return Result.Error(e) }
+# }
+# ```
+#
+# For streaming operations (e.g., decoding base64 chunk by chunk):
+# ```inko
+# let tracker = SizeTracker.new(max_size)
+# for chunk in chunks {
+#   match tracker.track_decoded(decoded_chunk.size) {
+#     case Ok(_) -> { append to output }
+#     case Error(e) -> { stop and return error }
+#   }
+# }
+# ```
+
+import emailparser.error (Error, Severity)
+import std.option (Option)
+import std.result (Result)
+
+# Size limit tracker for enforcing allocation and decoding limits
+type pub SizeTracker {
+  let mut @current_size: Int
+  let @max_size: Int
+  let @strict_mode: Bool
+}
+
+impl SizeTracker {
+  # Create a new size tracker with specified maximum
+  fn pub static new(max_size: Int, strict_mode: Bool) -> SizeTracker {
+    SizeTracker(
+      current_size: 0,
+      max_size: max_size,
+      strict_mode: strict_mode,
+    )
+  }
+
+  # Check if adding `additional` bytes would exceed `max` limit
+  # Returns Ok(true) if allocation is allowed, Error if limit would be exceeded
+  fn pub static check_allocation(
+    current: Int,
+    additional: Int,
+    max: Int,
+  ) -> Result[Bool, Error] {
+    let new_size = current + additional
+
+    if new_size > max {
+      Result.Error(
+        Error.DecodedSizeTooLarge(
+          Severity.Error,
+          new_size,
+          max,
+          'allocation',
+          Option.None,
+          Option.None,
+          Option.None,
+        ),
+      )
+    } else {
+      Result.Ok(true)
+    }
+  }
+
+  # Track decoded data and check against limit
+  # Returns Ok with the new size if within limit, Error otherwise
+  fn pub mut track_decoded(amount: Int) -> Result[Int, Error] {
+    let new_size = @current_size + amount
+
+    if new_size > @max_size {
+      Result.Error(
+        Error.DecodedSizeTooLarge(
+          Severity.Error,
+          new_size,
+          @max_size,
+          'decoded data',
+          Option.None,
+          Option.None,
+          Option.None,
+        ),
+      )
+    } else {
+      @current_size = new_size
+      Result.Ok(new_size)
+    }
+  }
+
+  # Check if an allocation of `additional` bytes is allowed
+  # Returns Ok(true) if allowed, Error if limit would be exceeded
+  fn pub mut check_add(additional: Int) -> Result[Bool, Error] {
+    let new_size = @current_size + additional
+
+    if new_size > @max_size {
+      Result.Error(
+        Error.DecodedSizeTooLarge(
+          Severity.Error,
+          new_size,
+          @max_size,
+          'allocation',
+          Option.None,
+          Option.None,
+          Option.None,
+        ),
+      )
+    } else {
+      Result.Ok(true)
+    }
+  }
+
+  # Add bytes to tracker without checking (use with caution)
+  # Should only be called after check_add or track_decoded succeeds
+  fn pub mut add(amount: Int) -> Int {
+    @current_size = @current_size + amount
+    @current_size
+  }
+
+  # Get current size
+  fn pub current_size -> Int {
+    @current_size
+  }
+
+  # Get remaining space before hitting limit
+  fn pub remaining_space -> Int {
+    @max_size - @current_size
+  }
+
+  # Check if at or over limit
+  fn pub at_limit? -> Bool {
+    @current_size >= @max_size
+  }
+
+  # Reset tracker to zero
+  fn pub mut reset {
+    @current_size = 0
+  }
+}
