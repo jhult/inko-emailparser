@@ -23,6 +23,7 @@ import emailparser.header (
   get_param_value_impl, is_standard_header_impl, parse_content_type_impl,
   parse_headers_impl,
 )
+import emailparser.header_extraction (parse_threading_headers)
 import emailparser.limits (MAX_HEADER_ITERATIONS, MAX_MESSAGE_IDS)
 import emailparser.multipart (parse_multipart_impl)
 import emailparser.validation (is_valid_boundary)
@@ -198,6 +199,40 @@ fn parse_address_header(
   parse_address_list_impl(ref raw, decoded)
 }
 
+# Validate a single email address field
+fn validate_address_field(
+  addr: ref EmailAddress,
+  field_name: String,
+) -> Result[Bool, Error] {
+  if addr.address.size > 0 and !is_valid_email_format(addr.address.clone) {
+    return Result.Error(
+      Error.InvalidEmailFormat(
+        '${field_name} address has invalid format',
+        Option.None,
+        Option.None,
+        Option.Some(addr.raw.clone),
+      ),
+    )
+  }
+
+  Result.Ok(true)
+}
+
+# Validate an array of email addresses
+fn validate_address_list(
+  addresses: ref Array[EmailAddress],
+  field_name: String,
+) -> Result[Bool, Error] {
+  for addr in addresses.iter {
+    match validate_address_field(addr, field_name) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e)
+    }
+  }
+
+  Result.Ok(true)
+}
+
 # Validate parsed addresses in strict mode
 fn validate_addresses(
   from: ref EmailAddress,
@@ -208,58 +243,24 @@ fn validate_addresses(
 ) -> Result[Bool, Error] {
   if !strict_mode { return Result.Ok(true) }
 
-  # Validate From address
-  if from.address.size > 0 and !is_valid_email_format(from.address.clone) {
-    return Result.Error(
-      Error.InvalidEmailFormat(
-        'From address has invalid format',
-        Option.None,
-        Option.None,
-        Option.Some(from.raw.clone),
-      ),
-    )
+  match validate_address_field(from, 'From') {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
   }
 
-  # Validate To addresses
-  for addr in to.iter {
-    if addr.address.size > 0 and !is_valid_email_format(addr.address.clone) {
-      return Result.Error(
-        Error.InvalidEmailFormat(
-          'To address has invalid format',
-          Option.None,
-          Option.None,
-          Option.Some(addr.raw.clone),
-        ),
-      )
-    }
+  match validate_address_list(to, 'To') {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
   }
 
-  # Validate Cc addresses
-  for addr in cc.iter {
-    if addr.address.size > 0 and !is_valid_email_format(addr.address.clone) {
-      return Result.Error(
-        Error.InvalidEmailFormat(
-          'Cc address has invalid format',
-          Option.None,
-          Option.None,
-          Option.Some(addr.raw.clone),
-        ),
-      )
-    }
+  match validate_address_list(cc, 'Cc') {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
   }
 
-  # Validate Bcc addresses
-  for addr in bcc.iter {
-    if addr.address.size > 0 and !is_valid_email_format(addr.address.clone) {
-      return Result.Error(
-        Error.InvalidEmailFormat(
-          'Bcc address has invalid format',
-          Option.None,
-          Option.None,
-          Option.Some(addr.raw.clone),
-        ),
-      )
-    }
+  match validate_address_list(bcc, 'Bcc') {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
   }
 
   Result.Ok(true)
@@ -292,29 +293,6 @@ fn parse_email_addresses(
   let bcc = parse_address_header(headers, 'Bcc')
 
   (from, to, cc, bcc)
-}
-
-# Extract threading headers (In-Reply-To, References, thread_id)
-fn parse_threading_headers(
-  headers: ref Array[(String, String)],
-) -> (Option[String], Array[String], String) {
-  let in_reply_to = get_header_value_impl(headers, 'In-Reply-To')
-  let references = parse_message_ids_impl(
-    get_header_value_impl(headers, 'References').or(''),
-  )
-  let message_id = get_header_value_impl(headers, 'Message-ID').or('')
-
-  # Compute thread_id
-  let thread_id = if references.empty? {
-    message_id
-  } else {
-    match references.get(0) {
-      case Ok(r) -> r
-      case Error(_) -> message_id
-    }
-  }
-
-  (in_reply_to, references, thread_id)
 }
 
 # Extract MIME headers (Content-Type, Content-Transfer-Encoding, charset, boundary)
@@ -634,7 +612,7 @@ fn get_boundary_from_params(
 ) -> Option[String] {
   for (key, value) in params.iter {
     # Use case-insensitive comparison for 'boundary'
-    if eq_ignore_case(key.clone, 'boundary') { return Option.Some(value.clone) }
+    if eq_ignore_case(key, 'boundary') { return Option.Some(value.clone) }
   }
 
   Option.None
@@ -781,12 +759,11 @@ impl EmailParser {
 
     let boundary = get_boundary_from_params(ct_params)
 
-    # Validate boundary string format per RFC 2046
-    match boundary.clone {
+    # Validate boundary string format and check existence in one pass
+    let boundary_valid = match boundary.clone {
       case Some(b) -> {
         # RFC 2046 requires boundary to be 1-70 chars with valid characters
-        # This is a basic MIME requirement, not strict mode specific
-        if !is_valid_boundary(b.clone) {
+        if !is_valid_boundary(b) {
           return Result.Error(
             Error
               .InvalidBoundary(
@@ -798,24 +775,20 @@ impl EmailParser {
               .to_message,
           )
         }
+        true
       }
-      case None -> {}
-    }
-
-    # Validate that multipart Content-Type has boundary parameter
-    let has_boundary = match boundary.clone {
-      case Some(_) -> true
       case None -> false
     }
 
-    if is_multipart(ct_main) and !has_boundary {
+    # Validate that multipart Content-Type has boundary parameter
+    if is_multipart(ct_main) and !boundary_valid {
       return Result.Error(
         Error
           .InvalidBoundary(
             'missing boundary parameter for multipart Content-Type',
             Option.None,
             Option.None,
-            Option.Some(ct_main.clone()),
+            Option.Some(ct_main),
           )
           .to_message,
       )
@@ -827,17 +800,12 @@ impl EmailParser {
     let max_atts = @config.max_attachments
     let max_hdrs = @config.max_headers
 
-    let boundary_for_mime = match boundary.clone {
-      case Some(b) -> Option.Some(b.clone())
-      case None -> Option.None
-    }
-
     let (text_body, html_body, attachments) = match
       if is_multipart(ct_main) {
         parse_email_body(
           body_raw,
           ct_main,
-          boundary_for_mime.clone(),
+          boundary.clone(),
           content_transfer_encoding,
           max_depth,
           max_size,
@@ -878,7 +846,7 @@ impl EmailParser {
           content_type_params: ct_params,
           content_transfer_encoding: content_transfer_encoding,
           charset: charset,
-          boundary: boundary_for_mime,
+          boundary: boundary,
         ),
         text_body: text_body,
         html_body: html_body,

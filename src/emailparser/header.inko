@@ -390,11 +390,9 @@ fn get_header_value_impl(
   headers: ref Array[(String, String)],
   name: String,
 ) -> Option[String] {
-  let lower_name = name.to_lower
-
   for (key, value) in headers.iter {
-    # Compare lowercase key with lowercased search name
-    if key.to_lower == lower_name { return Option.Some(value.clone) }
+    # Use case-insensitive comparison to avoid creating lowercase strings
+    if eq_ignore_case(key, name) { return Option.Some(value.clone) }
   }
 
   Option.None

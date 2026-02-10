@@ -15,6 +15,7 @@ import emailparser.streaming_multipart (MultipartStreamParser, MultipartStreamHa
 import emailparser.streaming_decoder (Base64StreamingDecoder, QuotedPrintableStreamingDecoder)
 import emailparser.streaming_reader (AsyncReader)
 import emailparser.header (parse_headers_impl, get_header_value_impl, parse_content_type_impl, get_param_value_impl, eq_ignore_case, extract_extra_headers)
+import emailparser.header_extraction (parse_threading_headers)
 import emailparser.decoder (decode_body_impl, decode_rfc2047_word)
 import emailparser.address (parse_address_list_impl)
 import emailparser.validation (is_valid_boundary)
@@ -265,18 +266,7 @@ impl StreamingParser {
     let message_id = get_header_value_impl(ref headers, 'Message-ID').or('')
 
     # Extract threading headers
-    let in_reply_to = get_header_value_impl(ref headers, 'In-Reply-To')
-    let references = parse_message_ids_impl(
-      get_header_value_impl(ref headers, 'References').or(''),
-    )
-    let thread_id = if references.empty? {
-      message_id
-    } else {
-      match references.get(0) {
-        case Ok(r) -> r
-        case Error(_) -> message_id
-      }
-    }
+    let (in_reply_to, references, thread_id) = parse_threading_headers(ref headers)
 
     # Extract MIME headers
     let content_type_raw = get_header_value_impl(ref headers, 'Content-Type').or('text/plain')

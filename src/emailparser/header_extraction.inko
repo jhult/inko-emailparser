@@ -1,0 +1,76 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# ==============================================================================
+# Header Extraction Module
+# ==============================================================================
+#
+# This module provides shared functions for extracting specific headers
+# from parsed email header arrays. These functions are used by both the
+# regular email parser and the streaming parser to avoid code duplication.
+#
+# ## Purpose
+#
+# Email parsing involves extracting specific sets of headers for different
+# purposes:
+# - Threading headers (In-Reply-To, References, Message-ID)
+# - Address headers (From, To, Cc, Bcc)
+# - MIME headers (Content-Type, Content-Transfer-Encoding)
+#
+# This module centralizes the extraction logic for common header groups.
+#
+# ## Architecture
+#
+# The module provides extraction functions that:
+# - Take a ref to an Array[(String, String)] of parsed headers
+# - Return structured data containing the extracted header values
+# - Use case-insensitive header name matching
+#
+# ## Public API
+#
+# - `parse_threading_headers`: Extract threading headers (In-Reply-To, References, thread_id)
+#
+# ## RFC Compliance
+#
+# - RFC 5322 section 3.6.4: Identification Fields (Message-ID, In-Reply-To, References)
+# - RFC 5322 section 3.6.2: Originator Fields (From, Sender, Reply-To)
+# - RFC 5322 section 3.6.3: Destination Address Fields (To, Cc, Bcc)
+
+import emailparser.header (get_header_value_impl)
+import emailparser (parse_message_ids_impl)
+import std.option (Option)
+
+# Extract threading headers (In-Reply-To, References, thread_id)
+#
+# RFC 5322 section 3.6.4: Identification Fields
+# - In-Reply-To: Contains the Message-ID of the message this one is a reply to
+# - References: Contains a list of Message-IDs forming the conversation thread
+# - thread_id: The root Message-ID of the thread (computed from References or Message-ID)
+#
+# Thread ID computation:
+# - If References header is present, thread_id is the first Message-ID in References
+# - Otherwise, thread_id is the Message-ID of the current message
+#
+# Returns: (in_reply_to, references, thread_id)
+fn pub parse_threading_headers(
+  headers: ref Array[(String, String)],
+) -> (Option[String], Array[String], String) {
+  let in_reply_to = get_header_value_impl(headers, 'In-Reply-To')
+  let references = parse_message_ids_impl(
+    get_header_value_impl(headers, 'References').or(''),
+  )
+  let message_id = get_header_value_impl(headers, 'Message-ID').or('')
+
+  # Compute thread_id
+  let thread_id = if references.empty? {
+    message_id
+  } else {
+    match references.get(0) {
+      case Ok(r) -> r
+      case Error(_) -> message_id
+    }
+  }
+
+  (in_reply_to, references, thread_id)
+}
