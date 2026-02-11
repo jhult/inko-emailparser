@@ -75,7 +75,7 @@ impl StreamingConfig {
       max_attachment_size: 25_000_000,
       max_multipart_depth: 10,
       max_headers: 1000,
-      stream_chunk_size: 65536,  # 64KB default
+      stream_chunk_size: 65536,
     )
   }
 
