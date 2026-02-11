@@ -44,3 +44,24 @@ jobs:
           inko --version
           inko fmt --check
           inko test
+
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/inko-lang/inko:latest
+    needs: [license-check, check-and-test]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Check Inko version
+        run: |
+          inko --version
+
+      - name: Run Performance Benchmarks
+        continue-on-error: true
+        run: |
+          echo "Running performance benchmarks (informational only)..."
+          ./run_benchmarks.sh || echo "Benchmarks completed with issues"
