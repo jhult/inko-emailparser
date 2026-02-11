@@ -21,7 +21,14 @@ type pub enum Severity {
 # for categorizing issues.
 type pub enum Error {
   # Size and limit errors
-  case EmailSizeTooLarge(Severity, Int, Int, Option[Int], Option[Int], Option[String])
+  case EmailSizeTooLarge(
+    Severity,
+    Int,
+    Int,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
   case AttachmentSizeTooLarge(
     Severity,
     Int,
@@ -30,7 +37,14 @@ type pub enum Error {
     Option[Int],
     Option[String],
   )
-  case TooManyHeaders(Severity, Int, Int, Option[Int], Option[Int], Option[String])
+  case TooManyHeaders(
+    Severity,
+    Int,
+    Int,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
   case MultipartDepthExceeded(
     Severity,
     Int,
@@ -41,16 +55,53 @@ type pub enum Error {
   )
 
   # Header validation errors
-  case InvalidHeaderFieldName(Severity, String, Option[Int], Option[Int], Option[String])
-  case MalformedHeader(Severity, String, Option[Int], Option[Int], Option[String])
-  case DuplicateHeader(Severity, String, Option[Int], Option[Int], Option[String])
+  case InvalidHeaderFieldName(
+    Severity,
+    String,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
+  case MalformedHeader(
+    Severity,
+    String,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
+  case DuplicateHeader(
+    Severity,
+    String,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
   case HeaderWithoutColon(Severity, Option[Int], Option[Int], Option[String])
-  case InvalidEmailFormat(Severity, String, Option[Int], Option[Int], Option[String])
-  case HeaderValueTooLarge(Severity, Int, Int, Option[Int], Option[Int], Option[String])
+  case InvalidEmailFormat(
+    Severity,
+    String,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
+  case HeaderValueTooLarge(
+    Severity,
+    Int,
+    Int,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
 
   # Boundary and multipart errors
   case BoundaryNotFound(Severity, Option[Int], Option[Int], Option[String])
-  case InvalidBoundary(Severity, String, Option[Int], Option[Int], Option[String])
+  case InvalidBoundary(
+    Severity,
+    String,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
   case MultipartWithoutParts(Severity, Option[Int], Option[Int], Option[String])
   case NoBodyInPart(Severity, Option[Int], Option[Int], Option[String])
 
@@ -58,7 +109,14 @@ type pub enum Error {
   case ParseError(Severity, String, Option[Int], Option[Int], Option[String])
 
   # Decoding errors
-  case DecodingFailed(Severity, String, String, Option[Int], Option[Int], Option[String])
+  case DecodingFailed(
+    Severity,
+    String,
+    String,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
   case DecodedSizeTooLarge(
     Severity,
     Int,
@@ -70,14 +128,32 @@ type pub enum Error {
   )
 
   # Required header validation errors (strict mode)
-  case MissingRequiredHeader(Severity, String, Option[Int], Option[Int], Option[String])
-  case EmptyRequiredHeader(Severity, String, Option[Int], Option[Int], Option[String])
+  case MissingRequiredHeader(
+    Severity,
+    String,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
+  case EmptyRequiredHeader(
+    Severity,
+    String,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
 
   # Size limit errors
   case EmailSizeExceeded(Severity, Int, Int, Option[Int], Option[Int])
 
   # Content-Type validation errors
-  case InvalidContentType(Severity, String, Option[Int], Option[Int], Option[String])
+  case InvalidContentType(
+    Severity,
+    String,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
 }
 
 impl Error {
@@ -141,6 +217,7 @@ impl Error {
           + ' bytes (max: '
           + max_size.to_string
           + ' bytes)'
+
         '[' + severity_prefix + '] ' + format_with_context(msg, line, pos, frag)
       }
       case AttachmentSizeTooLarge(_, size, max_size, line, pos, frag) -> {
@@ -149,6 +226,7 @@ impl Error {
           + ' bytes (max: '
           + max_size.to_string
           + ' bytes)'
+
         '[' + severity_prefix + '] ' + format_with_context(msg, line, pos, frag)
       }
       case TooManyHeaders(_, count, max_count, line, pos, frag) -> {
@@ -157,6 +235,7 @@ impl Error {
           + ' (max: '
           + max_count.to_string
           + ')'
+
         '[' + severity_prefix + '] ' + format_with_context(msg, line, pos, frag)
       }
       case MultipartDepthExceeded(_, depth, max_depth, line, pos, frag) -> {
@@ -165,22 +244,58 @@ impl Error {
           + ' (max: '
           + max_depth.to_string
           + ')'
+
         '[' + severity_prefix + '] ' + format_with_context(msg, line, pos, frag)
       }
       case InvalidHeaderFieldName(_, name, line, pos, frag) -> {
-        '[' + severity_prefix + '] ' + format_with_context('Invalid header field name: ' + name, line, pos, frag)
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context(
+            'Invalid header field name: ' + name,
+            line,
+            pos,
+            frag,
+          )
       }
       case MalformedHeader(_, reason, line, pos, frag) -> {
-        '[' + severity_prefix + '] ' + format_with_context('Malformed header: ' + reason, line, pos, frag)
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context('Malformed header: ' + reason, line, pos, frag)
       }
       case DuplicateHeader(_, name, line, pos, frag) -> {
-        '[' + severity_prefix + '] ' + format_with_context('Duplicate header detected: ' + name, line, pos, frag)
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context(
+            'Duplicate header detected: ' + name,
+            line,
+            pos,
+            frag,
+          )
       }
       case HeaderWithoutColon(_, line, pos, frag) -> {
-        '[' + severity_prefix + '] ' + format_with_context('Invalid header format: no colon found', line, pos, frag)
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context(
+            'Invalid header format: no colon found',
+            line,
+            pos,
+            frag,
+          )
       }
       case InvalidEmailFormat(_, reason, line, pos, frag) -> {
-        '[' + severity_prefix + '] ' + format_with_context('Invalid email format: ' + reason, line, pos, frag)
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context(
+            'Invalid email format: ' + reason,
+            line,
+            pos,
+            frag,
+          )
       }
       case HeaderValueTooLarge(_, size, max_size, line, pos, frag) -> {
         let msg = 'Header value exceeds maximum allowed size: '
@@ -188,28 +303,66 @@ impl Error {
           + ' bytes (max: '
           + max_size.to_string
           + ' bytes)'
+
         '[' + severity_prefix + '] ' + format_with_context(msg, line, pos, frag)
       }
       case BoundaryNotFound(_, line, pos, frag) -> {
-        '[' + severity_prefix + '] ' + format_with_context('Boundary marker not found in message body', line, pos, frag)
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context(
+            'Boundary marker not found in message body',
+            line,
+            pos,
+            frag,
+          )
       }
       case InvalidBoundary(_, reason, line, pos, frag) -> {
-        '[' + severity_prefix + '] ' + format_with_context('Invalid boundary string: ' + reason, line, pos, frag)
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context(
+            'Invalid boundary string: ' + reason,
+            line,
+            pos,
+            frag,
+          )
       }
       case MultipartWithoutParts(_, line, pos, frag) -> {
-        '[' + severity_prefix + '] ' + format_with_context('Multipart message has no body parts', line, pos, frag)
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context(
+            'Multipart message has no body parts',
+            line,
+            pos,
+            frag,
+          )
       }
       case NoBodyInPart(_, line, pos, frag) -> {
-        '[' + severity_prefix + '] ' + format_with_context('No body found in multipart part', line, pos, frag)
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context(
+            'No body found in multipart part',
+            line,
+            pos,
+            frag,
+          )
       }
       case ParseError(_, message, line, pos, frag) -> {
-        '[' + severity_prefix + '] ' + format_with_context(message, line, pos, frag)
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context(message, line, pos, frag)
       }
       case DecodingFailed(_, encoding, reason, line, pos, frag) -> {
         let msg = 'Failed to decode ' + encoding + ' content: ' + reason
+
         '[' + severity_prefix + '] ' + format_with_context(msg, line, pos, frag)
       }
-      case DecodedSizeTooLarge(_, size, max_size, encoding, line, pos, frag) -> {
+      case DecodedSizeTooLarge(_, size, max_size, encoding, line, pos, frag)
+      -> {
         let msg = 'Decoded '
           + encoding
           + ' content exceeds maximum size: '
@@ -217,23 +370,52 @@ impl Error {
           + ' bytes (max: '
           + max_size.to_string
           + ' bytes)'
+
         '[' + severity_prefix + '] ' + format_with_context(msg, line, pos, frag)
       }
       case MissingRequiredHeader(_, header_name, line, pos, frag) -> {
-        '[' + severity_prefix + '] ' + format_with_context('Missing required header: ' + header_name, line, pos, frag)
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context(
+            'Missing required header: ' + header_name,
+            line,
+            pos,
+            frag,
+          )
       }
       case EmptyRequiredHeader(_, header_name, line, pos, frag) -> {
-        '[' + severity_prefix + '] ' + format_with_context('Required header is empty: ' + header_name, line, pos, frag)
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context(
+            'Required header is empty: ' + header_name,
+            line,
+            pos,
+            frag,
+          )
       }
       case EmailSizeExceeded(_, max_size, actual_size, line, pos) -> {
         let msg = 'Email size '
           + actual_size.to_string
           + ' exceeds maximum '
           + max_size.to_string
-        '[' + severity_prefix + '] ' + format_with_context(msg, line, pos, Option.None)
+
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context(msg, line, pos, Option.None)
       }
       case InvalidContentType(_, reason, line, pos, frag) -> {
-        '[' + severity_prefix + '] ' + format_with_context('Invalid Content-Type: ' + reason, line, pos, frag)
+        '['
+          + severity_prefix
+          + '] '
+          + format_with_context(
+            'Invalid Content-Type: ' + reason,
+            line,
+            pos,
+            frag,
+          )
       }
     }
   }
@@ -290,16 +472,26 @@ impl Error {
       case EmailSizeExceeded(_, _, _, _, _) -> Severity.Error
       case InvalidContentType(_, _, _, _, _) -> Severity.Error
     }
+
     sev
   }
 
   # Create a ParseError from a string message (for backward compatibility)
   fn pub static from_string(message: String) -> Error {
-    Error.ParseError(Severity.Error, message, Option.None, Option.None, Option.None)
+    Error.ParseError(
+      Severity.Error,
+      message,
+      Option.None,
+      Option.None,
+      Option.None,
+    )
   }
 
   # Create a ParseError from a string message with severity
-  fn pub static from_string_with_severity(message: String, sev: Severity) -> Error {
+  fn pub static from_string_with_severity(
+    message: String,
+    sev: Severity,
+  ) -> Error {
     Error.ParseError(sev, message, Option.None, Option.None, Option.None)
   }
 }

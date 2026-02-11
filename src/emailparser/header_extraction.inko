@@ -37,8 +37,8 @@
 # - RFC 5322 section 3.6.2: Originator Fields (From, Sender, Reply-To)
 # - RFC 5322 section 3.6.3: Destination Address Fields (To, Cc, Bcc)
 
-import emailparser.header (get_header_value_impl)
 import emailparser (parse_message_ids_impl)
+import emailparser.header (get_header_value_impl)
 import std.option (Option)
 
 # Extract threading headers (In-Reply-To, References, thread_id)

@@ -103,7 +103,8 @@ fn decode_body_impl(
       0
     }
 
-    let estimated_size = ((cleaned_size - padding) * BASE64_DECODED_SIZE) / BASE64_CHUNK_SIZE
+    let estimated_size = ((cleaned_size - padding) * BASE64_DECODED_SIZE)
+      / BASE64_CHUNK_SIZE
 
     match SizeTracker.check_allocation(0, estimated_size, max_size) {
       case Ok(_) -> {}
@@ -336,14 +337,22 @@ fn pub decode_rfc2047_quoted_printable(text: String) -> String {
 #
 # Allows swapping decoder implementations for testing and extensibility
 trait pub ContentDecoder {
-  fn decode(input: String, encoding: String, max_size: Int) -> Result[String, Error]
+  fn decode(
+    input: String,
+    encoding: String,
+    max_size: Int,
+  ) -> Result[String, Error]
 }
 
 # Default content decoder implementation
 type pub DefaultContentDecoder {}
 
 impl ContentDecoder for DefaultContentDecoder {
-  fn decode(input: String, encoding: String, max_size: Int) -> Result[String, Error] {
+  fn decode(
+    input: String,
+    encoding: String,
+    max_size: Int,
+  ) -> Result[String, Error] {
     decode_body_impl(input, encoding, max_size)
   }
 }

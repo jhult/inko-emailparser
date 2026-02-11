@@ -132,6 +132,7 @@ fn pub tests(t: mut Tests) {
     let mut tracker = SizeTracker.new(1000, true)
 
     let size = tracker.add(100)
+
     t.equal(size, 100)
     t.equal(tracker.current_size, 100)
   })
@@ -189,11 +190,13 @@ fn pub tests(t: mut Tests) {
 
   t.test('strict_mode_true', fn (t) {
     let tracker = SizeTracker.new(1000, true)
+
     t.true(tracker.strict_mode)
   })
 
   t.test('strict_mode_false', fn (t) {
     let tracker = SizeTracker.new(1000, false)
+
     t.false(tracker.strict_mode)
   })
 

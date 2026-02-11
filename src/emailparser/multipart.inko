@@ -398,7 +398,12 @@ fn pub split_multipart_body(
     let fragment = if raw.size > 50 { raw.substring(0, 50) } else { raw.clone }
 
     return Result.Error(
-      Error.BoundaryNotFound(Severity.Error, Option.None, Option.None, Option.Some(fragment)),
+      Error.BoundaryNotFound(
+        Severity.Error,
+        Option.None,
+        Option.None,
+        Option.Some(fragment),
+      ),
     )
   }
 
@@ -571,7 +576,12 @@ fn pub parse_single_multipart_part(
       }
 
       Result.Error(
-        Error.NoBodyInPart(Severity.Error, Option.None, Option.None, Option.Some(fragment)),
+        Error.NoBodyInPart(
+          Severity.Error,
+          Option.None,
+          Option.None,
+          Option.Some(fragment),
+        ),
       )
     }
   }

@@ -15,11 +15,13 @@
 # - Fail-fast error handling (abort on detection)
 # - Configurable malicious pattern detection
 
-import emailparser.streaming (StreamHandler, StreamingParser, AttachmentInfo, StreamingResult)
-import emailparser.test_data_generator (TestDataGenerator, TestAttachment)
-import std.stdio (Stdout, Stderr)
+import emailparser.streaming (
+  AttachmentInfo, StreamHandler, StreamingParser, StreamingResult,
+)
+import emailparser.test_data_generator (TestAttachment, TestDataGenerator)
 import std.bytes (ByteArray)
 import std.option (Option)
+import std.stdio (Stderr, Stdout)
 
 # ContentScanner scans email content for malicious patterns
 type pub ContentScanner {
@@ -76,6 +78,7 @@ impl ContentScanner {
         return Option.Some(pattern.clone)
       }
     }
+
     Option.None
   }
 
@@ -85,6 +88,7 @@ impl ContentScanner {
         return Option.Some('binary_pattern_' + pattern.size.to_string)
       }
     }
+
     Option.None
   }
 
@@ -98,9 +102,7 @@ impl ContentScanner {
 }
 
 fn contains_binary_pattern(data: ByteArray, pattern: ByteArray) -> Bool {
-  if pattern.size == 0 or data.size < pattern.size {
-    return false
-  }
+  if pattern.size == 0 or data.size < pattern.size { return false }
 
   let mut i = 0
   let max_i = data.size - pattern.size
@@ -130,12 +132,11 @@ fn contains_binary_pattern(data: ByteArray, pattern: ByteArray) -> Bool {
           break
         }
       }
+
       j = j + 1
     }
 
-    if match_found {
-      return true
-    }
+    if match_found { return true }
 
     i = i + 1
   }
@@ -146,26 +147,39 @@ fn contains_binary_pattern(data: ByteArray, pattern: ByteArray) -> Bool {
 impl StreamHandler for ContentScanner {
   fn pub mut on_begin -> Result[Int, String] {
     if @verbose {
-      Stdout.new.print("Starting content scan...")
-      Stdout.new.print("Monitoring " + @malicious_patterns.size.to_string + " text patterns")
-      Stdout.new.print("Monitoring " + @binary_patterns.size.to_string + " binary patterns")
+      Stdout.new.print('Starting content scan...')
+      Stdout.new.print(
+        'Monitoring ' + @malicious_patterns.size.to_string + ' text patterns',
+      )
+      Stdout.new.print(
+        'Monitoring ' + @binary_patterns.size.to_string + ' binary patterns',
+      )
     }
+
     Result.Ok(0)
   }
 
-  fn pub mut on_headers(headers: ref Array[(String, String)]) -> Result[Int, String] {
-    if @verbose {
-      Stdout.new.print("Headers parsed successfully")
-    }
+  fn pub mut on_headers(
+    headers: ref Array[(String, String)],
+  ) -> Result[Int, String] {
+    if @verbose { Stdout.new.print('Headers parsed successfully') }
 
     for (name, value) in headers.iter {
       match scan_text(value.clone) {
         case Some(pattern) -> {
           @patterns_found.push(pattern.clone)
-          Stderr.new.print("WARNING: Malicious pattern '" + pattern + "' found in header '" + name + "'")
+          Stderr.new.print(
+            "WARNING: Malicious pattern '"
+              + pattern
+              + "' found in header '"
+              + name
+              + "'",
+          )
 
           if @fail_fast {
-            return Result.Error("Malicious content detected in header '" + name + "': " + pattern)
+            return Result.Error(
+              "Malicious content detected in header '" + name + "': " + pattern,
+            )
           }
         }
         case None -> {}
@@ -177,16 +191,22 @@ impl StreamHandler for ContentScanner {
 
   fn pub mut on_text_chunk(chunk: String) -> Result[Int, String] {
     if @verbose and chunk.size > 0 {
-      Stdout.new.print("Scanning text chunk: " + chunk.size.to_string + " bytes")
+      Stdout.new.print(
+        'Scanning text chunk: ' + chunk.size.to_string + ' bytes',
+      )
     }
 
     match scan_text(chunk) {
       case Some(pattern) -> {
         @patterns_found.push(pattern.clone)
-        Stderr.new.print("WARNING: Malicious pattern '" + pattern + "' found in text body")
+        Stderr.new.print(
+          "WARNING: Malicious pattern '" + pattern + "' found in text body",
+        )
 
         if @fail_fast {
-          return Result.Error("Malicious content detected in text body: " + pattern)
+          return Result.Error(
+            'Malicious content detected in text body: ' + pattern,
+          )
         }
       }
       case None -> {}
@@ -197,16 +217,22 @@ impl StreamHandler for ContentScanner {
 
   fn pub mut on_html_chunk(chunk: String) -> Result[Int, String] {
     if @verbose and chunk.size > 0 {
-      Stdout.new.print("Scanning HTML chunk: " + chunk.size.to_string + " bytes")
+      Stdout.new.print(
+        'Scanning HTML chunk: ' + chunk.size.to_string + ' bytes',
+      )
     }
 
     match scan_text(chunk) {
       case Some(pattern) -> {
         @patterns_found.push(pattern.clone)
-        Stderr.new.print("WARNING: Malicious pattern '" + pattern + "' found in HTML body")
+        Stderr.new.print(
+          "WARNING: Malicious pattern '" + pattern + "' found in HTML body",
+        )
 
         if @fail_fast {
-          return Result.Error("Malicious content detected in HTML body: " + pattern)
+          return Result.Error(
+            'Malicious content detected in HTML body: ' + pattern,
+          )
         }
       }
       case None -> {}
@@ -215,16 +241,22 @@ impl StreamHandler for ContentScanner {
     Result.Ok(0)
   }
 
-  fn pub mut on_attachment_begin(info: ref AttachmentInfo) -> Result[Int, String] {
+  fn pub mut on_attachment_begin(
+    info: ref AttachmentInfo,
+  ) -> Result[Int, String] {
     if @verbose {
       let filename = match info.filename {
         case Some(f) -> f
-        case None -> "unnamed"
+        case None -> 'unnamed'
       }
-      Stdout.new.print("Scanning attachment #" + info.index.to_string + ": " + filename)
-      Stdout.new.print("  Content-Type: " + info.content_type)
-      Stdout.new.print("  Encoding: " + info.transfer_encoding)
+
+      Stdout.new.print(
+        'Scanning attachment #' + info.index.to_string + ': ' + filename,
+      )
+      Stdout.new.print('  Content-Type: ' + info.content_type)
+      Stdout.new.print('  Encoding: ' + info.transfer_encoding)
     }
+
     Result.Ok(0)
   }
 
@@ -233,16 +265,24 @@ impl StreamHandler for ContentScanner {
     info: ref AttachmentInfo,
   ) -> Result[Int, String] {
     if @verbose and chunk.size > 0 {
-      Stdout.new.print("  Scanning attachment chunk: " + chunk.size.to_string + " bytes")
+      Stdout.new.print(
+        '  Scanning attachment chunk: ' + chunk.size.to_string + ' bytes',
+      )
     }
 
     match scan_binary(chunk) {
       case Some(pattern) -> {
         @patterns_found.push(pattern.clone)
-        Stderr.new.print("WARNING: Malicious binary pattern '" + pattern + "' found in attachment")
+        Stderr.new.print(
+          "WARNING: Malicious binary pattern '"
+            + pattern
+            + "' found in attachment",
+        )
 
         if @fail_fast {
-          return Result.Error("Malicious content detected in attachment: " + pattern)
+          return Result.Error(
+            'Malicious content detected in attachment: ' + pattern,
+          )
         }
       }
       case None -> {}
@@ -251,31 +291,40 @@ impl StreamHandler for ContentScanner {
     Result.Ok(0)
   }
 
-  fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String] {
+  fn pub mut on_attachment_end(
+    info: ref AttachmentInfo,
+  ) -> Result[Int, String] {
     if @verbose {
-      Stdout.new.print("  Attachment #" + info.index.to_string + " scan complete")
+      Stdout.new.print(
+        '  Attachment #' + info.index.to_string + ' scan complete',
+      )
     }
+
     Result.Ok(0)
   }
 
   fn pub mut on_end -> Result[Int, String] {
     if @verbose {
-      Stdout.new.print("Scanning complete!")
+      Stdout.new.print('Scanning complete!')
 
       if @patterns_found.empty? {
-        Stdout.new.print("No malicious patterns detected")
+        Stdout.new.print('No malicious patterns detected')
       } else {
-        Stdout.new.print("Malicious patterns found: " + @patterns_found.size.to_string)
+        Stdout.new.print(
+          'Malicious patterns found: ' + @patterns_found.size.to_string,
+        )
+
         for pattern in @patterns_found.iter {
-          Stdout.new.print("  - " + pattern)
+          Stdout.new.print('  - ' + pattern)
         }
       }
     }
+
     Result.Ok(0)
   }
 
   fn pub mut on_error(error: String) -> Result[Int, String] {
-    Stderr.new.print("Scan error: " + error)
+    Stderr.new.print('Scan error: ' + error)
     Result.Ok(0)
   }
 }
@@ -285,11 +334,14 @@ type async Main {
     let out = Stdout.new
     let err = Stderr.new
 
-    out.print("=== ContentScanner Example ===")
-    out.print("This example demonstrates scanning email content for malicious patterns")
-    out.print("")
+    out.print('=== ContentScanner Example ===')
+    out.print(
+      'This example demonstrates scanning email content for malicious patterns',
+    )
+    out.print('')
 
-    out.print("--- Test 1: Clean email (no malicious content) ---")
+    out.print('--- Test 1: Clean email (no malicious content) ---')
+
     let mut generator = TestDataGenerator.new
     let clean_email = generator.generate_text_email(
       'Hello from friend',
@@ -301,16 +353,16 @@ type async Main {
 
     match parser.parse_stream(clean_email, scanner) {
       case Ok(result) -> {
-        out.print("Result: CLEAN - No malicious patterns detected")
-        out.print("Subject: " + result.subject)
+        out.print('Result: CLEAN - No malicious patterns detected')
+        out.print('Subject: ' + result.subject)
       }
-      case Error(e) -> {
-        err.print("Result: ERROR - " + e)
-      }
+      case Error(e) -> err.print('Result: ERROR - ' + e)
     }
-    out.print("")
 
-    out.print("--- Test 2: Email with malicious content in text body ---")
+    out.print('')
+
+    out.print('--- Test 2: Email with malicious content in text body ---')
+
     let malicious_text_email = generator.generate_text_email(
       'Suspicious offer',
       'This email contains malware and virus content for testing.',
@@ -321,17 +373,21 @@ type async Main {
 
     match parser2.parse_stream(malicious_text_email, scanner2) {
       case Ok(result) -> {
-        out.print("Result: CLEAN - No malicious patterns detected")
-        out.print("Subject: " + result.subject)
+        out.print('Result: CLEAN - No malicious patterns detected')
+        out.print('Subject: ' + result.subject)
       }
       case Error(e) -> {
-        out.print("Result: BLOCKED - " + e)
-        out.print("Patterns found: " + scanner2.get_patterns_found.size.to_string)
+        out.print('Result: BLOCKED - ' + e)
+        out.print(
+          'Patterns found: ' + scanner2.get_patterns_found.size.to_string,
+        )
       }
     }
-    out.print("")
 
-    out.print("--- Test 3: Email with malicious HTML content ---")
+    out.print('')
+
+    out.print('--- Test 3: Email with malicious HTML content ---')
+
     let html_email = generator.generate_alternative_email(
       'HTML Test',
       'Plain text here',
@@ -343,17 +399,21 @@ type async Main {
 
     match parser3.parse_stream(html_email, scanner3) {
       case Ok(result) -> {
-        out.print("Result: CLEAN - No malicious patterns detected")
-        out.print("Subject: " + result.subject)
+        out.print('Result: CLEAN - No malicious patterns detected')
+        out.print('Subject: ' + result.subject)
       }
       case Error(e) -> {
-        out.print("Result: BLOCKED - " + e)
-        out.print("Patterns found: " + scanner3.get_patterns_found.size.to_string)
+        out.print('Result: BLOCKED - ' + e)
+        out.print(
+          'Patterns found: ' + scanner3.get_patterns_found.size.to_string,
+        )
       }
     }
-    out.print("")
 
-    out.print("--- Test 4: Email with attachments ---")
+    out.print('')
+
+    out.print('--- Test 4: Email with attachments ---')
+
     let attachments = [
       TestAttachment(
         name: 'safe.txt',
@@ -369,25 +429,31 @@ type async Main {
       ),
     ]
 
-    let email_with_attachments = generator.generate_email_with_attachments(attachments)
+    let email_with_attachments = generator.generate_email_with_attachments(
+      attachments,
+    )
 
     let mut scanner4 = ContentScanner.with_defaults(true)
     let parser4 = StreamingParser.new
 
     match parser4.parse_stream(email_with_attachments, scanner4) {
       case Ok(result) -> {
-        out.print("Result: CLEAN - No malicious patterns detected")
-        out.print("Subject: " + result.subject)
-        out.print("Attachments scanned: " + result.attachment_count.to_string)
+        out.print('Result: CLEAN - No malicious patterns detected')
+        out.print('Subject: ' + result.subject)
+        out.print('Attachments scanned: ' + result.attachment_count.to_string)
       }
       case Error(e) -> {
-        out.print("Result: BLOCKED - " + e)
-        out.print("Patterns found: " + scanner4.get_patterns_found.size.to_string)
+        out.print('Result: BLOCKED - ' + e)
+        out.print(
+          'Patterns found: ' + scanner4.get_patterns_found.size.to_string,
+        )
       }
     }
-    out.print("")
 
-    out.print("--- Test 5: Non-fail-fast mode (detect all violations) ---")
+    out.print('')
+
+    out.print('--- Test 5: Non-fail-fast mode (detect all violations) ---')
+
     let multi_malicious_email = generator.generate_text_email(
       'Multiple violations',
       'This has virus and malware and trojan content.',
@@ -399,18 +465,19 @@ type async Main {
 
     match parser5.parse_stream(multi_malicious_email, scanner5) {
       case Ok(result) -> {
-        out.print("Result: SCAN COMPLETE (non-fail-fast mode)")
-        out.print("Violations detected: " + scanner5.get_patterns_found.size.to_string)
+        out.print('Result: SCAN COMPLETE (non-fail-fast mode)')
+        out.print(
+          'Violations detected: ' + scanner5.get_patterns_found.size.to_string,
+        )
+
         for pattern in scanner5.get_patterns_found.iter {
-          out.print("  - " + pattern)
+          out.print('  - ' + pattern)
         }
       }
-      case Error(e) -> {
-        err.print("Unexpected error: " + e)
-      }
+      case Error(e) -> err.print('Unexpected error: ' + e)
     }
 
-    out.print("")
-    out.print("=== All tests completed ===")
+    out.print('')
+    out.print('=== All tests completed ===')
   }
 }

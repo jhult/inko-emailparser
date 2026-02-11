@@ -10,28 +10,35 @@
 #
 # See docs/streaming-api.md for complete design documentation.
 
-import emailparser.address (EmailAddress)
-import emailparser.streaming_multipart (MultipartStreamParser, MultipartStreamHandler)
-import emailparser.streaming_decoder (Base64StreamingDecoder, QuotedPrintableStreamingDecoder)
-import emailparser.streaming_reader (AsyncReader)
-import emailparser.header (parse_headers_impl, get_header_value_impl, parse_content_type_impl, get_param_value_impl, eq_ignore_case, extract_extra_headers)
-import emailparser.header_extraction (parse_threading_headers)
-import emailparser.decoder (decode_body_impl, decode_rfc2047_word)
-import emailparser.address (parse_address_list_impl)
-import emailparser.validation (is_valid_boundary)
 import emailparser (parse_message_ids_impl)
+import emailparser.address (EmailAddress)
+import emailparser.address (parse_address_list_impl)
+import emailparser.decoder (decode_body_impl, decode_rfc2047_word)
+import emailparser.header (
+  eq_ignore_case, extract_extra_headers, get_header_value_impl,
+  get_param_value_impl, parse_content_type_impl, parse_headers_impl,
+)
+import emailparser.header_extraction (parse_threading_headers)
+import emailparser.streaming_decoder (
+  Base64StreamingDecoder, QuotedPrintableStreamingDecoder,
+)
+import emailparser.streaming_multipart (
+  MultipartStreamHandler, MultipartStreamParser,
+)
+import emailparser.streaming_reader (AsyncReader)
+import emailparser.validation (is_valid_boundary)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
 
 # Attachment metadata (without content)
 type pub AttachmentInfo {
-  let pub @index: Int                       # Attachment number (0-based)
+  let pub @index: Int # Attachment number (0-based)
   let pub @content_type: String
   let pub @filename: Option[String]
   let pub @content_disposition: String
   let pub @content_id: Option[String]
-  let pub @size: Int                        # Total size (if known)
+  let pub @size: Int # Total size (if known)
   let pub @transfer_encoding: String
 }
 
@@ -52,6 +59,7 @@ type pub StreamingResult {
   let pub @charset: Option[String]
   let pub @extra_headers: Array[(String, String)]
   let pub @attachment_count: Int
+
   # NOTE: No @text_body, @html_body, @attachments - content is streamed
 }
 
@@ -63,7 +71,7 @@ type pub StreamingConfig {
   let pub mut @max_attachment_size: Int
   let pub mut @max_multipart_depth: Int
   let pub mut @max_headers: Int
-  let pub mut @stream_chunk_size: Int  # Bytes to process per callback
+  let pub mut @stream_chunk_size: Int # Bytes to process per callback
 }
 
 impl StreamingConfig {
@@ -121,28 +129,35 @@ impl StreamingConfig {
 trait pub StreamHandler {
   # Called when parsing begins
   fn pub mut on_begin -> Result[Int, String]
-  
+
   # Called when headers are parsed
-  fn pub mut on_headers(headers: ref Array[(String, String)]) -> Result[Int, String]
-  
+  fn pub mut on_headers(
+    headers: ref Array[(String, String)],
+  ) -> Result[Int, String]
+
   # Called when text body is available (in chunks)
   fn pub mut on_text_chunk(chunk: String) -> Result[Int, String]
-  
+
   # Called when HTML body is available (in chunks)
   fn pub mut on_html_chunk(chunk: String) -> Result[Int, String]
-  
+
   # Called when an attachment header is parsed (metadata only)
-  fn pub mut on_attachment_begin(info: ref AttachmentInfo) -> Result[Int, String]
+  fn pub mut on_attachment_begin(
+    info: ref AttachmentInfo,
+  ) -> Result[Int, String]
 
   # Called when attachment data is available (in chunks)
-  fn pub mut on_attachment_chunk(chunk: ByteArray, info: ref AttachmentInfo) -> Result[Int, String]
+  fn pub mut on_attachment_chunk(
+    chunk: ByteArray,
+    info: ref AttachmentInfo,
+  ) -> Result[Int, String]
 
   # Called when attachment is complete
   fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String]
-  
+
   # Called when parsing completes successfully
   fn pub mut on_end -> Result[Int, String]
-  
+
   # Called when an error occurs (optional, errors also propagated to caller)
   fn pub mut on_error(error: String) -> Result[Int, String]
 }
@@ -176,7 +191,7 @@ impl StreamingParser {
     # Notify handler that parsing is beginning
     match handler.on_begin {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error("Handler on_begin failed: ${e}")
+      case Error(e) -> return Result.Error('Handler on_begin failed: ${e}')
     }
 
     # Normalize line endings
@@ -185,11 +200,14 @@ impl StreamingParser {
 
     # Check email size limit
     if email_size > @config.max_email_size {
-      match handler.on_error("Email size exceeds maximum") {
+      match handler.on_error('Email size exceeds maximum') {
         case Ok(_) -> {}
-        case Error(e) -> return Result.Error("Handler on_error failed: ${e}")
+        case Error(e) -> return Result.Error('Handler on_error failed: ${e}')
       }
-      return Result.Error("Email size ${email_size} exceeds maximum ${@config.max_email_size}")
+
+      return Result.Error(
+        'Email size ${email_size} exceeds maximum ${@config.max_email_size}',
+      )
     }
 
     # Split headers and body
@@ -209,18 +227,23 @@ impl StreamingParser {
     }
 
     # Parse headers
-    let headers = match parse_headers_impl(
-      headers_raw,
-      @config.strict_mode,
-      @config.max_email_size,
-      @config.max_headers,
-    ) {
+    let headers = match
+      parse_headers_impl(
+        headers_raw,
+        @config.strict_mode,
+        @config.max_email_size,
+        @config.max_headers,
+      )
+    {
       case Ok(h) -> h
       case Error(e) -> {
         match handler.on_error(e.to_message) {
           case Ok(_) -> {}
-          case Error(err) -> return Result.Error("Handler on_error failed: ${err}")
+          case Error(err) -> {
+            return Result.Error('Handler on_error failed: ${err}')
+          }
         }
+
         return Result.Error(e.to_message)
       }
     }
@@ -228,7 +251,7 @@ impl StreamingParser {
     # Notify handler of headers
     match handler.on_headers(ref headers) {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error("Handler on_headers failed: ${e}")
+      case Error(e) -> return Result.Error('Handler on_headers failed: ${e}')
     }
 
     # Extract metadata for result
@@ -266,15 +289,22 @@ impl StreamingParser {
     let message_id = get_header_value_impl(ref headers, 'Message-ID').or('')
 
     # Extract threading headers
-    let (in_reply_to, references, thread_id) = parse_threading_headers(ref headers)
+    let (in_reply_to, references, thread_id) = parse_threading_headers(
+      ref headers,
+    )
 
     # Extract MIME headers
-    let content_type_raw = get_header_value_impl(ref headers, 'Content-Type').or('text/plain')
+    let content_type_raw = get_header_value_impl(ref headers, 'Content-Type')
+      .or('text/plain')
     let (ct_main, ct_params) = match parse_content_type_impl(content_type_raw) {
       case Ok(result) -> result
       case Error(e) -> return Result.Error(e.to_message)
     }
-    let content_transfer_encoding = get_header_value_impl(ref headers, 'Content-Transfer-Encoding').or('7bit')
+    let content_transfer_encoding = get_header_value_impl(
+      ref headers,
+      'Content-Transfer-Encoding',
+    )
+      .or('7bit')
     let charset = get_param_value_impl(ref ct_params, 'charset')
 
     # Parse body based on content type
@@ -285,28 +315,37 @@ impl StreamingParser {
       match boundary.clone {
         case Some(b) -> {
           if !is_valid_boundary(b.clone) {
-            return Result.Error("Invalid boundary string")
+            return Result.Error('Invalid boundary string')
           }
         }
-        case None -> return Result.Error("Multipart content type requires boundary parameter")
+        case None -> {
+          return Result.Error(
+            'Multipart content type requires boundary parameter',
+          )
+        }
       }
     }
 
     # Parse body with streaming
-    let attachment_count = match parse_body_stream(
-      body_raw,
-      ct_main,
-      boundary,
-      content_transfer_encoding,
-      handler,
-      @config,
-    ) {
+    let attachment_count = match
+      parse_body_stream(
+        body_raw,
+        ct_main,
+        boundary,
+        content_transfer_encoding,
+        handler,
+        @config,
+      )
+    {
       case Ok(count) -> count
       case Error(e) -> {
         match handler.on_error(e) {
           case Ok(_) -> {}
-          case Error(err) -> return Result.Error("Handler on_error failed: ${err}")
+          case Error(err) -> {
+            return Result.Error('Handler on_error failed: ${err}')
+          }
         }
+
         return Result.Error(e)
       }
     }
@@ -317,27 +356,29 @@ impl StreamingParser {
     # Notify handler that parsing is complete
     match handler.on_end {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error("Handler on_end failed: ${e}")
+      case Error(e) -> return Result.Error('Handler on_end failed: ${e}')
     }
 
     # Return streaming result with metadata
-    Result.Ok(StreamingResult(
-      from: from,
-      to: to,
-      cc: cc,
-      bcc: bcc,
-      subject: subject,
-      date: date,
-      message_id: message_id,
-      in_reply_to: in_reply_to,
-      references: references,
-      thread_id: thread_id,
-      content_type: ct_main,
-      content_transfer_encoding: content_transfer_encoding,
-      charset: charset,
-      extra_headers: extra_headers,
-      attachment_count: attachment_count,
-    ))
+    Result.Ok(
+      StreamingResult(
+        from: from,
+        to: to,
+        cc: cc,
+        bcc: bcc,
+        subject: subject,
+        date: date,
+        message_id: message_id,
+        in_reply_to: in_reply_to,
+        references: references,
+        thread_id: thread_id,
+        content_type: ct_main,
+        content_transfer_encoding: content_transfer_encoding,
+        charset: charset,
+        extra_headers: extra_headers,
+        attachment_count: attachment_count,
+      ),
+    )
   }
 
   # Parse an email using streaming callbacks from async source
@@ -350,18 +391,21 @@ impl StreamingParser {
   ) -> Result[StreamingResult, String] {
     match handler.on_begin {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error("Handler on_begin failed: ${e}")
+      case Error(e) -> return Result.Error('Handler on_begin failed: ${e}')
     }
 
     let normalized = normalize_line_endings_stream(raw)
     let email_size = normalized.size
 
     if email_size > @config.max_email_size {
-      match handler.on_error("Email size exceeds maximum") {
+      match handler.on_error('Email size exceeds maximum') {
         case Ok(_) -> {}
-        case Error(e) -> return Result.Error("Handler on_error failed: ${e}")
+        case Error(e) -> return Result.Error('Handler on_error failed: ${e}')
       }
-      return Result.Error("Email size ${email_size} exceeds maximum ${@config.max_email_size}")
+
+      return Result.Error(
+        'Email size ${email_size} exceeds maximum ${@config.max_email_size}',
+      )
     }
 
     let split_pos = normalized.index_of('\n\n', 0)
@@ -373,33 +417,34 @@ impl StreamingParser {
           normalized.substring(pos + 2, normalized.size),
         )
       }
-      case None -> {
-        (normalized.clone(), '')
-      }
+      case None -> (normalized.clone(), '')
     }
 
-
-    let headers = match parse_headers_impl(
-      headers_raw,
-      @config.strict_mode,
-      @config.max_email_size,
-      @config.max_headers,
-    ) {
+    let headers = match
+      parse_headers_impl(
+        headers_raw,
+        @config.strict_mode,
+        @config.max_email_size,
+        @config.max_headers,
+      )
+    {
       case Ok(h) -> h
       case Error(e) -> {
         match handler.on_error(e.to_message) {
           case Ok(_) -> {}
-          case Error(err) -> return Result.Error("Handler on_error failed: ${err}")
+          case Error(err) -> {
+            return Result.Error('Handler on_error failed: ${err}')
+          }
         }
+
         return Result.Error(e.to_message)
       }
     }
 
     match handler.on_headers(ref headers) {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error("Handler on_headers failed: ${e}")
+      case Error(e) -> return Result.Error('Handler on_headers failed: ${e}')
     }
-
 
     let from_raw = get_header_value_impl(ref headers, 'From')
     let from_list = parse_address_list_impl(ref from_raw, from_raw.or(''))
@@ -444,12 +489,17 @@ impl StreamingParser {
       }
     }
 
-    let content_type_raw = get_header_value_impl(ref headers, 'Content-Type').or('text/plain')
+    let content_type_raw = get_header_value_impl(ref headers, 'Content-Type')
+      .or('text/plain')
     let (ct_main, ct_params) = match parse_content_type_impl(content_type_raw) {
       case Ok(result) -> result
       case Error(e) -> return Result.Error(e.to_message)
     }
-    let content_transfer_encoding = get_header_value_impl(ref headers, 'Content-Transfer-Encoding').or('7bit')
+    let content_transfer_encoding = get_header_value_impl(
+      ref headers,
+      'Content-Transfer-Encoding',
+    )
+      .or('7bit')
     let charset = get_param_value_impl(ref ct_params, 'charset')
 
     let boundary = extract_boundary_from_params(ref ct_params)
@@ -458,27 +508,36 @@ impl StreamingParser {
       match boundary.clone {
         case Some(b) -> {
           if !is_valid_boundary(b.clone) {
-            return Result.Error("Invalid boundary string")
+            return Result.Error('Invalid boundary string')
           }
         }
-        case None -> return Result.Error("Multipart content type requires boundary parameter")
+        case None -> {
+          return Result.Error(
+            'Multipart content type requires boundary parameter',
+          )
+        }
       }
     }
 
-    let attachment_count = match parse_body_stream(
-      body_raw,
-      ct_main,
-      boundary,
-      content_transfer_encoding,
-      handler,
-      @config,
-    ) {
+    let attachment_count = match
+      parse_body_stream(
+        body_raw,
+        ct_main,
+        boundary,
+        content_transfer_encoding,
+        handler,
+        @config,
+      )
+    {
       case Ok(count) -> count
       case Error(e) -> {
         match handler.on_error(e) {
           case Ok(_) -> {}
-          case Error(err) -> return Result.Error("Handler on_error failed: ${err}")
+          case Error(err) -> {
+            return Result.Error('Handler on_error failed: ${err}')
+          }
         }
+
         return Result.Error(e)
       }
     }
@@ -487,26 +546,28 @@ impl StreamingParser {
 
     match handler.on_end {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error("Handler on_end failed: ${e}")
+      case Error(e) -> return Result.Error('Handler on_end failed: ${e}')
     }
 
-    Result.Ok(StreamingResult(
-      from: from,
-      to: to,
-      cc: cc,
-      bcc: bcc,
-      subject: subject,
-      date: date,
-      message_id: message_id,
-      in_reply_to: in_reply_to,
-      references: references,
-      thread_id: thread_id,
-      content_type: ct_main,
-      content_transfer_encoding: content_transfer_encoding,
-      charset: charset,
-      extra_headers: extra_headers,
-      attachment_count: attachment_count,
-    ))
+    Result.Ok(
+      StreamingResult(
+        from: from,
+        to: to,
+        cc: cc,
+        bcc: bcc,
+        subject: subject,
+        date: date,
+        message_id: message_id,
+        in_reply_to: in_reply_to,
+        references: references,
+        thread_id: thread_id,
+        content_type: ct_main,
+        content_transfer_encoding: content_transfer_encoding,
+        charset: charset,
+        extra_headers: extra_headers,
+        attachment_count: attachment_count,
+      ),
+    )
   }
 
   # Parse an email from an async reader using streaming callbacks
@@ -519,7 +580,7 @@ impl StreamingParser {
   ) -> Result[StreamingResult, String] {
     match handler.on_begin {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error("Handler on_begin failed: ${e}")
+      case Error(e) -> return Result.Error('Handler on_begin failed: ${e}')
     }
 
     let mut buffer = ByteArray.new
@@ -533,27 +594,32 @@ impl StreamingParser {
     loop {
       match reader.read(chunk_size) {
         case Ok(chunk) -> {
-          if chunk.size == 0 {
-            break
-          }
+          if chunk.size == 0 { break }
 
           total_bytes = total_bytes + chunk.size
 
           if total_bytes > @config.max_email_size {
-            match handler.on_error("Email size exceeds maximum") {
+            match handler.on_error('Email size exceeds maximum') {
               case Ok(_) -> {}
-              case Error(e) -> return Result.Error("Handler on_error failed: ${e}")
+              case Error(e) -> {
+                return Result.Error('Handler on_error failed: ${e}')
+              }
             }
-            return Result.Error("Email size ${total_bytes} exceeds maximum ${@config.max_email_size}")
+
+            return Result.Error(
+              'Email size ${total_bytes} exceeds maximum ${@config.max_email_size}',
+            )
           }
 
           if !headers_parsed {
             let mut i = 0
+
             while i < chunk.size {
               match chunk.get(i) {
                 case Ok(byte) -> buffer.push(byte)
                 case Error(_) -> {}
               }
+
               i = i + 1
             }
 
@@ -563,52 +629,65 @@ impl StreamingParser {
             match double_newline_pos {
               case Some(pos) -> {
                 let headers_raw = buffer_str.substring(0, pos)
-                headers = match parse_headers_impl(
-                  headers_raw,
-                  @config.strict_mode,
-                  @config.max_email_size,
-                  @config.max_headers,
-                ) {
+
+                headers = match
+                  parse_headers_impl(
+                    headers_raw,
+                    @config.strict_mode,
+                    @config.max_email_size,
+                    @config.max_headers,
+                  )
+                {
                   case Ok(h) -> h
                   case Error(e) -> {
                     match handler.on_error(e.to_message) {
                       case Ok(_) -> {}
-                      case Error(err) -> return Result.Error("Handler on_error failed: ${err}")
+                      case Error(err) -> {
+                        return Result.Error('Handler on_error failed: ${err}')
+                      }
                     }
+
                     return Result.Error(e.to_message)
                   }
                 }
 
                 match handler.on_headers(ref headers) {
                   case Ok(_) -> {}
-                  case Error(e) -> return Result.Error("Handler on_headers failed: ${e}")
+                  case Error(e) -> {
+                    return Result.Error('Handler on_headers failed: ${e}')
+                  }
                 }
 
                 headers_parsed = true
 
                 let mut j = pos + 2
+
                 while j < buffer.size {
                   match buffer.get(j) {
                     case Ok(byte) -> body.push(byte)
                     case Error(_) -> {}
                   }
+
                   j = j + 1
                 }
+
                 buffer = ByteArray.new
               }
               case None -> {
                 if buffer.size > 10000 {
-                  return Result.Error("Headers too large or malformed")
+                  return Result.Error('Headers too large or malformed')
                 }
               }
             }
           } else {
             let mut i = 0
+
             while i < chunk.size {
               match chunk.get(i) {
                 case Ok(byte) -> body.push(byte)
                 case Error(_) -> {}
               }
+
               i = i + 1
             }
           }
@@ -616,8 +695,11 @@ impl StreamingParser {
         case Error(e) -> {
           match handler.on_error(e) {
             case Ok(_) -> {}
-            case Error(err) -> return Result.Error("Handler on_error failed: ${err}")
+            case Error(err) -> {
+              return Result.Error('Handler on_error failed: ${err}')
+            }
           }
+
           return Result.Error(e)
         }
       }
@@ -666,12 +748,17 @@ impl StreamingParser {
       }
     }
 
-    let content_type_raw = get_header_value_impl(ref headers, 'Content-Type').or('text/plain')
+    let content_type_raw = get_header_value_impl(ref headers, 'Content-Type')
+      .or('text/plain')
     let (ct_main, ct_params) = match parse_content_type_impl(content_type_raw) {
       case Ok(result) -> result
       case Error(e) -> return Result.Error(e.to_message)
     }
-    let content_transfer_encoding = get_header_value_impl(ref headers, 'Content-Transfer-Encoding').or('7bit')
+    let content_transfer_encoding = get_header_value_impl(
+      ref headers,
+      'Content-Transfer-Encoding',
+    )
+      .or('7bit')
     let charset = get_param_value_impl(ref ct_params, 'charset')
 
     let boundary = extract_boundary_from_params(ref ct_params)
@@ -680,28 +767,37 @@ impl StreamingParser {
       match boundary.clone {
         case Some(b) -> {
           if !is_valid_boundary(b.clone) {
-            return Result.Error("Invalid boundary string")
+            return Result.Error('Invalid boundary string')
           }
         }
-        case None -> return Result.Error("Multipart content type requires boundary parameter")
+        case None -> {
+          return Result.Error(
+            'Multipart content type requires boundary parameter',
+          )
+        }
       }
     }
 
     let body_str = body.into_string
-    let attachment_count = match parse_body_stream(
-      body_str,
-      ct_main,
-      boundary,
-      content_transfer_encoding,
-      handler,
-      @config,
-    ) {
+    let attachment_count = match
+      parse_body_stream(
+        body_str,
+        ct_main,
+        boundary,
+        content_transfer_encoding,
+        handler,
+        @config,
+      )
+    {
       case Ok(count) -> count
       case Error(e) -> {
         match handler.on_error(e) {
           case Ok(_) -> {}
-          case Error(err) -> return Result.Error("Handler on_error failed: ${err}")
+          case Error(err) -> {
+            return Result.Error('Handler on_error failed: ${err}')
+          }
         }
+
         return Result.Error(e)
       }
     }
@@ -710,26 +806,28 @@ impl StreamingParser {
 
     match handler.on_end {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error("Handler on_end failed: ${e}")
+      case Error(e) -> return Result.Error('Handler on_end failed: ${e}')
     }
 
-    Result.Ok(StreamingResult(
-      from: from,
-      to: to,
-      cc: cc,
-      bcc: bcc,
-      subject: subject,
-      date: date,
-      message_id: message_id,
-      in_reply_to: in_reply_to,
-      references: references,
-      thread_id: thread_id,
-      content_type: ct_main,
-      content_transfer_encoding: content_transfer_encoding,
-      charset: charset,
-      extra_headers: extra_headers,
-      attachment_count: attachment_count,
-    ))
+    Result.Ok(
+      StreamingResult(
+        from: from,
+        to: to,
+        cc: cc,
+        bcc: bcc,
+        subject: subject,
+        date: date,
+        message_id: message_id,
+        in_reply_to: in_reply_to,
+        references: references,
+        thread_id: thread_id,
+        content_type: ct_main,
+        content_transfer_encoding: content_transfer_encoding,
+        charset: charset,
+        extra_headers: extra_headers,
+        attachment_count: attachment_count,
+      ),
+    )
   }
 }
 
@@ -742,10 +840,9 @@ fn normalize_line_endings_stream(text: String) -> String {
 
 # Decode header value for streaming (simplified version)
 fn decode_header_value_stream(raw: String) -> String {
-  
   let mut result = ByteArray.new
   let mut pos = 0
-  
+
   while pos < raw.size {
     match raw.index_of('=?', pos) {
       case Some(begin) -> {
@@ -754,14 +851,16 @@ fn decode_header_value_stream(raw: String) -> String {
             # Push text before the encoded word
             if begin > pos {
               let before = raw.substring(pos, begin)
+
               result.append(before.to_byte_array)
             }
-            
+
             # Decode and push the encoded word
             let encoded_word = raw.substring(begin, end + 2)
             let decoded = decode_rfc2047_word(encoded_word)
+
             result.append(decoded.to_byte_array)
-            
+
             # Move position past the encoded word
             pos = end + 2
           }
@@ -771,13 +870,14 @@ fn decode_header_value_stream(raw: String) -> String {
       case None -> break
     }
   }
-  
+
   # Push any remaining text
   if pos < raw.size {
     let remaining = raw.substring(pos, raw.size)
+
     result.append(remaining.to_byte_array)
   }
-  
+
   result.into_string
 }
 
@@ -786,10 +886,9 @@ fn extract_boundary_from_params(
   params: ref Array[(String, String)],
 ) -> Option[String] {
   for (key, value) in params.iter {
-    if eq_ignore_case(key.clone, 'boundary') {
-      return Option.Some(value.clone)
-    }
+    if eq_ignore_case(key.clone, 'boundary') { return Option.Some(value.clone) }
   }
+
   Option.None
 }
 
@@ -835,10 +934,20 @@ fn parse_body_stream[H: mut + StreamHandler](
       case None -> Result.Ok(0)
     }
   } else if is_text_plain(ct_main) {
-    stream_text_body(body_raw, content_transfer_encoding, config.stream_chunk_size, handler)
+    stream_text_body(
+      body_raw,
+      content_transfer_encoding,
+      config.stream_chunk_size,
+      handler,
+    )
     Result.Ok(0)
   } else if is_text_html(ct_main) {
-    stream_html_body(body_raw, content_transfer_encoding, config.stream_chunk_size, handler)
+    stream_html_body(
+      body_raw,
+      content_transfer_encoding,
+      config.stream_chunk_size,
+      handler,
+    )
     Result.Ok(0)
   } else {
     Result.Ok(0)
@@ -852,17 +961,18 @@ fn stream_text_body[H: mut + StreamHandler](
   chunk_size: Int,
   handler: mut H,
 ) {
-  
   let mut decoder: Option[Base64StreamingDecoder] = Option.None
   let mut qp_decoder: Option[QuotedPrintableStreamingDecoder] = Option.None
   let encoding_lower = encoding.to_lower
-  
+
   if encoding_lower == 'base64' {
     decoder = Option.Some(Base64StreamingDecoder.new(50_000_000, false))
   } else if encoding_lower == 'quoted-printable' {
-    qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(50_000_000, false, false))
+    qp_decoder = Option.Some(
+      QuotedPrintableStreamingDecoder.new(50_000_000, false, false),
+    )
   }
-  
+
   match (decoder, qp_decoder) {
     case (Some(mut d), None) -> {
       match d.feed(body_raw) {
@@ -870,6 +980,7 @@ fn stream_text_body[H: mut + StreamHandler](
           if decoded.size > 0 {
             let decoded_str = decoded.into_string
             let mut pos = 0
+
             while pos < decoded_str.size {
               let end = if pos + chunk_size > decoded_str.size {
                 decoded_str.size
@@ -877,18 +988,22 @@ fn stream_text_body[H: mut + StreamHandler](
                 pos + chunk_size
               }
               let chunk = decoded_str.substring(pos, end)
+
               match handler.on_text_chunk(chunk) {
                 case Ok(_) -> {}
                 case Error(_) -> return
               }
+
               pos = end
             }
           }
+
           match d.finish {
             case Ok(decoded) -> {
               if decoded.size > 0 {
                 let decoded_str = decoded.into_string
                 let mut pos = 0
+
                 while pos < decoded_str.size {
                   let end = if pos + chunk_size > decoded_str.size {
                     decoded_str.size
@@ -896,10 +1011,12 @@ fn stream_text_body[H: mut + StreamHandler](
                     pos + chunk_size
                   }
                   let chunk = decoded_str.substring(pos, end)
+
                   match handler.on_text_chunk(chunk) {
                     case Ok(_) -> {}
                     case Error(_) -> return
                   }
+
                   pos = end
                 }
               }
@@ -916,6 +1033,7 @@ fn stream_text_body[H: mut + StreamHandler](
           if decoded.size > 0 {
             let decoded_str = decoded.into_string
             let mut pos = 0
+
             while pos < decoded_str.size {
               let end = if pos + chunk_size > decoded_str.size {
                 decoded_str.size
@@ -923,18 +1041,22 @@ fn stream_text_body[H: mut + StreamHandler](
                 pos + chunk_size
               }
               let chunk = decoded_str.substring(pos, end)
+
               match handler.on_text_chunk(chunk) {
                 case Ok(_) -> {}
                 case Error(_) -> return
               }
+
               pos = end
             }
           }
+
           match d.finish {
             case Ok(decoded) -> {
               if decoded.size > 0 {
                 let decoded_str = decoded.into_string
                 let mut pos = 0
+
                 while pos < decoded_str.size {
                   let end = if pos + chunk_size > decoded_str.size {
                     decoded_str.size
@@ -942,10 +1064,12 @@ fn stream_text_body[H: mut + StreamHandler](
                     pos + chunk_size
                   }
                   let chunk = decoded_str.substring(pos, end)
+
                   match handler.on_text_chunk(chunk) {
                     case Ok(_) -> {}
                     case Error(_) -> return
                   }
+
                   pos = end
                 }
               }
@@ -960,6 +1084,7 @@ fn stream_text_body[H: mut + StreamHandler](
       match decode_body_impl(body_raw, encoding, 50_000_000) {
         case Ok(decoded) -> {
           let mut pos = 0
+
           while pos < decoded.size {
             let end = if pos + chunk_size > decoded.size {
               decoded.size
@@ -967,10 +1092,12 @@ fn stream_text_body[H: mut + StreamHandler](
               pos + chunk_size
             }
             let chunk = decoded.substring(pos, end)
+
             match handler.on_text_chunk(chunk) {
               case Ok(_) -> {}
               case Error(_) -> return
             }
+
             pos = end
           }
         }
@@ -988,17 +1115,18 @@ fn stream_html_body[H: mut + StreamHandler](
   chunk_size: Int,
   handler: mut H,
 ) {
-  
   let mut decoder: Option[Base64StreamingDecoder] = Option.None
   let mut qp_decoder: Option[QuotedPrintableStreamingDecoder] = Option.None
   let encoding_lower = encoding.to_lower
-  
+
   if encoding_lower == 'base64' {
     decoder = Option.Some(Base64StreamingDecoder.new(50_000_000, false))
   } else if encoding_lower == 'quoted-printable' {
-    qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(50_000_000, false, false))
+    qp_decoder = Option.Some(
+      QuotedPrintableStreamingDecoder.new(50_000_000, false, false),
+    )
   }
-  
+
   match (decoder, qp_decoder) {
     case (Some(mut d), None) -> {
       match d.feed(body_raw) {
@@ -1006,6 +1134,7 @@ fn stream_html_body[H: mut + StreamHandler](
           if decoded.size > 0 {
             let decoded_str = decoded.into_string
             let mut pos = 0
+
             while pos < decoded_str.size {
               let end = if pos + chunk_size > decoded_str.size {
                 decoded_str.size
@@ -1013,18 +1142,22 @@ fn stream_html_body[H: mut + StreamHandler](
                 pos + chunk_size
               }
               let chunk = decoded_str.substring(pos, end)
+
               match handler.on_html_chunk(chunk) {
                 case Ok(_) -> {}
                 case Error(_) -> return
               }
+
               pos = end
             }
           }
+
           match d.finish {
             case Ok(decoded) -> {
               if decoded.size > 0 {
                 let decoded_str = decoded.into_string
                 let mut pos = 0
+
                 while pos < decoded_str.size {
                   let end = if pos + chunk_size > decoded_str.size {
                     decoded_str.size
@@ -1032,10 +1165,12 @@ fn stream_html_body[H: mut + StreamHandler](
                     pos + chunk_size
                   }
                   let chunk = decoded_str.substring(pos, end)
+
                   match handler.on_html_chunk(chunk) {
                     case Ok(_) -> {}
                     case Error(_) -> return
                   }
+
                   pos = end
                 }
               }
@@ -1052,6 +1187,7 @@ fn stream_html_body[H: mut + StreamHandler](
           if decoded.size > 0 {
             let decoded_str = decoded.into_string
             let mut pos = 0
+
             while pos < decoded_str.size {
               let end = if pos + chunk_size > decoded_str.size {
                 decoded_str.size
@@ -1059,18 +1195,22 @@ fn stream_html_body[H: mut + StreamHandler](
                 pos + chunk_size
               }
               let chunk = decoded_str.substring(pos, end)
+
               match handler.on_html_chunk(chunk) {
                 case Ok(_) -> {}
                 case Error(_) -> return
               }
+
               pos = end
             }
           }
+
           match d.finish {
             case Ok(decoded) -> {
               if decoded.size > 0 {
                 let decoded_str = decoded.into_string
                 let mut pos = 0
+
                 while pos < decoded_str.size {
                   let end = if pos + chunk_size > decoded_str.size {
                     decoded_str.size
@@ -1078,10 +1218,12 @@ fn stream_html_body[H: mut + StreamHandler](
                     pos + chunk_size
                   }
                   let chunk = decoded_str.substring(pos, end)
+
                   match handler.on_html_chunk(chunk) {
                     case Ok(_) -> {}
                     case Error(_) -> return
                   }
+
                   pos = end
                 }
               }
@@ -1096,6 +1238,7 @@ fn stream_html_body[H: mut + StreamHandler](
       match decode_body_impl(body_raw, encoding, 50_000_000) {
         case Ok(decoded) -> {
           let mut pos = 0
+
           while pos < decoded.size {
             let end = if pos + chunk_size > decoded.size {
               decoded.size
@@ -1103,10 +1246,12 @@ fn stream_html_body[H: mut + StreamHandler](
               pos + chunk_size
             }
             let chunk = decoded.substring(pos, end)
+
             match handler.on_html_chunk(chunk) {
               case Ok(_) -> {}
               case Error(_) -> return
             }
+
             pos = end
           }
         }
@@ -1130,26 +1275,41 @@ type MultipartHandlerWrapper[H: mut + StreamHandler] {
   let @chunk_size: Int
 }
 
-impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandler {
+impl MultipartStreamHandler for MultipartHandlerWrapper
+if
+  H: mut + StreamHandler,
+{
   fn pub mut on_part_begin(
     headers: ref Array[(String, String)],
     content_type: String,
     is_attachment: Bool,
   ) {
     @current_content_type = content_type
-    let content_disposition = get_header_value_impl(ref headers, 'Content-Disposition').or('')
-    let content_transfer_encoding = get_header_value_impl(ref headers, 'Content-Transfer-Encoding').or('7bit')
+
+    let content_disposition = get_header_value_impl(
+      ref headers,
+      'Content-Disposition',
+    )
+      .or('')
+    let content_transfer_encoding = get_header_value_impl(
+      ref headers,
+      'Content-Transfer-Encoding',
+    )
+      .or('7bit')
+
     @current_encoding = content_transfer_encoding
+
     let content_id = get_header_value_impl(ref headers, 'Content-ID')
-    
-    let is_actual_attachment = content_disposition.starts_with?('attachment') or content_disposition.starts_with?('file')
-    
+
+    let is_actual_attachment = content_disposition.starts_with?('attachment')
+      or content_disposition.starts_with?('file')
+
     let filename = if is_actual_attachment {
       extract_filename(content_disposition)
     } else {
       Option.None
     }
-    
+
     if is_actual_attachment {
       let info = AttachmentInfo(
         index: @attachment_count,
@@ -1160,32 +1320,38 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
         size: 0,
         transfer_encoding: content_transfer_encoding,
       )
+
       match @handler.on_attachment_begin(info) {
         case Ok(_) -> {}
         case Error(_) -> {}
       }
+
       @current_info = Option.Some(info)
     }
   }
-  
+
   fn pub mut on_part_data(
     data: ref ByteArray,
     content_transfer_encoding: String,
   ) {
     @current_encoding = content_transfer_encoding
+
     let data_str = data.clone
-    
+
     match @current_info {
       case Some(info) -> {
         let encoding_lower = content_transfer_encoding.to_lower
-        
+
         if encoding_lower == 'base64' {
           match @base64_decoder {
             case None -> {
-              @base64_decoder = Option.Some(Base64StreamingDecoder.new(@max_size, false))
+              @base64_decoder = Option.Some(
+                Base64StreamingDecoder.new(@max_size, false),
+              )
             }
             case Some(_) -> {}
           }
+
           match @base64_decoder {
             case Some(mut d) -> {
               match d.feed(data_str.into_string) {
@@ -1205,10 +1371,13 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
         } else if encoding_lower == 'quoted-printable' {
           match @qp_decoder {
             case None -> {
-              @qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(@max_size, false, false))
+              @qp_decoder = Option.Some(
+                QuotedPrintableStreamingDecoder.new(@max_size, false, false),
+              )
             }
             case Some(_) -> {}
           }
+
           match @qp_decoder {
             case Some(mut d) -> {
               match d.feed(data_str.into_string) {
@@ -1235,13 +1404,17 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
       case None -> {
         if is_text_plain(@current_content_type) {
           let encoding_lower = content_transfer_encoding.to_lower
+
           if encoding_lower == 'base64' {
             match @base64_decoder {
               case None -> {
-                @base64_decoder = Option.Some(Base64StreamingDecoder.new(@max_size, false))
+                @base64_decoder = Option.Some(
+                  Base64StreamingDecoder.new(@max_size, false),
+                )
               }
               case Some(_) -> {}
             }
+
             match @base64_decoder {
               case Some(mut d) -> {
                 match d.feed(data_str.into_string) {
@@ -1249,6 +1422,7 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
                     if decoded.size > 0 {
                       let decoded_str = decoded.into_string
                       let mut pos = 0
+
                       while pos < decoded_str.size {
                         let end = if pos + @chunk_size > decoded_str.size {
                           decoded_str.size
@@ -1256,10 +1430,12 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
                           pos + @chunk_size
                         }
                         let chunk = decoded_str.substring(pos, end)
+
                         match @handler.on_text_chunk(chunk) {
                           case Ok(_) -> {}
                           case Error(_) -> {}
                         }
+
                         pos = end
                       }
                     }
@@ -1272,10 +1448,13 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
           } else if encoding_lower == 'quoted-printable' {
             match @qp_decoder {
               case None -> {
-                @qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(@max_size, false, false))
+                @qp_decoder = Option.Some(
+                  QuotedPrintableStreamingDecoder.new(@max_size, false, false),
+                )
               }
               case Some(_) -> {}
             }
+
             match @qp_decoder {
               case Some(mut d) -> {
                 match d.feed(data_str.into_string) {
@@ -1283,6 +1462,7 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
                     if decoded.size > 0 {
                       let decoded_str = decoded.into_string
                       let mut pos = 0
+
                       while pos < decoded_str.size {
                         let end = if pos + @chunk_size > decoded_str.size {
                           decoded_str.size
@@ -1290,10 +1470,12 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
                           pos + @chunk_size
                         }
                         let chunk = decoded_str.substring(pos, end)
+
                         match @handler.on_text_chunk(chunk) {
                           case Ok(_) -> {}
                           case Error(_) -> {}
                         }
+
                         pos = end
                       }
                     }
@@ -1311,13 +1493,17 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
           }
         } else if is_text_html(@current_content_type) {
           let encoding_lower = content_transfer_encoding.to_lower
+
           if encoding_lower == 'base64' {
             match @base64_decoder {
               case None -> {
-                @base64_decoder = Option.Some(Base64StreamingDecoder.new(@max_size, false))
+                @base64_decoder = Option.Some(
+                  Base64StreamingDecoder.new(@max_size, false),
+                )
               }
               case Some(_) -> {}
             }
+
             match @base64_decoder {
               case Some(mut d) -> {
                 match d.feed(data_str.into_string) {
@@ -1325,6 +1511,7 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
                     if decoded.size > 0 {
                       let decoded_str = decoded.into_string
                       let mut pos = 0
+
                       while pos < decoded_str.size {
                         let end = if pos + @chunk_size > decoded_str.size {
                           decoded_str.size
@@ -1332,10 +1519,12 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
                           pos + @chunk_size
                         }
                         let chunk = decoded_str.substring(pos, end)
+
                         match @handler.on_html_chunk(chunk) {
                           case Ok(_) -> {}
                           case Error(_) -> {}
                         }
+
                         pos = end
                       }
                     }
@@ -1348,10 +1537,13 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
           } else if encoding_lower == 'quoted-printable' {
             match @qp_decoder {
               case None -> {
-                @qp_decoder = Option.Some(QuotedPrintableStreamingDecoder.new(@max_size, false, false))
+                @qp_decoder = Option.Some(
+                  QuotedPrintableStreamingDecoder.new(@max_size, false, false),
+                )
               }
               case Some(_) -> {}
             }
+
             match @qp_decoder {
               case Some(mut d) -> {
                 match d.feed(data_str.into_string) {
@@ -1359,6 +1551,7 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
                     if decoded.size > 0 {
                       let decoded_str = decoded.into_string
                       let mut pos = 0
+
                       while pos < decoded_str.size {
                         let end = if pos + @chunk_size > decoded_str.size {
                           decoded_str.size
@@ -1366,10 +1559,12 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
                           pos + @chunk_size
                         }
                         let chunk = decoded_str.substring(pos, end)
+
                         match @handler.on_html_chunk(chunk) {
                           case Ok(_) -> {}
                           case Error(_) -> {}
                         }
+
                         pos = end
                       }
                     }
@@ -1389,7 +1584,7 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
       }
     }
   }
-  
+
   fn pub mut on_part_end {
     # Collect decoded data before calling handler methods
     let mut base64_decoded: Option[ByteArray] = Option.None
@@ -1400,15 +1595,14 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
       case Some(mut d) -> {
         match d.finish {
           case Ok(decoded) -> {
-            if decoded.size > 0 {
-              base64_decoded = Option.Some(decoded)
-            }
+            if decoded.size > 0 { base64_decoded = Option.Some(decoded) }
           }
           case Error(_) -> {}
         }
       }
       case None -> {}
     }
+
     @base64_decoder = Option.None
 
     # Finish quoted-printable decoder if present
@@ -1416,15 +1610,14 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
       case Some(mut d) -> {
         match d.finish {
           case Ok(decoded) -> {
-            if decoded.size > 0 {
-              qp_decoded = Option.Some(decoded)
-            }
+            if decoded.size > 0 { qp_decoded = Option.Some(decoded) }
           }
           case Error(_) -> {}
         }
       }
       case None -> {}
     }
+
     @qp_decoder = Option.None
 
     # Now pass decoded data to handler
@@ -1464,6 +1657,7 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
             case Some(data) -> {
               let decoded_str = data.into_string
               let mut pos = 0
+
               while pos < decoded_str.size {
                 let end = if pos + @chunk_size > decoded_str.size {
                   decoded_str.size
@@ -1471,10 +1665,12 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
                   pos + @chunk_size
                 }
                 let chunk = decoded_str.substring(pos, end)
+
                 match @handler.on_text_chunk(chunk) {
                   case Ok(_) -> {}
                   case Error(_) -> {}
                 }
+
                 pos = end
               }
             }
@@ -1485,6 +1681,7 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
             case Some(data) -> {
               let decoded_str = data.into_string
               let mut pos = 0
+
               while pos < decoded_str.size {
                 let end = if pos + @chunk_size > decoded_str.size {
                   decoded_str.size
@@ -1492,10 +1689,12 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
                   pos + @chunk_size
                 }
                 let chunk = decoded_str.substring(pos, end)
+
                 match @handler.on_text_chunk(chunk) {
                   case Ok(_) -> {}
                   case Error(_) -> {}
                 }
+
                 pos = end
               }
             }
@@ -1506,6 +1705,7 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
             case Some(data) -> {
               let decoded_str = data.into_string
               let mut pos = 0
+
               while pos < decoded_str.size {
                 let end = if pos + @chunk_size > decoded_str.size {
                   decoded_str.size
@@ -1513,10 +1713,12 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
                   pos + @chunk_size
                 }
                 let chunk = decoded_str.substring(pos, end)
+
                 match @handler.on_html_chunk(chunk) {
                   case Ok(_) -> {}
                   case Error(_) -> {}
                 }
+
                 pos = end
               }
             }
@@ -1527,6 +1729,7 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
             case Some(data) -> {
               let decoded_str = data.into_string
               let mut pos = 0
+
               while pos < decoded_str.size {
                 let end = if pos + @chunk_size > decoded_str.size {
                   decoded_str.size
@@ -1534,10 +1737,12 @@ impl MultipartStreamHandler for MultipartHandlerWrapper if H: mut + StreamHandle
                   pos + @chunk_size
                 }
                 let chunk = decoded_str.substring(pos, end)
+
                 match @handler.on_html_chunk(chunk) {
                   case Ok(_) -> {}
                   case Error(_) -> {}
                 }
+
                 pos = end
               }
             }
@@ -1564,18 +1769,17 @@ fn parse_multipart_stream[H: mut + StreamHandler](
   chunk_size: Int,
   handler: mut H,
 ) -> Result[Int, String] {
-  
   if current_depth >= max_depth {
-    return Result.Error("Maximum multipart depth exceeded")
+    return Result.Error('Maximum multipart depth exceeded')
   }
-  
+
   let mut attachment_count = 0
   let mut current_info: Option[AttachmentInfo] = Option.None
   let mut base64_decoder: Option[Base64StreamingDecoder] = Option.None
   let mut qp_decoder: Option[QuotedPrintableStreamingDecoder] = Option.None
   let mut current_encoding: String = default_encoding
   let mut current_content_type: String = 'text/plain'
-  
+
   let mut parser = MultipartStreamParser.new(
     boundary,
     max_depth,
@@ -1584,7 +1788,7 @@ fn parse_multipart_stream[H: mut + StreamHandler](
     max_headers,
     max_size,
   )
-  
+
   let mut wrapper = MultipartHandlerWrapper(
     handler: handler,
     attachment_count: attachment_count,
@@ -1598,6 +1802,7 @@ fn parse_multipart_stream[H: mut + StreamHandler](
   )
 
   let data = raw.to_byte_array
+
   match parser.feed(ref data, wrapper, default_encoding) {
     case Ok(_) -> {}
     case Error(e) -> return Result.Error(e)
@@ -1610,16 +1815,16 @@ fn parse_multipart_stream[H: mut + StreamHandler](
 
   Result.Ok(wrapper.attachment_count)
 }
-  
+
 fn extract_filename(content_disposition: String) -> Option[String] {
   # Simple extraction - looks for filename= parameter
   let filename_key = 'filename='
+
   match content_disposition.index_of(filename_key, 0) {
     case Some(pos) -> {
       let start = pos + filename_key.size
-      if start >= content_disposition.size {
-        return Option.None
-      }
+
+      if start >= content_disposition.size { return Option.None }
 
       # Check for quoted filename
       match content_disposition.get(start) {
@@ -1629,23 +1834,25 @@ fn extract_filename(content_disposition: String) -> Option[String] {
               case Some(e) -> e
               case None -> content_disposition.size
             }
+
             if end > (start + 1) {
               return Option.Some(content_disposition.substring(start + 1, end))
             }
           } else {
             # Unquoted filename - read until space or semicolon
             let mut end = start
+
             while end < content_disposition.size {
               match content_disposition.get(end) {
                 case Ok(b) -> {
-                  if b == 32 or b == 59 {
-                    break
-                  }
+                  if b == 32 or b == 59 { break }
+
                   end = end + 1
                 }
                 case Error(_) -> break
               }
             }
+
             if end > start {
               return Option.Some(content_disposition.substring(start, end))
             }
@@ -1656,5 +1863,6 @@ fn extract_filename(content_disposition: String) -> Option[String] {
     }
     case None -> return Option.None
   }
+
   return Option.None
 }

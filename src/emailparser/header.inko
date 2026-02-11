@@ -212,7 +212,9 @@ fn parse_headers_impl(
 
         let new_size = current_value.size + 1 + line_str.trim.size
 
-        match SizeTracker.check_allocation(0, new_size, MAX_HEADER_VALUE_LENGTH) {
+        match
+          SizeTracker.check_allocation(0, new_size, MAX_HEADER_VALUE_LENGTH)
+        {
           case Ok(_) -> {}
           case Error(_) -> {
             if strict_mode {
@@ -277,7 +279,13 @@ fn parse_headers_impl(
           }
 
           # Check header value size limit
-          match SizeTracker.check_allocation(0, current_value.size, MAX_HEADER_VALUE_LENGTH) {
+          match
+            SizeTracker.check_allocation(
+              0,
+              current_value.size,
+              MAX_HEADER_VALUE_LENGTH,
+            )
+          {
             case Ok(_) -> {}
             case Error(_) -> {
               if strict_mode {

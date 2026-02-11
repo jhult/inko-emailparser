@@ -276,6 +276,7 @@ fn is_valid_boundary_char(byte: Int) -> Bool {
     or byte == ASCII_COLON
     or byte == ASCII_EQUALS
     or byte == ASCII_QUESTION
+
   is_valid
 }
 
@@ -320,21 +321,21 @@ fn pub is_valid_boundary(boundary: String) -> Bool {
   let mut has_non_space = false
 
   while i < boundary.size {
-     match boundary.get(i) {
-       case Ok(byte) -> {
-         # Reject control characters (including newlines, tabs, null, DEL)
-         if is_control_char(byte) or byte == ASCII_DEL { return false }
+    match boundary.get(i) {
+      case Ok(byte) -> {
+        # Reject control characters (including newlines, tabs, null, DEL)
+        if is_control_char(byte) or byte == ASCII_DEL { return false }
 
-         # Validate character using helper predicate
-         if !is_valid_boundary_char(byte) { return false }
+        # Validate character using helper predicate
+        if !is_valid_boundary_char(byte) { return false }
 
-         # Track if we have at least one non-space character
-         if byte != ASCII_SPACE { has_non_space = true }
+        # Track if we have at least one non-space character
+        if byte != ASCII_SPACE { has_non_space = true }
 
-         i = i + 1
-       }
-       case Error(_) -> return false
-     }
+        i = i + 1
+      }
+      case Error(_) -> return false
+    }
   }
 
   # Boundary must contain at least one non-space character

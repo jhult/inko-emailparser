@@ -71,11 +71,7 @@ type pub SizeTracker {
 impl SizeTracker {
   # Create a new size tracker with specified maximum
   fn pub static new(max_size: Int, strict_mode: Bool) -> SizeTracker {
-    SizeTracker(
-      current_size: 0,
-      max_size: max_size,
-      strict_mode: strict_mode,
-    )
+    SizeTracker(current_size: 0, max_size: max_size, strict_mode: strict_mode)
   }
 
   # Check if adding `additional` bytes would exceed `max` limit

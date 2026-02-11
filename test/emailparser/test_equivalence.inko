@@ -9,8 +9,10 @@
 # two implementations don't diverge over time.
 
 import emailparser (EmailParser, ParsedEmailMessage)
-import emailparser.streaming (StreamHandler, StreamingParser, StreamingResult, AttachmentInfo)
-import emailparser.test_data_generator (TestDataGenerator, TestAttachment)
+import emailparser.streaming (
+  AttachmentInfo, StreamHandler, StreamingParser, StreamingResult,
+)
+import emailparser.test_data_generator (TestAttachment, TestDataGenerator)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
@@ -63,31 +65,35 @@ impl EquivalenceTestHandler {
 }
 
 impl StreamHandler for EquivalenceTestHandler {
-  fn pub mut on_begin   -> Result[Int, String] {
+  fn pub mut on_begin -> Result[Int, String] {
     @begin_called = true
     Result.Ok(0)
   }
 
-  fn pub mut on_headers(headers: ref Array[(String, String)])   -> Result[Int, String] {
+  fn pub mut on_headers(
+    headers: ref Array[(String, String)],
+  ) -> Result[Int, String] {
     @headers_called = true
     @headers = []
-    for (key, value) in headers.iter {
-      @headers.push((key, value))
-    }
+
+    for (key, value) in headers.iter { @headers.push((key, value)) }
+
     Result.Ok(0)
   }
 
-  fn pub mut on_text_chunk(chunk: String)   -> Result[Int, String] {
+  fn pub mut on_text_chunk(chunk: String) -> Result[Int, String] {
     @text_body = @text_body + chunk
     Result.Ok(0)
   }
 
-  fn pub mut on_html_chunk(chunk: String)   -> Result[Int, String] {
+  fn pub mut on_html_chunk(chunk: String) -> Result[Int, String] {
     @html_body = @html_body + chunk
     Result.Ok(0)
   }
 
-  fn pub mut on_attachment_begin(info: ref AttachmentInfo)   -> Result[Int, String] {
+  fn pub mut on_attachment_begin(
+    info: ref AttachmentInfo,
+  ) -> Result[Int, String] {
     let info_copy = AttachmentInfo(
       index: info.index,
       content_type: info.content_type.clone(),
@@ -103,6 +109,7 @@ impl StreamHandler for EquivalenceTestHandler {
       size: info.size,
       transfer_encoding: info.transfer_encoding.clone(),
     )
+
     @current_attachment = Option.Some(info_copy)
     @current_attachment_data = recover ByteArray.new
     Result.Ok(0)
@@ -111,19 +118,24 @@ impl StreamHandler for EquivalenceTestHandler {
   fn pub mut on_attachment_chunk(
     chunk: ByteArray,
     info: ref AttachmentInfo,
-  )   -> Result[Int, String] {
+  ) -> Result[Int, String] {
     let mut i = 0
+
     while i < chunk.size {
       match chunk.get(i) {
         case Ok(byte) -> @current_attachment_data.push(byte)
         case Error(_) -> {}
       }
+
       i = i + 1
     }
+
     Result.Ok(0)
   }
 
-  fn pub mut on_attachment_end(info: ref AttachmentInfo)   -> Result[Int, String] {
+  fn pub mut on_attachment_end(
+    info: ref AttachmentInfo,
+  ) -> Result[Int, String] {
     let info_copy = AttachmentInfo(
       index: info.index,
       content_type: info.content_type.clone(),
@@ -139,18 +151,19 @@ impl StreamHandler for EquivalenceTestHandler {
       size: info.size,
       transfer_encoding: info.transfer_encoding.clone(),
     )
+
     @attachments.push((info_copy, @current_attachment_data.clone()))
     @current_attachment = Option.None
     @current_attachment_data = recover ByteArray.new
     Result.Ok(0)
   }
 
-  fn pub mut on_end   -> Result[Int, String] {
+  fn pub mut on_end -> Result[Int, String] {
     @end_called = true
     Result.Ok(0)
   }
 
-  fn pub mut on_error(error: String)   -> Result[Int, String] {
+  fn pub mut on_error(error: String) -> Result[Int, String] {
     @errors.push(error)
     Result.Ok(0)
   }
@@ -166,11 +179,16 @@ fn pub tests(t: mut Tests) {
 
   t.test('equivalence_simple_text_email', fn (t) {
     let mut generator = TestDataGenerator.new
-    let email = generator.generate_text_email('Simple Test Subject', 'This is a simple text body message.')
+    let email = generator.generate_text_email(
+      'Simple Test Subject',
+      'This is a simple text body message.',
+    )
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -188,7 +206,10 @@ fn pub tests(t: mut Tests) {
     }
 
     t.equal(streaming_result.subject, regular_result.subject)
-    t.equal(streaming_result.from.address, regular_result.addresses.from.address)
+    t.equal(
+      streaming_result.from.address,
+      regular_result.addresses.from.address,
+    )
     t.equal(streaming_result.content_type, regular_result.mime.content_type)
     t.equal(streaming_result.attachment_count, regular_result.attachments.size)
 
@@ -196,9 +217,7 @@ fn pub tests(t: mut Tests) {
       case Some(regular_text) -> {
         t.equal(streaming_handler.get_text_body.trim, regular_text.trim)
       }
-      case None -> {
-        t.equal(streaming_handler.get_text_body.trim, '')
-      }
+      case None -> t.equal(streaming_handler.get_text_body.trim, '')
     }
   })
 
@@ -211,7 +230,9 @@ fn pub tests(t: mut Tests) {
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -244,7 +265,9 @@ End.'
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -270,11 +293,17 @@ End.'
 
   t.test('equivalence_single_base64_attachment', fn (t) {
     let mut generator = TestDataGenerator.new
-    let email = generator.generate_email_with_attachment('test.txt', 'Attachment Content Here', 'base64')
+    let email = generator.generate_email_with_attachment(
+      'test.txt',
+      'Attachment Content Here',
+      'base64',
+    )
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -297,11 +326,17 @@ End.'
 
   t.test('equivalence_single_quoted_printable_attachment', fn (t) {
     let mut generator = TestDataGenerator.new
-    let email = generator.generate_email_with_attachment('test.txt', 'QP Content =E2=9C=93', 'quoted-printable')
+    let email = generator.generate_email_with_attachment(
+      'test.txt',
+      'QP Content =E2=9C=93',
+      'quoted-printable',
+    )
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -347,7 +382,9 @@ End.'
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -371,11 +408,17 @@ End.'
   t.test('equivalence_large_attachment', fn (t) {
     let mut generator = TestDataGenerator.new
     let large_content = generator.generate_large_attachment(50000, 'LARGE')
-    let email = generator.generate_email_with_attachment('large.bin', large_content, 'base64')
+    let email = generator.generate_email_with_attachment(
+      'large.bin',
+      large_content,
+      'base64',
+    )
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -409,7 +452,9 @@ End.'
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -454,7 +499,9 @@ End.'
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -484,7 +531,9 @@ End.'
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -511,7 +560,9 @@ End.'
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -542,7 +593,9 @@ End.'
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -565,11 +618,16 @@ End.'
 
   t.test('equivalence_no_attachments', fn (t) {
     let mut generator = TestDataGenerator.new
-    let email = generator.generate_text_email('No Attachments', 'Just text, no files.')
+    let email = generator.generate_text_email(
+      'No Attachments',
+      'Just text, no files.',
+    )
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -596,7 +654,9 @@ End.'
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -623,7 +683,9 @@ End.'
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -681,7 +743,9 @@ End.'
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -708,7 +772,9 @@ End.'
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -749,7 +815,9 @@ Body for multiple recipients.
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(raw_email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(raw_email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -791,7 +859,9 @@ Threaded body.
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(raw_email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(raw_email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -825,7 +895,9 @@ Threaded body.
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -871,7 +943,9 @@ SGVsbG8=
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(raw_email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(raw_email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -913,7 +987,9 @@ Body with custom headers.
 
     let streaming_parser = StreamingParser.new
     let mut streaming_handler = EquivalenceTestHandler.new
-    let streaming_result = match streaming_parser.parse_stream(raw_email, streaming_handler) {
+    let streaming_result = match
+      streaming_parser.parse_stream(raw_email, streaming_handler)
+    {
       case Ok(r) -> r
       case Error(e) -> {
         t.equal('should parse streaming', 'got error: ' + e)
@@ -931,6 +1007,9 @@ Body with custom headers.
     }
 
     t.equal(streaming_result.subject, regular_result.subject)
-    t.equal(streaming_result.extra_headers.size, regular_result.extra_headers.size)
+    t.equal(
+      streaming_result.extra_headers.size,
+      regular_result.extra_headers.size,
+    )
   })
 }

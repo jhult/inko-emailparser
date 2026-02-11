@@ -12,8 +12,10 @@
 # - Mid-stream error handling and resource cleanup
 
 import emailparser (EmailParser, ParserConfig)
-import emailparser.streaming (StreamHandler, StreamingParser, StreamingConfig, AttachmentInfo)
-import emailparser.test_data_generator (TestDataGenerator, TestAttachment)
+import emailparser.streaming (
+  AttachmentInfo, StreamHandler, StreamingConfig, StreamingParser,
+)
+import emailparser.test_data_generator (TestAttachment, TestDataGenerator)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
@@ -35,7 +37,10 @@ type pub ErrorTestingHandler {
 }
 
 impl ErrorTestingHandler {
-  fn pub static new(fail_on_chunk: Int, should_fail: Bool) -> ErrorTestingHandler {
+  fn pub static new(
+    fail_on_chunk: Int,
+    should_fail: Bool,
+  ) -> ErrorTestingHandler {
     ErrorTestingHandler(
       text_body: '',
       html_body: '',
@@ -70,35 +75,45 @@ impl ErrorTestingHandler {
 }
 
 impl StreamHandler for ErrorTestingHandler {
-  fn pub mut on_begin   -> Result[Int, String] {
+  fn pub mut on_begin -> Result[Int, String] {
     @begin_called = true
     Result.Ok(0)
   }
 
-  fn pub mut on_headers(headers: ref Array[(String, String)])   -> Result[Int, String] {
+  fn pub mut on_headers(
+    headers: ref Array[(String, String)],
+  ) -> Result[Int, String] {
     @headers_called = true
     Result.Ok(0)
   }
 
-  fn pub mut on_text_chunk(chunk: String)   -> Result[Int, String] {
+  fn pub mut on_text_chunk(chunk: String) -> Result[Int, String] {
     if @should_fail and @chunk_count == @fail_on_chunk_number {
-      return Result.Error('Simulated error on text chunk ' + @chunk_count.to_string)
+      return Result.Error(
+        'Simulated error on text chunk ' + @chunk_count.to_string,
+      )
     }
+
     @text_body = @text_body + chunk
     @chunk_count = @chunk_count + 1
     Result.Ok(0)
   }
 
-  fn pub mut on_html_chunk(chunk: String)   -> Result[Int, String] {
+  fn pub mut on_html_chunk(chunk: String) -> Result[Int, String] {
     if @should_fail and @chunk_count == @fail_on_chunk_number {
-      return Result.Error('Simulated error on HTML chunk ' + @chunk_count.to_string)
+      return Result.Error(
+        'Simulated error on HTML chunk ' + @chunk_count.to_string,
+      )
     }
+
     @html_body = @html_body + chunk
     @chunk_count = @chunk_count + 1
     Result.Ok(0)
   }
 
-  fn pub mut on_attachment_begin(info: ref AttachmentInfo)   -> Result[Int, String] {
+  fn pub mut on_attachment_begin(
+    info: ref AttachmentInfo,
+  ) -> Result[Int, String] {
     let info_copy = AttachmentInfo(
       index: info.index,
       content_type: info.content_type.clone(),
@@ -114,6 +129,7 @@ impl StreamHandler for ErrorTestingHandler {
       size: info.size,
       transfer_encoding: info.transfer_encoding.clone(),
     )
+
     @current_attachment = Option.Some(info_copy)
     @current_attachment_data = recover ByteArray.new
     @chunk_count = 0
@@ -123,23 +139,31 @@ impl StreamHandler for ErrorTestingHandler {
   fn pub mut on_attachment_chunk(
     chunk: ByteArray,
     info: ref AttachmentInfo,
-  )   -> Result[Int, String] {
+  ) -> Result[Int, String] {
     if @should_fail and @chunk_count == @fail_on_chunk_number {
-      return Result.Error('Simulated error on attachment chunk ' + @chunk_count.to_string)
+      return Result.Error(
+        'Simulated error on attachment chunk ' + @chunk_count.to_string,
+      )
     }
+
     let mut i = 0
+
     while i < chunk.size {
       match chunk.get(i) {
         case Ok(byte) -> @current_attachment_data.push(byte)
         case Error(_) -> {}
       }
+
       i = i + 1
     }
+
     @chunk_count = @chunk_count + 1
     Result.Ok(0)
   }
 
-  fn pub mut on_attachment_end(info: ref AttachmentInfo)   -> Result[Int, String] {
+  fn pub mut on_attachment_end(
+    info: ref AttachmentInfo,
+  ) -> Result[Int, String] {
     let info_copy = AttachmentInfo(
       index: info.index,
       content_type: info.content_type.clone(),
@@ -155,18 +179,19 @@ impl StreamHandler for ErrorTestingHandler {
       size: info.size,
       transfer_encoding: info.transfer_encoding.clone(),
     )
+
     @attachments.push((info_copy, @current_attachment_data.clone()))
     @current_attachment = Option.None
     @current_attachment_data = recover ByteArray.new
     Result.Ok(0)
   }
 
-  fn pub mut on_end   -> Result[Int, String] {
+  fn pub mut on_end -> Result[Int, String] {
     @end_called = true
     Result.Ok(0)
   }
 
-  fn pub mut on_error(error: String)   -> Result[Int, String] {
+  fn pub mut on_error(error: String) -> Result[Int, String] {
     @errors.push(error)
     Result.Ok(0)
   }
@@ -194,6 +219,7 @@ fn pub tests(t: mut Tests) {
     # Headers are ~140 bytes, so we need ~860 bytes in body for 1000 total
     let mut body = 'X'
     let mut i = 0
+
     while i < 859 {
       body = body + 'X'
       i = i + 1
@@ -206,7 +232,8 @@ Message-ID: <test@example.com>
 MIME-Version: 1.0
 Content-Type: text/plain
 
-' + body
+'
+      + body
 
     let result = parser.parse(raw_email)
 
@@ -236,6 +263,7 @@ Content-Type: text/plain
     # Create email exactly at max_size (1000 bytes)
     let mut body = 'Y'
     let mut i = 0
+
     while i < 999 {
       body = body + 'Y'
       i = i + 1
@@ -248,7 +276,8 @@ Message-ID: <test@example.com>
 MIME-Version: 1.0
 Content-Type: text/plain
 
-' + body
+'
+      + body
 
     let result = parser.parse(raw_email)
 
@@ -278,6 +307,7 @@ Content-Type: text/plain
     # Create email at max_size + 1 (1001 bytes)
     let mut body = 'Z'
     let mut i = 0
+
     while i < 1000 {
       body = body + 'Z'
       i = i + 1
@@ -290,7 +320,8 @@ Message-ID: <test@example.com>
 MIME-Version: 1.0
 Content-Type: text/plain
 
-' + body
+'
+      + body
 
     let result = parser.parse(raw_email)
 
@@ -322,6 +353,7 @@ Content-Type: text/plain
     # 'AAA...' decodes to 0x00... which is 96 bytes
     let mut attachment_data = ''
     let mut i = 0
+
     while i < 128 {
       attachment_data = attachment_data + 'A'
       i = i + 1
@@ -343,7 +375,9 @@ Content-Type: application/octet-stream
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="test.bin"
 
-' + attachment_data + '
+'
+      + attachment_data
+      + '
 --abc--
 '
 
@@ -365,7 +399,9 @@ Content-Disposition: attachment; filename="test.bin"
       }
       case Error(e) -> {
         # May fail if our calculation is off
-        t.true(e.contains?('size') or e.contains?('Size') or e.contains?('boundary'))
+        t.true(
+          e.contains?('size') or e.contains?('Size') or e.contains?('boundary'),
+        )
       }
     }
   })
@@ -386,10 +422,12 @@ Content-Disposition: attachment; filename="test.bin"
     # Need exactly 100 bytes: 99 + 1 = 100, but base64 pads to multiples of 4
     let mut attachment_data = 'SGVsbG8=' # 8 bytes base64 = 6 bytes decoded
     let mut i = 0
+
     while i < 15 {
       attachment_data = attachment_data + 'SGVsbG8='
       i = i + 1
     }
+
     attachment_data = attachment_data.substring(0, 128)
 
     let raw_email = 'From: sender@example.com
@@ -408,7 +446,9 @@ Content-Type: application/octet-stream
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="test.bin"
 
-' + attachment_data + '
+'
+      + attachment_data
+      + '
 --abc--
 '
 
@@ -441,10 +481,12 @@ Content-Disposition: attachment; filename="test.bin"
     # Base64: 102 bytes decoded = 136 chars
     let mut attachment_data = 'SGVsbG8='
     let mut i = 0
+
     while i < 16 {
       attachment_data = attachment_data + 'SGVsbG8='
       i = i + 1
     }
+
     attachment_data = attachment_data.substring(0, 136)
 
     let raw_email = 'From: sender@example.com
@@ -463,7 +505,9 @@ Content-Type: application/octet-stream
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="test.bin"
 
-' + attachment_data + '
+'
+      + attachment_data
+      + '
 --abc--
 '
 
@@ -519,6 +563,7 @@ Valid attachment content
           case Some(_) -> true
           case None -> false
         }
+
         t.true(has_attachments or has_text_body)
       }
       case Error(e) -> {
@@ -683,7 +728,11 @@ Malformed attachment
 
     let mut generator = TestDataGenerator.new
     let large_content = generator.generate_large_attachment(10000, 'ATTACH')
-    let email = generator.generate_email_with_attachment('large.bin', large_content, 'base64')
+    let email = generator.generate_email_with_attachment(
+      'large.bin',
+      large_content,
+      'base64',
+    )
 
     match parser.parse_stream(email, handler) {
       case Ok(result) -> {
@@ -742,7 +791,11 @@ Malformed attachment
 
     let mut generator = TestDataGenerator.new
     let large_html = generator.generate_large_attachment(8000, 'HTML')
-    let email = generator.generate_alternative_email('Abort HTML', 'Plain text', '<html>' + large_html + '</html>')
+    let email = generator.generate_alternative_email(
+      'Abort HTML',
+      'Plain text',
+      '<html>' + large_html + '</html>',
+    )
 
     match parser.parse_stream(email, handler) {
       case Ok(_) -> {
@@ -764,7 +817,10 @@ Malformed attachment
     let handler = ErrorTestingHandler.new(0, false)
 
     let mut generator = TestDataGenerator.new
-    let email = generator.generate_text_email('Continue Test', 'This should complete normally')
+    let email = generator.generate_text_email(
+      'Continue Test',
+      'This should complete normally',
+    )
 
     match parser.parse_stream(email, handler) {
       case Ok(result) -> {
@@ -773,9 +829,7 @@ Malformed attachment
         t.true(handler.headers_called)
         t.true(handler.end_called)
       }
-      case Error(e) -> {
-        t.equal('should complete normally', 'got error: ' + e)
-      }
+      case Error(e) -> t.equal('should complete normally', 'got error: ' + e)
     }
   })
 
@@ -788,7 +842,11 @@ Malformed attachment
     let handler = ErrorTestingHandler.new(2, true)
 
     let mut generator = TestDataGenerator.new
-    let email = generator.generate_email_with_attachment('test.txt', 'Content for cleanup test', 'base64')
+    let email = generator.generate_email_with_attachment(
+      'test.txt',
+      'Content for cleanup test',
+      'base64',
+    )
 
     match parser.parse_stream(email, handler) {
       case Ok(_) -> {
@@ -808,20 +866,22 @@ Malformed attachment
     let handler = ErrorTestingHandler.new(1, true)
 
     let mut generator = TestDataGenerator.new
-    let email = generator.generate_email_with_attachments([
-      TestAttachment(
-        name: 'file1.txt',
-        content_type: 'text/plain',
-        content: 'Content 1',
-        encoding: 'base64',
-      ),
-      TestAttachment(
-        name: 'file2.txt',
-        content_type: 'text/plain',
-        content: 'Content 2',
-        encoding: 'base64',
-      ),
-    ])
+    let email = generator.generate_email_with_attachments(
+      [
+        TestAttachment(
+          name: 'file1.txt',
+          content_type: 'text/plain',
+          content: 'Content 1',
+          encoding: 'base64',
+        ),
+        TestAttachment(
+          name: 'file2.txt',
+          content_type: 'text/plain',
+          content: 'Content 2',
+          encoding: 'base64',
+        ),
+      ],
+    )
 
     match parser.parse_stream(email, handler) {
       case Ok(_) -> {

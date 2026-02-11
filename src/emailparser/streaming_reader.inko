@@ -66,20 +66,20 @@ impl AsyncReader for ByteArrayReader {
   # Returns empty ByteArray when EOF is reached (position >= size).
   # Never returns Error for ByteArrayReader (always Ok).
   fn pub mut read(size: Int) -> Result[ByteArray, String] {
-    if @position >= @data.size {
-      return Result.Ok(ByteArray.new)
-    }
+    if @position >= @data.size { return Result.Ok(ByteArray.new) }
 
     let remaining = @data.size - @position
     let bytes_to_read = if size < remaining { size } else { remaining }
 
     let mut result = ByteArray.new
     let mut i = 0
+
     while i < bytes_to_read {
       match @data.get(@position + i) {
         case Ok(byte) -> result.push(byte)
         case Error(_) -> {}
       }
+
       i = i + 1
     }
 

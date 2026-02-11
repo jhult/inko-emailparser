@@ -1,14 +1,12 @@
 # Tests for streaming multipart parser
 
+import emailparser.streaming_multipart (
+  MultipartState, MultipartStreamHandler, MultipartStreamParser,
+)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
 import std.test (Tests)
-import emailparser.streaming_multipart (
-  MultipartStreamParser,
-  MultipartStreamHandler,
-  MultipartState,
-)
 
 # Test handler that collects parts for verification
 type pub TestHandler {
@@ -52,9 +50,9 @@ impl MultipartStreamHandler for TestHandler {
 
     # Clone headers for verification
     let mut cloned_headers: Array[(String, String)] = []
-    for (k, v) in headers.iter {
-      cloned_headers.push((k.clone, v.clone))
-    }
+
+    for (k, v) in headers.iter { cloned_headers.push((k.clone, v.clone)) }
+
     @headers_seen.push(cloned_headers)
     @content_types.push(content_type)
     @is_attachments.push(is_attachment)
@@ -67,13 +65,16 @@ impl MultipartStreamHandler for TestHandler {
     # Convert ByteArray to String for verification
     let mut cloned_data = ByteArray.new
     let mut i = 0
+
     while i < data.size {
       match data.get(i) {
         case Ok(byte) -> cloned_data.push(byte)
         case Error(_) -> {}
       }
+
       i = i + 1
     }
+
     @data_chunks.push(cloned_data.into_string)
   }
 
@@ -118,12 +119,12 @@ Hello World
 
     match parser.feed(ref data, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed failed: ${e}")
+      case Error(e) -> panic('Feed failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(e) -> panic("Finish failed: ${e}")
+      case Error(e) -> panic('Finish failed: ${e}')
     }
 
     t.equal(handler.parts_begun, 1)
@@ -158,12 +159,12 @@ Part Two
 
     match parser.feed(ref data, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed failed: ${e}")
+      case Error(e) -> panic('Feed failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(e) -> panic("Finish failed: ${e}")
+      case Error(e) -> panic('Finish failed: ${e}')
     }
 
     t.equal(handler.parts_begun, 2)
@@ -190,22 +191,22 @@ Part Two
 
     match parser.feed(ref chunk1, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed 1 failed: ${e}")
+      case Error(e) -> panic('Feed 1 failed: ${e}')
     }
 
     match parser.feed(ref chunk2, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed 2 failed: ${e}")
+      case Error(e) -> panic('Feed 2 failed: ${e}')
     }
 
     match parser.feed(ref chunk3, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed 3 failed: ${e}")
+      case Error(e) -> panic('Feed 3 failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(e) -> panic("Finish failed: ${e}")
+      case Error(e) -> panic('Finish failed: ${e}')
     }
 
     t.equal(handler.parts_begun, 1)
@@ -213,6 +214,7 @@ Part Two
 
     # Data might be delivered in multiple chunks
     let mut total_data = ''
+
     for chunk in handler.data_chunks.iter {
       total_data = total_data + chunk.clone
     }
@@ -234,21 +236,22 @@ Part Two
 
     # Split the boundary marker across chunks
     let chunk1 = '--splitbou'.to_byte_array
-    let chunk2 = 'ndary\nContent-Type: text/plain\n\nTest\n--splitboundary--'.to_byte_array
+    let chunk2 = 'ndary\nContent-Type: text/plain\n\nTest\n--splitboundary--'
+      .to_byte_array
 
     match parser.feed(ref chunk1, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed 1 failed: ${e}")
+      case Error(e) -> panic('Feed 1 failed: ${e}')
     }
 
     match parser.feed(ref chunk2, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed 2 failed: ${e}")
+      case Error(e) -> panic('Feed 2 failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(e) -> panic("Finish failed: ${e}")
+      case Error(e) -> panic('Finish failed: ${e}')
     }
 
     t.equal(handler.parts_begun, 1)
@@ -282,12 +285,12 @@ Binary data
 
     match parser.feed(ref data, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed failed: ${e}")
+      case Error(e) -> panic('Feed failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(e) -> panic("Finish failed: ${e}")
+      case Error(e) -> panic('Finish failed: ${e}')
     }
 
     t.equal(handler.parts_begun, 2)
@@ -323,12 +326,12 @@ Content-ID: <part1@example.com>
 
     match parser.feed(ref data, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed failed: ${e}")
+      case Error(e) -> panic('Feed failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(e) -> panic("Finish failed: ${e}")
+      case Error(e) -> panic('Finish failed: ${e}')
     }
 
     t.equal(handler.parts_begun, 1)
@@ -361,12 +364,12 @@ Content-Type: text/html
 
     match parser.feed(ref data, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed failed: ${e}")
+      case Error(e) -> panic('Feed failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(e) -> panic("Finish failed: ${e}")
+      case Error(e) -> panic('Finish failed: ${e}')
     }
 
     t.equal(handler.parts_begun, 2)
@@ -391,12 +394,12 @@ Content-Type: text/html
 
     match parser.feed(ref data, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed failed: ${e}")
+      case Error(e) -> panic('Feed failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(e) -> panic("Finish failed: ${e}")
+      case Error(e) -> panic('Finish failed: ${e}')
     }
 
     t.equal(handler.parts_begun, 1)
@@ -427,12 +430,12 @@ Actual content
 
     match parser.feed(ref data, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed failed: ${e}")
+      case Error(e) -> panic('Feed failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(e) -> panic("Finish failed: ${e}")
+      case Error(e) -> panic('Finish failed: ${e}')
     }
 
     t.equal(handler.parts_begun, 1)
@@ -462,12 +465,12 @@ File contents
 
     match parser.feed(ref data, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed failed: ${e}")
+      case Error(e) -> panic('Feed failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(e) -> panic("Finish failed: ${e}")
+      case Error(e) -> panic('Finish failed: ${e}')
     }
 
     t.equal(handler.parts_begun, 1)
@@ -489,6 +492,7 @@ File contents
     # Build a large body that exceeds chunk size
     let mut large_body = ''
     let mut i = 0
+
     while i < 100 {
       large_body = large_body + 'This is line {i} of the large body content.\n'
       i = i + 1
@@ -503,12 +507,12 @@ Content-Type: text/plain
 
     match parser.feed(ref data, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed failed: ${e}")
+      case Error(e) -> panic('Feed failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(e) -> panic("Finish failed: ${e}")
+      case Error(e) -> panic('Finish failed: ${e}')
     }
 
     t.equal(handler.parts_begun, 1)
@@ -546,7 +550,7 @@ Test'
     # Should fail on finish in strict mode
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(_) -> {}  # Expected to fail
+      case Error(_) -> {} # Expected to fail
     }
   })
 
@@ -566,12 +570,12 @@ Test'
 
     match parser.feed(ref data, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed failed: ${e}")
+      case Error(e) -> panic('Feed failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(_) -> {}  # OK to fail for empty
+      case Error(_) -> {} # OK to fail for empty
     }
   })
 
@@ -597,12 +601,12 @@ Plain text without headers
 
     match parser.feed(ref data, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed failed: ${e}")
+      case Error(e) -> panic('Feed failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(e) -> panic("Finish failed: ${e}")
+      case Error(e) -> panic('Finish failed: ${e}')
     }
 
     t.equal(handler.parts_begun, 1)
@@ -630,12 +634,12 @@ Plain text without headers
 
     match parser.feed(ref data, mut handler, '7bit') {
       case Ok(_) -> {}
-      case Error(e) -> panic("Feed failed: ${e}")
+      case Error(e) -> panic('Feed failed: ${e}')
     }
 
     match parser.finish(mut handler) {
       case Ok(_) -> {}
-      case Error(e) -> panic("Finish failed: ${e}")
+      case Error(e) -> panic('Finish failed: ${e}')
     }
 
     t.equal(handler.parts_begun, 1)
