@@ -12,9 +12,7 @@
 # - Mid-stream error handling and resource cleanup
 
 import emailparser (EmailParser, ParserConfig)
-import emailparser.streaming (
-  AttachmentInfo, StreamHandler, StreamingConfig, StreamingParser,
-)
+import emailparser.streaming (AttachmentInfo, StreamHandler, StreamingParser)
 import emailparser.test_data_generator (TestAttachment, TestDataGenerator)
 import std.bytes (ByteArray)
 import std.option (Option)
@@ -602,11 +600,11 @@ Content-Type: text/html
     let result = parser.parse(raw_email)
 
     match result {
-      case Ok(msg) -> {
+      case Ok(_) -> {
         # Should recover and parse HTML part
         t.true(true)
       }
-      case Error(e) -> {
+      case Error(_) -> {
         # May fail on malformed headers
         t.true(true)
       }
@@ -691,7 +689,7 @@ Malformed attachment
           case None -> t.false(true)
         }
       }
-      case Error(e) -> {
+      case Error(_) -> {
         # May fail entirely
         t.true(true)
       }
@@ -823,7 +821,7 @@ Malformed attachment
     )
 
     match parser.parse_stream(email, handler) {
-      case Ok(result) -> {
+      case Ok(_) -> {
         # Should complete without errors
         t.true(handler.begin_called)
         t.true(handler.headers_called)
@@ -899,7 +897,6 @@ Malformed attachment
     let parser = StreamingParser.new
     let handler = ErrorTestingHandler.new(0, false)
 
-    let mut generator = TestDataGenerator.new
     # Generate invalid email that will trigger error
     let raw_email = 'From: sender@example.com
 To: recipient@example.com

@@ -8,10 +8,8 @@
 # identical results for the same input email. This ensures that the
 # two implementations don't diverge over time.
 
-import emailparser (EmailParser, ParsedEmailMessage)
-import emailparser.streaming (
-  AttachmentInfo, StreamHandler, StreamingParser, StreamingResult,
-)
+import emailparser (EmailParser)
+import emailparser.streaming (AttachmentInfo, StreamHandler, StreamingParser)
 import emailparser.test_data_generator (TestAttachment, TestDataGenerator)
 import std.bytes (ByteArray)
 import std.option (Option)

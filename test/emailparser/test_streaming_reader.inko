@@ -1,6 +1,6 @@
 # Tests for streaming reader (AsyncReader trait and ByteArrayReader)
 
-import emailparser.streaming_reader (AsyncReader, ByteArrayReader)
+import emailparser.streaming_reader (ByteArrayReader)
 import std.test (Tests)
 
 fn pub tests(t: mut Tests) {

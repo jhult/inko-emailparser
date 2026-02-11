@@ -228,18 +228,16 @@ impl MultipartStreamParser {
   fn pub mut finish[H: mut + MultipartStreamHandler](
     handler: mut H,
   ) -> Result[Int, String] {
-    # If we're at a boundary, check if it's the end boundary
-    let was_at_boundary = match @state {
+    # If we're at a boundary, check if it's end boundary
+    match @state {
       case AtBoundary -> {
-        # Process the AtBoundary state one more time
+        # Process AtBoundary state one more time
         match process_at_boundary(self, handler) {
           case Ok(_) -> {}
           case Error(e) -> return Result.Error(e)
         }
-
-        true
       }
-      case _ -> false
+      case _ -> {}
     }
 
     # Ensure we're in a valid end state
@@ -358,9 +356,7 @@ fn process_at_boundary[H: mut + MultipartStreamHandler](
   parser: mut MultipartStreamParser,
   handler: mut H,
 ) -> Result[Int, String] {
-  # Check if this is the end boundary (--boundary--)
-  let end_marker = '--'.to_byte_array
-
+  # Check if this is end boundary (--boundary--)
   if parser.buffer.size >= 2 {
     match parser.buffer.get(0) {
       case Ok(b1) -> {
