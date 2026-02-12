@@ -1,4 +1,4 @@
-# This Source Code Form is subject to the terms of the Mozilla Public
+# This Source Code Form is subject to terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -55,6 +55,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Check Inko version
         run: |
@@ -65,3 +67,17 @@ jobs:
         run: |
           echo "Running performance benchmarks (informational only)..."
           ./run_benchmarks.sh || echo "Benchmarks completed with issues"
+
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        if: github.event_name == 'push' && github.ref == 'refs/heads/trunk'
+        with:
+          tool: 'inko'
+          output-file-path: benchmarks/results/benchmark-*.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: false
+          alert-threshold: '200%'
+          comment-on-alert: true
+          alert-comment-cc-users: '@jhult'
+          fail-on-alert: true
+          max-items-in-chart: 25

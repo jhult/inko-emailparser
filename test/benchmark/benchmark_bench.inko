@@ -9,136 +9,136 @@ import std.time (Instant)
 type async Main {
   fn async main {
     let out = Stdout.new
-
+    
     out.print('Starting Email Parser Benchmark Suite...')
     out.print('')
-
+    
     # Test data
     let simple_email = 'From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n\nHello World!'
-
+    
     let multipart_email = 'From: sender@example.com\nTo: recipient@example.com\nSubject: Multipart Test\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=boundary123\n\n--boundary123\nContent-Type: text/plain\n\nThis is plain text.\n\n--boundary123\nContent-Type: text/html\n\n<html><body>This is HTML</body></html>\n\n--boundary123--\n'
-
+    
     let base64_email = 'From: sender@example.com\nTo: recipient@example.com\nSubject: Base64 Test\nMIME-Version: 1.0\nContent-Type: text/plain\nContent-Transfer-Encoding: base64\n\nSGVsbG8gV29ybGQh\n'
-
+    
     let qp_email = 'From: sender@example.com\nTo: recipient@example.com\nSubject: QP Test\nMIME-Version: 1.0\nContent-Type: text/plain\nContent-Transfer-Encoding: quoted-printable\n\nHello=20World=21\n'
-
+    
     # Warmup
     out.print('Warming up...')
-
+    
     let parser = EmailParser.new
-    let _ = parser.parse(simple_email.clone)
-
+    parser.parse(simple_email.clone)
+    
     out.print('  Warmup complete')
-    out.print('')
+    _()
 
     # Benchmark 1: Simple email parsing (1000 iterations)
     out.print('Benchmark 1: Simple email parsing (1000 iterations)...')
-
+    
     let start1 = Instant.new
     let mut i1 = 0
-
+    
     while i1 < 1000 {
-      let _ = parser.parse(simple_email.clone)
-
+      parser.parse(simple_email.clone)
+      
       i1 = i1 + 1
     }
-
-    let _ = start1.elapsed
-
+    
+    start1.elapsed
+    
     out.print('  Complete')
-    out.print('')
+    _()
 
     # Benchmark 2: Multipart parsing (500 iterations)
     out.print('Benchmark 2: Multipart parsing (500 iterations)...')
-
+    
     let start2 = Instant.new
     let mut i2 = 0
-
+    
     while i2 < 500 {
-      let _ = parser.parse(multipart_email.clone)
-
+      parser.parse(multipart_email.clone)
+      
       i2 = i2 + 1
     }
-
-    let _ = start2.elapsed
-
+    
+    start2.elapsed
+    
     out.print('  Complete')
-    out.print('')
+    _()
 
     # Benchmark 3: Base64 decoding (1000 iterations)
     out.print('Benchmark 3: Base64 decoding (1000 iterations)...')
-
+    
     let start3 = Instant.new
     let mut i3 = 0
-
+    
     while i3 < 1000 {
-      let _ = parser.parse(base64_email.clone)
-
+      parser.parse(base64_email.clone)
+      
       i3 = i3 + 1
     }
-
-    let _ = start3.elapsed
-
+    
+    start3.elapsed
+    
     out.print('  Complete')
-    out.print('')
+    _()
 
     # Benchmark 4: Quoted-printable decoding (1000 iterations)
     out.print('Benchmark 4: Quoted-printable decoding (1000 iterations)...')
-
+    
     let start4 = Instant.new
     let mut i4 = 0
-
+    
     while i4 < 1000 {
-      let _ = parser.parse(qp_email.clone)
-
+      parser.parse(qp_email.clone)
+      
       i4 = i4 + 1
     }
-
-    let _ = start4.elapsed
-
+    
+    start4.elapsed
+    
     out.print('  Complete')
-    out.print('')
+    _()
 
     # Benchmark 5: Header parsing (10000 iterations)
     out.print('Benchmark 5: Header parsing (10000 iterations)...')
-
+    
     let start5 = Instant.new
     let mut i5 = 0
-
+    
     while i5 < 10000 {
-      let _ = parser.parse_headers(
+      parser.parse_headers(
         'From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n'
           .to_string,
       )
-
+      
       i5 = i5 + 1
     }
-
-    let _ = start5.elapsed
-
+    
+    start5.elapsed
+    
     out.print('  Complete')
-    out.print('')
+    _()
 
     # Benchmark 6: Address parsing (5000 iterations)
     out.print('Benchmark 6: Address parsing (5000 iterations)...')
-
+    
     let start6 = Instant.new
     let mut i6 = 0
-
+    
     while i6 < 5000 {
-      let _ = parser.parse_address_list(
+      parser.parse_address_list(
         Option.Some(
           'John Doe <john@example.com>, Jane <jane@example.com>'.to_string,
         ),
       )
-
+      
       i6 = i6 + 1
     }
-
-    let _ = start6.elapsed
-
+    
+    start6.elapsed
+    
     out.print('  Complete')
-    out.print('')
+    out.print('All benchmarks complete!')
 
     out.print('All benchmarks complete!')
   }
