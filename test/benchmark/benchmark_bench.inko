@@ -30,7 +30,7 @@ type async Main {
     parser.parse(simple_email.clone)
 
     out.print('  Warmup complete')
-    _()
+    out.print('')
 
     # Benchmark 1: Simple email parsing (1000 iterations)
     out.print('Benchmark 1: Simple email parsing (1000 iterations)...')
@@ -44,10 +44,9 @@ type async Main {
       i1 = i1 + 1
     }
 
-    start1.elapsed
+    let elapsed1 = start1.elapsed
 
-    out.print('  Complete')
-    _()
+    out.print('  ${elapsed1.to_millis} ms')
 
     # Benchmark 2: Multipart parsing (500 iterations)
     out.print('Benchmark 2: Multipart parsing (500 iterations)...')
@@ -61,10 +60,9 @@ type async Main {
       i2 = i2 + 1
     }
 
-    start2.elapsed
+    let elapsed2 = start2.elapsed
 
-    out.print('  Complete')
-    _()
+    out.print('  ${elapsed2.to_millis} ms')
 
     # Benchmark 3: Base64 decoding (1000 iterations)
     out.print('Benchmark 3: Base64 decoding (1000 iterations)...')
@@ -78,10 +76,9 @@ type async Main {
       i3 = i3 + 1
     }
 
-    start3.elapsed
+    let elapsed3 = start3.elapsed
 
-    out.print('  Complete')
-    _()
+    out.print('  ${elapsed3.to_millis} ms')
 
     # Benchmark 4: Quoted-printable decoding (1000 iterations)
     out.print('Benchmark 4: Quoted-printable decoding (1000 iterations)...')
@@ -95,10 +92,9 @@ type async Main {
       i4 = i4 + 1
     }
 
-    start4.elapsed
+    let elapsed4 = start4.elapsed
 
-    out.print('  Complete')
-    _()
+    out.print('  ${elapsed4.to_millis} ms')
 
     # Benchmark 5: Header parsing (10000 iterations)
     out.print('Benchmark 5: Header parsing (10000 iterations)...')
@@ -115,10 +111,9 @@ type async Main {
       i5 = i5 + 1
     }
 
-    start5.elapsed
+    let elapsed5 = start5.elapsed
 
-    out.print('  Complete')
-    _()
+    out.print('  ${elapsed5.to_millis} ms')
 
     # Benchmark 6: Address parsing (5000 iterations)
     out.print('Benchmark 6: Address parsing (5000 iterations)...')
@@ -136,11 +131,11 @@ type async Main {
       i6 = i6 + 1
     }
 
-    start6.elapsed
+    let elapsed6 = start6.elapsed
 
-    out.print('  Complete')
-    out.print('All benchmarks complete!')
+    out.print('  ${elapsed6.to_millis} ms')
 
+    out.print('')
     out.print('All benchmarks complete!')
   }
 }

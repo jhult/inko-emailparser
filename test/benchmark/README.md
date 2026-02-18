@@ -105,11 +105,11 @@ let test_data = 'your test data here'
 let start = Instant.new
 let mut i = 0
 while i < N {
-  let _ = parser.parse(test_data)
+  parser.parse(test_data)
   i = i + 1
 }
-let _ = start.elapsed
-out.print('  Complete')
+let elapsed = start.elapsed
+out.print('  ${elapsed.to_millis} ms')
 ```
 
 2. Run the benchmark suite and verify it works
@@ -118,6 +118,5 @@ out.print('  Complete')
 ## Notes
 
 - Inko does not have a built-in benchmark framework like Rust's criterion
-- The `Instant.elapsed` return type `Duration` which cannot be converted to string for display
-- This benchmark suite provides basic timing infrastructure without detailed statistics
+- Timing is measured via `Instant.elapsed` which returns a `Duration` with `to_millis` for millisecond output
 - For more advanced benchmarking, consider integrating with external tools

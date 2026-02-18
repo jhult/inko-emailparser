@@ -91,13 +91,31 @@ echo "Running parsing benchmarks..."
 PARSING_OUTPUT=$(inko run test/benchmark/benchmark_bench.inko 2>&1)
 echo "$PARSING_OUTPUT" | tee "$RESULTS_DIR/parsing-$TIMESTAMP.log"
 
-# Note: Since the benchmark output doesn't include timing stats,
-# we'll create a placeholder JSON with the timestamp
+# Parse timing results from benchmark output
+# Each benchmark outputs "  <N> ms" on the line after its header
+parse_ms() {
+	local label="$1"
+	echo "$PARSING_OUTPUT" | grep -A1 "$label" | grep -oE '[0-9]+' | head -1
+}
+
+SIMPLE_MS=$(parse_ms "Benchmark 1:")
+MULTIPART_MS=$(parse_ms "Benchmark 2:")
+BASE64_MS=$(parse_ms "Benchmark 3:")
+QP_MS=$(parse_ms "Benchmark 4:")
+HEADER_MS=$(parse_ms "Benchmark 5:")
+ADDRESS_MS=$(parse_ms "Benchmark 6:")
+
+# Generate JSON results file
 cat >"$RESULTS_FILE" <<EOF
 {
   "timestamp": "$TIMESTAMP",
   "benchmarks": {
-    "note": "Benchmark execution completed. Check log file for details."
+    "simple_email_1000": {"ms": ${SIMPLE_MS:-0}, "iterations": 1000},
+    "multipart_500": {"ms": ${MULTIPART_MS:-0}, "iterations": 500},
+    "base64_1000": {"ms": ${BASE64_MS:-0}, "iterations": 1000},
+    "quoted_printable_1000": {"ms": ${QP_MS:-0}, "iterations": 1000},
+    "header_parsing_10000": {"ms": ${HEADER_MS:-0}, "iterations": 10000},
+    "address_parsing_5000": {"ms": ${ADDRESS_MS:-0}, "iterations": 5000}
   }
 }
 EOF
