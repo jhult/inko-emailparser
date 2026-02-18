@@ -1,0 +1,306 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Tests for header parsing module
+#
+# Tests is_valid_field_name, sanitize_filename, extract_extra_headers,
+# and header parsing behavior through the EmailParser API.
+
+import emailparser (EmailParser)
+import emailparser.header (
+  extract_extra_headers, is_valid_field_name, sanitize_filename,
+)
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  # ============================================================
+  # is_valid_field_name tests
+  # ============================================================
+
+  t.test('valid_field_name_simple', fn (t) {
+    t.true(is_valid_field_name('From'))
+    t.true(is_valid_field_name('To'))
+    t.true(is_valid_field_name('Subject'))
+    t.true(is_valid_field_name('X-Custom-Header'))
+  })
+
+  t.test('valid_field_name_all_printable_ascii', fn (t) {
+    # RFC 5322: ftext = %d33-57 / %d59-126 (printable ASCII except colon)
+    t.true(is_valid_field_name('!'))
+    t.true(is_valid_field_name('~'))
+    t.true(is_valid_field_name('A-Z'))
+    t.true(is_valid_field_name('Content-Type'))
+  })
+
+  t.test('invalid_field_name_empty', fn (t) { t.false(is_valid_field_name('')) })
+
+  t.test('invalid_field_name_contains_colon', fn (t) {
+    t.false(is_valid_field_name('Field:Name'))
+    t.false(is_valid_field_name(':'))
+  })
+
+  t.test('invalid_field_name_contains_space', fn (t) {
+    t.false(is_valid_field_name('Field Name'))
+    t.false(is_valid_field_name(' Leading'))
+    t.false(is_valid_field_name('Trailing '))
+  })
+
+  t.test('invalid_field_name_control_chars', fn (t) {
+    # Control characters (< 33) are invalid
+    t.false(is_valid_field_name('\t'))
+    t.false(is_valid_field_name('\n'))
+    t.false(is_valid_field_name('\r'))
+  })
+
+  # ============================================================
+  # sanitize_filename tests
+  # ============================================================
+
+  t.test('sanitize_filename_valid', fn (t) {
+    t.equal(sanitize_filename('document.pdf'), Option.Some('document.pdf'))
+    t.equal(sanitize_filename('file'), Option.Some('file'))
+    t.equal(sanitize_filename('my-file_v2'), Option.Some('my-file_v2'))
+  })
+
+  t.test('sanitize_filename_empty', fn (t) {
+    t.equal(sanitize_filename(''), Option.None)
+  })
+
+  t.test('sanitize_filename_path_traversal', fn (t) {
+    t.equal(sanitize_filename('../etc/passwd'), Option.None)
+    t.equal(sanitize_filename('..'), Option.None)
+    t.equal(sanitize_filename('foo/../bar'), Option.None)
+  })
+
+  t.test('sanitize_filename_path_separators', fn (t) {
+    t.equal(sanitize_filename('/etc/passwd'), Option.None)
+    t.equal(sanitize_filename('C:\\Windows\\system32'), Option.None)
+    t.equal(sanitize_filename('dir/file'), Option.None)
+  })
+
+  t.test('sanitize_filename_windows_reserved', fn (t) {
+    t.equal(sanitize_filename('CON'), Option.None)
+    t.equal(sanitize_filename('PRN'), Option.None)
+    t.equal(sanitize_filename('AUX'), Option.None)
+    t.equal(sanitize_filename('NUL'), Option.None)
+    t.equal(sanitize_filename('COM1'), Option.None)
+    t.equal(sanitize_filename('LPT1'), Option.None)
+    # Case-insensitive
+    t.equal(sanitize_filename('con'), Option.None)
+    t.equal(sanitize_filename('Con'), Option.None)
+    # Reserved name with extension
+    t.equal(sanitize_filename('CON.txt'), Option.None)
+  })
+
+  t.test('sanitize_filename_windows_special_chars', fn (t) {
+    t.equal(sanitize_filename('file<name'), Option.None)
+    t.equal(sanitize_filename('file>name'), Option.None)
+    t.equal(sanitize_filename('file:name'), Option.None)
+    t.equal(sanitize_filename('file"name'), Option.None)
+    t.equal(sanitize_filename('file|name'), Option.None)
+    t.equal(sanitize_filename('file?name'), Option.None)
+    t.equal(sanitize_filename('file*name'), Option.None)
+  })
+
+  t.test('sanitize_filename_leading_trailing_dots', fn (t) {
+    t.equal(sanitize_filename('.hidden'), Option.None)
+    t.equal(sanitize_filename('file.'), Option.None)
+    t.equal(sanitize_filename('.'), Option.None)
+  })
+
+  t.test('sanitize_filename_too_long', fn (t) {
+    let mut long_name = ''
+    let mut i = 0
+
+    while i < 256 {
+      long_name = long_name + 'a'
+      i = i + 1
+    }
+
+    t.equal(sanitize_filename(long_name), Option.None)
+  })
+
+  t.test('sanitize_filename_max_length_ok', fn (t) {
+    let mut name = ''
+    let mut i = 0
+
+    while i < 255 {
+      name = name + 'a'
+      i = i + 1
+    }
+
+    t.true(sanitize_filename(name).some?)
+  })
+
+  # ============================================================
+  # extract_extra_headers tests
+  # ============================================================
+
+  t.test('extract_extra_headers_with_custom', fn (t) {
+    let headers = [
+      ('From', 'test@example.com'),
+      ('To', 'user@example.com'),
+      ('X-Custom', 'value1'),
+      ('Subject', 'Test'),
+      ('X-Mailer', 'TestMailer'),
+    ]
+
+    let extra = extract_extra_headers(headers)
+
+    t.equal(extra.size, 2)
+
+    match extra.get(0) {
+      case Ok(pair) -> {
+        t.equal(pair.0, 'X-Custom')
+        t.equal(pair.1, 'value1')
+      }
+      case Error(_) -> t.true(false)
+    }
+
+    match extra.get(1) {
+      case Ok(pair) -> {
+        t.equal(pair.0, 'X-Mailer')
+        t.equal(pair.1, 'TestMailer')
+      }
+      case Error(_) -> t.true(false)
+    }
+  })
+
+  t.test('extract_extra_headers_none_custom', fn (t) {
+    let headers = [
+      ('From', 'test@example.com'),
+      ('To', 'user@example.com'),
+      ('Subject', 'Test'),
+    ]
+
+    let extra = extract_extra_headers(headers)
+
+    t.equal(extra.size, 0)
+  })
+
+  t.test('extract_extra_headers_empty', fn (t) {
+    let headers: Array[(String, String)] = []
+    let extra = extract_extra_headers(headers)
+
+    t.equal(extra.size, 0)
+  })
+
+  # ============================================================
+  # Header parsing via EmailParser API
+  # ============================================================
+
+  t.test('parse_headers_basic', fn (t) {
+    let parser = EmailParser.new
+    let raw = 'From: test@example.com\nTo: user@example.com\nSubject: Test\n\n'
+    let result = parser.parse_headers(raw)
+
+    match result {
+      case Ok(headers) -> t.equal(headers.size, 3)
+      case Error(_) -> t.true(false)
+    }
+  })
+
+  t.test('parse_headers_folded_between_params', fn (t) {
+    # Folding BETWEEN parameters (after semicolon) should be OK
+    let parser = EmailParser.new
+    let raw = 'Content-Type: multipart/mixed; charset=utf-8;\n boundary=abc123\n\n'
+    let result = parser.parse_headers(raw)
+
+    match result {
+      case Ok(headers) -> t.equal(headers.size, 1)
+      case Error(_) -> t.true(false)
+    }
+  })
+
+  t.test('parse_headers_suspicious_folding_single_param', fn (t) {
+    # Folding within a parameter value (no semicolon after =) is suspicious
+    let parser = EmailParser.new
+    let raw = 'Content-Type: multipart/mixed; boundary=abc\n 123\n\n'
+    let result = parser.parse_headers(raw)
+
+    match result {
+      case Ok(_) -> t.true(false)
+      case Error(e) -> t.true(e.contains?('suspicious folding'))
+    }
+  })
+
+  t.test('parse_headers_suspicious_folding_multi_param', fn (t) {
+    # Folding in the LAST parameter value should be caught
+    # even when earlier parameters have semicolons after their '='
+    let parser = EmailParser.new
+    let raw = 'Content-Type: multipart/mixed; charset=utf-8; boundary=abc\n 123\n\n'
+    let result = parser.parse_headers(raw)
+
+    match result {
+      case Ok(_) -> t.true(false)
+      case Error(e) -> t.true(e.contains?('suspicious folding'))
+    }
+  })
+
+  t.test('parse_headers_max_count_strict', fn (t) {
+    let parser = EmailParser.new.with_strict_mode(true).with_max_headers(2)
+
+    # 4 headers exceeds limit of 2 (error triggers when 3rd header
+    # sees size 2 already in array)
+    let raw = 'From: a@b.com\nTo: c@d.com\nSubject: X\nDate: Mon, 01 Jan 2026 00:00:00 +0000\n\n'
+
+    match parser.parse_headers(raw) {
+      case Ok(_) -> t.true(false)
+      case Error(e) -> t.true(e.contains?('Maximum number of headers exceeded'))
+    }
+  })
+
+  t.test('parse_headers_empty_field_name_rejected', fn (t) {
+    let parser = EmailParser.new
+    # Header line starting with colon has empty field name
+    let raw = ': value\n\n'
+
+    match parser.parse_headers(raw) {
+      case Ok(_) -> t.true(false)
+      case Error(e) -> t.true(e.contains?('Invalid header field name'))
+    }
+  })
+
+  t.test('parse_headers_no_colon_rejected', fn (t) {
+    let parser = EmailParser.new
+    let raw = 'This line has no colon\n\n'
+
+    match parser.parse_headers(raw) {
+      case Ok(_) -> t.true(false)
+      case Error(e) -> t.true(e.contains?('no colon found'))
+    }
+  })
+
+  t.test('parse_headers_crlf_handling', fn (t) {
+    let parser = EmailParser.new
+    let raw = 'From: test@example.com\r\nTo: user@example.com\r\n\r\n'
+    let result = parser.parse_headers(raw)
+
+    match result {
+      case Ok(headers) -> t.equal(headers.size, 2)
+      case Error(_) -> t.true(false)
+    }
+  })
+
+  t.test('parse_headers_value_at_max_length_lax', fn (t) {
+    let parser = EmailParser.new
+
+    # Create a header value close to 8192 bytes
+    let mut long_value = ''
+    let mut i = 0
+
+    while i < 8190 {
+      long_value = long_value + 'x'
+      i = i + 1
+    }
+
+    let raw = 'Subject: ' + long_value + '\n\n'
+    let result = parser.parse_headers(raw)
+
+    match result {
+      case Ok(headers) -> t.equal(headers.size, 1)
+      case Error(_) -> t.true(false)
+    }
+  })
+}
