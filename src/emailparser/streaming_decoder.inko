@@ -347,6 +347,7 @@ impl QuotedPrintableStreamingDecoder {
                     i = i + 2
                   } else if next1 == ASCII_EQUALS {
                     # == special case: treat as literal =
+                    # This is a common encoding for literal = in the wild
                     output.push(ASCII_EQUALS)
                     i = i + 2
                   } else {
