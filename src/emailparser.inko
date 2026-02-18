@@ -797,21 +797,6 @@ impl EmailParser {
             'missing boundary parameter for multipart Content-Type',
             Option.None,
             Option.None,
-            Option.None,
-          )
-          .to_message,
-      )
-    }
-
-    # Validate that multipart Content-Type has boundary parameter
-    if is_multipart(ct_main) and !boundary_valid {
-      return Result.Error(
-        Error
-          .InvalidBoundary(
-            Severity.Error,
-            'missing boundary parameter for multipart Content-Type',
-            Option.None,
-            Option.None,
             Option.Some(ct_main),
           )
           .to_message,
@@ -841,7 +826,7 @@ impl EmailParser {
           body_raw,
           ct_main,
           content_transfer_encoding,
-          @config.max_email_size,
+          @config.max_attachment_size,
         )
 
         Result.Ok((text, html, []))
