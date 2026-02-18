@@ -32,7 +32,7 @@ jobs:
     name: Check and Test
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/inko-lang/inko:latest
+      image: ghcr.io/inko-lang/inko:main
     needs: [license-check]
 
     steps:
@@ -49,7 +49,7 @@ jobs:
     name: Performance Benchmarks
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/inko-lang/inko:latest
+      image: ghcr.io/inko-lang/inko:main
     needs: [license-check, check-and-test]
 
     steps:
