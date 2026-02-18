@@ -112,7 +112,7 @@ impl StreamHandler for FileAttachmentSaver {
   fn pub mut on_begin -> Result[Int, String] {
     @attachment_count = 0
 
-    if @verbose { Stdout.new.print('Starting email parsing...') }
+    if @verbose { let _ = Stdout.new.print('Starting email parsing...') }
 
     Result.Ok(0)
   }
@@ -121,7 +121,7 @@ impl StreamHandler for FileAttachmentSaver {
   fn pub mut on_headers(
     headers: ref Array[(String, String)],
   ) -> Result[Int, String] {
-    if @verbose { Stdout.new.print('Headers parsed successfully') }
+    if @verbose { let _ = Stdout.new.print('Headers parsed successfully') }
 
     Result.Ok(0)
   }
@@ -129,7 +129,9 @@ impl StreamHandler for FileAttachmentSaver {
   # Called when text body chunk arrives
   fn pub mut on_text_chunk(chunk: String) -> Result[Int, String] {
     if @verbose and chunk.size > 0 {
-      Stdout.new.print('Text body chunk: ' + chunk.size.to_string + ' bytes')
+      let _ = Stdout.new.print(
+        'Text body chunk: ' + chunk.size.to_string + ' bytes',
+      )
     }
 
     Result.Ok(0)
@@ -138,7 +140,9 @@ impl StreamHandler for FileAttachmentSaver {
   # Called when HTML body chunk arrives
   fn pub mut on_html_chunk(chunk: String) -> Result[Int, String] {
     if @verbose and chunk.size > 0 {
-      Stdout.new.print('HTML body chunk: ' + chunk.size.to_string + ' bytes')
+      let _ = Stdout.new.print(
+        'HTML body chunk: ' + chunk.size.to_string + ' bytes',
+      )
     }
 
     Result.Ok(0)
@@ -155,12 +159,12 @@ impl StreamHandler for FileAttachmentSaver {
         let output_path = create_output_path(filename)
 
         if @verbose {
-          Stdout.new.print(
+          let _ = Stdout.new.print(
             'Attachment #' + info.index.to_string + ': ' + filename,
           )
-          Stdout.new.print('  Content-Type: ' + info.content_type)
-          Stdout.new.print('  Encoding: ' + info.transfer_encoding)
-          Stdout.new.print('  Saving to: ' + output_path)
+          let _ = Stdout.new.print('  Content-Type: ' + info.content_type)
+          let _ = Stdout.new.print('  Encoding: ' + info.transfer_encoding)
+          let _ = Stdout.new.print('  Saving to: ' + output_path)
         }
 
         # Create output file tracker (simulating file creation)
@@ -169,7 +173,7 @@ impl StreamHandler for FileAttachmentSaver {
       }
       case None -> {
         if @verbose {
-          Stdout.new.print(
+          let _ = Stdout.new.print(
             'Attachment #' + info.index.to_string + ': unnamed (skipping)',
           )
         }
@@ -197,7 +201,7 @@ impl StreamHandler for FileAttachmentSaver {
 
         if @verbose {
           if file.chunk_count == 1 or file.chunk_count % 100 == 0 {
-            Stdout.new.print(
+            let _ = Stdout.new.print(
               '  Chunk #'
                 + file.chunk_count.to_string
                 + ': '
@@ -224,7 +228,7 @@ impl StreamHandler for FileAttachmentSaver {
     match @current_file {
       case Some(file) -> {
         if @verbose {
-          Stdout.new.print(
+          let _ = Stdout.new.print(
             '  Completed: '
               + file.chunk_count.to_string
               + ' chunks, '
@@ -244,8 +248,8 @@ impl StreamHandler for FileAttachmentSaver {
   # Called when parsing completes successfully
   fn pub mut on_end -> Result[Int, String] {
     if @verbose {
-      Stdout.new.print('Parsing complete!')
-      Stdout.new.print(
+      let _ = Stdout.new.print('Parsing complete!')
+      let _ = Stdout.new.print(
         'Total attachments saved: ' + @attachment_count.to_string,
       )
     }
@@ -255,7 +259,8 @@ impl StreamHandler for FileAttachmentSaver {
 
   # Called when an error occurs
   fn pub mut on_error(error: String) -> Result[Int, String] {
-    Stderr.new.print('Error: ' + error)
+    let _ = Stderr.new.print('Error: ' + error)
+
     Result.Ok(0)
   }
 }
@@ -266,14 +271,16 @@ type async Main {
     let out = Stdout.new
     let err = Stderr.new
 
-    out.print('=== FileAttachmentSaver Example ===')
-    out.print('This example demonstrates saving email attachments to disk')
-    out.print('')
+    let _ = out.print('=== FileAttachmentSaver Example ===')
+    let _ = out.print(
+      'This example demonstrates saving email attachments to disk',
+    )
+    let _ = out.print('')
 
     # Generate a test email with attachments
     let mut generator = TestDataGenerator.new
 
-    out.print('Generating test email with 3 attachments...')
+    let _ = out.print('Generating test email with 3 attachments...')
 
     let attachments = [
       TestAttachment(
@@ -298,37 +305,42 @@ type async Main {
 
     let email = generator.generate_email_with_attachments(attachments)
 
-    out.print('Test email generated (' + email.size.to_string + ' bytes)')
-    out.print('')
+    let _ = out.print(
+      'Test email generated (' + email.size.to_string + ' bytes)',
+    )
+    let _ = out.print('')
 
     # Create the handler with verbose output
     let mut saver = FileAttachmentSaver.new('./attachments', true)
 
     # Parse the email using streaming API
-    out.print('Parsing email with streaming API...')
+    let _ = out.print('Parsing email with streaming API...')
 
     let parser = StreamingParser.new
 
     match parser.parse_stream(email, saver) {
       case Ok(result) -> {
-        out.print('')
-        out.print('=== Parsing Results ===')
-        out.print('Subject: ' + result.subject)
-        out.print('From: ' + result.from.address)
+        let _ = out.print('')
+        let _ = out.print('=== Parsing Results ===')
+        let _ = out.print('Subject: ' + result.subject)
+        let _ = out.print('From: ' + result.from.address)
 
         let first_to = match result.to.iter.next {
           case Some(addr) -> addr.address
           case None -> 'n/a'
         }
 
-        out.print('To: ' + first_to)
-        out.print('Content-Type: ' + result.content_type)
-        out.print('Attachment count: ' + result.attachment_count.to_string)
-        out.print('')
-        out.print('All attachments processed successfully!')
+        let _ = out.print('To: ' + first_to)
+        let _ = out.print('Content-Type: ' + result.content_type)
+        let _ = out.print(
+          'Attachment count: ' + result.attachment_count.to_string,
+        )
+        let _ = out.print('')
+        let _ = out.print('All attachments processed successfully!')
       }
       case Error(e) -> {
-        err.print('Failed to parse email: ' + e)
+        let _ = err.print('Failed to parse email: ' + e)
+
         return
       }
     }
