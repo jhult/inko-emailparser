@@ -173,41 +173,64 @@ fn decode_hex_sequence(
         } else if byte == ASCII_EQUALS {
           if i + 2 < text.size {
             match text.get(i + 1) {
-              case Ok(hex1) -> {
-                match text.get(i + 2) {
-                  case Ok(hex2) -> {
-                    let hex_str = two_bytes_to_hex_string(hex1, hex2)
-
-                    match parse_hex_byte(hex_str) {
-                      case Some(decoded_byte) -> {
-                        result_bytes.push(decoded_byte)
+              case Ok(next1) -> {
+                if next1 == ASCII_CR {
+                  match text.get(i + 2) {
+                    case Ok(next2) -> {
+                      if next2 == ASCII_LF {
                         i = i + 3
-                      }
-                      case None -> {
+                      } else {
                         if preserve_equals_on_error {
                           result_bytes.push(ASCII_EQUALS)
-                        } else {
-                          # Push Unicode replacement character U+FFFD (UTF-8: 239, 191, 189)
-                          for byte in UNICODE_REPLACEMENT_CHAR_UTF8.iter {
-                            result_bytes.push(byte)
-                          }
                         }
 
                         i = i + 1
                       }
                     }
+                    case Error(_) -> {
+                      if preserve_equals_on_error {
+                        result_bytes.push(ASCII_EQUALS)
+                      }
+
+                      i = i + 1
+                    }
                   }
-                  case Error(_) -> {
-                    if preserve_equals_on_error {
-                      result_bytes.push(ASCII_EQUALS)
-                    } else {
-                      # Push Unicode replacement character U+FFFD (UTF-8: 239, 191, 189)
-                      for byte in UNICODE_REPLACEMENT_CHAR_UTF8.iter {
-                        result_bytes.push(byte)
+                } else if next1 == ASCII_LF {
+                  i = i + 2
+                } else {
+                  match text.get(i + 2) {
+                    case Ok(hex2) -> {
+                      let hex_str = two_bytes_to_hex_string(next1, hex2)
+
+                      match parse_hex_byte(hex_str) {
+                        case Some(decoded_byte) -> {
+                          result_bytes.push(decoded_byte)
+                          i = i + 3
+                        }
+                        case None -> {
+                          if preserve_equals_on_error {
+                            result_bytes.push(ASCII_EQUALS)
+                          } else {
+                            for byte in UNICODE_REPLACEMENT_CHAR_UTF8.iter {
+                              result_bytes.push(byte)
+                            }
+                          }
+
+                          i = i + 1
+                        }
                       }
                     }
+                    case Error(_) -> {
+                      if preserve_equals_on_error {
+                        result_bytes.push(ASCII_EQUALS)
+                      } else {
+                        for byte in UNICODE_REPLACEMENT_CHAR_UTF8.iter {
+                          result_bytes.push(byte)
+                        }
+                      }
 
-                    i = i + 1
+                      i = i + 1
+                    }
                   }
                 }
               }
@@ -215,7 +238,6 @@ fn decode_hex_sequence(
                 if preserve_equals_on_error {
                   result_bytes.push(ASCII_EQUALS)
                 } else {
-                  # Push Unicode replacement character U+FFFD (UTF-8: 239, 191, 189)
                   for byte in UNICODE_REPLACEMENT_CHAR_UTF8.iter {
                     result_bytes.push(byte)
                   }
@@ -228,7 +250,6 @@ fn decode_hex_sequence(
             if preserve_equals_on_error {
               result_bytes.push(ASCII_EQUALS)
             } else {
-              # Push Unicode replacement character U+FFFD (UTF-8: 239, 191, 189)
               for byte in UNICODE_REPLACEMENT_CHAR_UTF8.iter {
                 result_bytes.push(byte)
               }

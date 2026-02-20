@@ -42,7 +42,13 @@ fn pub tests(t: mut Tests) {
   t.test('decode_quoted_printable_soft_line_break', fn (t) {
     let decoded = decode_quoted_printable('Line one=\r\nLine two')
 
-    t.equal(decoded, 'Line one=\r\nLine two')
+    t.equal(decoded, 'Line oneLine two')
+  })
+
+  t.test('decode_quoted_printable_soft_line_break_lf_only', fn (t) {
+    let decoded = decode_quoted_printable('Line one=\nLine two')
+
+    t.equal(decoded, 'Line oneLine two')
   })
 
   t.test('decode_quoted_printable_multiline', fn (t) {
