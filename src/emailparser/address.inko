@@ -252,6 +252,36 @@ fn extract_addr_spec(input: String) -> Option[String] {
   }
 }
 
+fn is_colon_outside_delimiters(input: String, pos: Int) -> Bool {
+  let mut in_quote = false
+  let mut paren_depth = 0
+  let mut angle_depth = 0
+  let mut i = 0
+
+  while i < input.size and i < pos {
+    match input.get(i) {
+      case Ok(byte) -> {
+        if byte == 34 {
+          in_quote = if in_quote { false } else { true }
+        } else if byte == 40 and in_quote == false {
+          paren_depth = paren_depth + 1
+        } else if byte == 41 and in_quote == false {
+          if paren_depth > 0 { paren_depth = paren_depth - 1 }
+        } else if byte == 60 and in_quote == false and paren_depth == 0 {
+          angle_depth = angle_depth + 1
+        } else if byte == 62 and in_quote == false and paren_depth == 0 {
+          if angle_depth > 0 { angle_depth = angle_depth - 1 }
+        }
+      }
+      case Error(_) -> {}
+    }
+
+    i = i + 1
+  }
+
+  in_quote == false and paren_depth == 0 and angle_depth == 0
+}
+
 fn parse_single_address(input: String) -> Option[EmailAddress] {
   let cleaned = remove_comments(input)
   let (name_opt, remaining) = extract_display_name(cleaned)
@@ -267,10 +297,25 @@ fn parse_single_address(input: String) -> Option[EmailAddress] {
 fn pub parse_comma_separated_addresses(input: String) -> Array[EmailAddress] {
   # RFC 5322 group addresses use syntax: group-name: mailbox-list;
   # We don't support parsing groups, so return empty if detected
-  match input.index_of(':', 0) {
-    case Some(_) -> return []
-    case None -> {}
+  # Only treat as group if colon is outside quotes/parens/angle brackets
+  let mut colon_pos = 0
+  let mut found_group_colon = false
+
+  loop {
+    match input.index_of(':', colon_pos) {
+      case Some(pos) -> {
+        if is_colon_outside_delimiters(input, pos) {
+          found_group_colon = true
+          break
+        }
+
+        colon_pos = pos + 1
+      }
+      case None -> break
+    }
   }
+
+  if found_group_colon { return [] }
 
   let mut result = []
   let mut current = [] as Array[Int]
@@ -329,9 +374,24 @@ fn parse_address_list_impl(
   match raw {
     case Some(_) -> {
       let mut result = []
-      let colon_pos = decoded.index_of(':', 0)
+      let mut colon_pos = 0
+      let mut group_colon_opt = Option.None
 
-      match colon_pos {
+      loop {
+        match decoded.index_of(':', colon_pos) {
+          case Some(pos) -> {
+            if is_colon_outside_delimiters(decoded, pos) {
+              group_colon_opt = Option.Some(pos)
+              break
+            }
+
+            colon_pos = pos + 1
+          }
+          case None -> break
+        }
+      }
+
+      match group_colon_opt {
         case Some(colon) -> {
           let _group_name = decoded.substring(0, colon).trim
           let group_content = decoded.substring(colon + 1, decoded.size)
