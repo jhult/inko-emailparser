@@ -698,8 +698,10 @@ fn get_param_value_impl(
   params: ref Array[(String, String)],
   key: String,
 ) -> Option[String] {
+  let key_lower = key.to_lower
+
   for (k, v) in params.iter {
-    if k == key { return Option.Some(v.clone) }
+    if k.to_lower == key_lower { return Option.Some(v.clone) }
   }
 
   Option.None
