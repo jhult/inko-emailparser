@@ -899,12 +899,12 @@ fn is_multipart(content_type: String) -> Bool {
 
 # Check if content type is text/plain
 fn is_text_plain(content_type: String) -> Bool {
-  content_type.starts_with?('text/plain')
+  content_type == 'text/plain'
 }
 
 # Check if content type is text/html
 fn is_text_html(content_type: String) -> Bool {
-  content_type.starts_with?('text/html')
+  content_type == 'text/html'
 }
 
 # Parse body with streaming callbacks
@@ -938,6 +938,7 @@ fn parse_body_stream[H: mut + StreamHandler](
       body_raw,
       content_transfer_encoding,
       config.stream_chunk_size,
+      config.max_attachment_size,
       handler,
     )
     Result.Ok(0)
@@ -946,6 +947,7 @@ fn parse_body_stream[H: mut + StreamHandler](
       body_raw,
       content_transfer_encoding,
       config.stream_chunk_size,
+      config.max_attachment_size,
       handler,
     )
     Result.Ok(0)
@@ -954,11 +956,13 @@ fn parse_body_stream[H: mut + StreamHandler](
   }
 }
 
-# Stream text body in chunks
-fn stream_text_body[H: mut + StreamHandler](
+# Stream body in chunks (shared helper)
+fn stream_body_impl[H: mut + StreamHandler](
   body_raw: String,
   encoding: String,
   chunk_size: Int,
+  max_size: Int,
+  is_html: Bool,
   handler: mut H,
 ) {
   let mut decoder: Option[Base64StreamingDecoder] = Option.None
@@ -966,10 +970,10 @@ fn stream_text_body[H: mut + StreamHandler](
   let encoding_lower = encoding.to_lower
 
   if encoding_lower == 'base64' {
-    decoder = Option.Some(Base64StreamingDecoder.new(50_000_000, false))
+    decoder = Option.Some(Base64StreamingDecoder.new(max_size, false))
   } else if encoding_lower == 'quoted-printable' {
     qp_decoder = Option.Some(
-      QuotedPrintableStreamingDecoder.new(50_000_000, false, false),
+      QuotedPrintableStreamingDecoder.new(max_size, false, false),
     )
   }
 
@@ -989,7 +993,13 @@ fn stream_text_body[H: mut + StreamHandler](
               }
               let chunk = decoded_str.substring(pos, end)
 
-              match handler.on_text_chunk(chunk) {
+              let result = if is_html {
+                handler.on_html_chunk(chunk)
+              } else {
+                handler.on_text_chunk(chunk)
+              }
+
+              match result {
                 case Ok(_) -> {}
                 case Error(_) -> return
               }
@@ -1012,7 +1022,13 @@ fn stream_text_body[H: mut + StreamHandler](
                   }
                   let chunk = decoded_str.substring(pos, end)
 
-                  match handler.on_text_chunk(chunk) {
+                  let result = if is_html {
+                    handler.on_html_chunk(chunk)
+                  } else {
+                    handler.on_text_chunk(chunk)
+                  }
+
+                  match result {
                     case Ok(_) -> {}
                     case Error(_) -> return
                   }
@@ -1042,7 +1058,13 @@ fn stream_text_body[H: mut + StreamHandler](
               }
               let chunk = decoded_str.substring(pos, end)
 
-              match handler.on_text_chunk(chunk) {
+              let result = if is_html {
+                handler.on_html_chunk(chunk)
+              } else {
+                handler.on_text_chunk(chunk)
+              }
+
+              match result {
                 case Ok(_) -> {}
                 case Error(_) -> return
               }
@@ -1065,7 +1087,13 @@ fn stream_text_body[H: mut + StreamHandler](
                   }
                   let chunk = decoded_str.substring(pos, end)
 
-                  match handler.on_text_chunk(chunk) {
+                  let result = if is_html {
+                    handler.on_html_chunk(chunk)
+                  } else {
+                    handler.on_text_chunk(chunk)
+                  }
+
+                  match result {
                     case Ok(_) -> {}
                     case Error(_) -> return
                   }
@@ -1093,7 +1121,13 @@ fn stream_text_body[H: mut + StreamHandler](
             }
             let chunk = decoded.substring(pos, end)
 
-            match handler.on_text_chunk(chunk) {
+            let result = if is_html {
+              handler.on_html_chunk(chunk)
+            } else {
+              handler.on_text_chunk(chunk)
+            }
+
+            match result {
               case Ok(_) -> {}
               case Error(_) -> return
             }
@@ -1108,158 +1142,26 @@ fn stream_text_body[H: mut + StreamHandler](
   }
 }
 
+# Stream text body in chunks
+fn stream_text_body[H: mut + StreamHandler](
+  body_raw: String,
+  encoding: String,
+  chunk_size: Int,
+  max_size: Int,
+  handler: mut H,
+) {
+  stream_body_impl(body_raw, encoding, chunk_size, max_size, false, handler)
+}
+
 # Stream HTML body in chunks
 fn stream_html_body[H: mut + StreamHandler](
   body_raw: String,
   encoding: String,
   chunk_size: Int,
+  max_size: Int,
   handler: mut H,
 ) {
-  let mut decoder: Option[Base64StreamingDecoder] = Option.None
-  let mut qp_decoder: Option[QuotedPrintableStreamingDecoder] = Option.None
-  let encoding_lower = encoding.to_lower
-
-  if encoding_lower == 'base64' {
-    decoder = Option.Some(Base64StreamingDecoder.new(50_000_000, false))
-  } else if encoding_lower == 'quoted-printable' {
-    qp_decoder = Option.Some(
-      QuotedPrintableStreamingDecoder.new(50_000_000, false, false),
-    )
-  }
-
-  match (decoder, qp_decoder) {
-    case (Some(mut d), None) -> {
-      match d.feed(body_raw) {
-        case Ok(decoded) -> {
-          if decoded.size > 0 {
-            let decoded_str = decoded.into_string
-            let mut pos = 0
-
-            while pos < decoded_str.size {
-              let end = if pos + chunk_size > decoded_str.size {
-                decoded_str.size
-              } else {
-                pos + chunk_size
-              }
-              let chunk = decoded_str.substring(pos, end)
-
-              match handler.on_html_chunk(chunk) {
-                case Ok(_) -> {}
-                case Error(_) -> return
-              }
-
-              pos = end
-            }
-          }
-
-          match d.finish {
-            case Ok(decoded) -> {
-              if decoded.size > 0 {
-                let decoded_str = decoded.into_string
-                let mut pos = 0
-
-                while pos < decoded_str.size {
-                  let end = if pos + chunk_size > decoded_str.size {
-                    decoded_str.size
-                  } else {
-                    pos + chunk_size
-                  }
-                  let chunk = decoded_str.substring(pos, end)
-
-                  match handler.on_html_chunk(chunk) {
-                    case Ok(_) -> {}
-                    case Error(_) -> return
-                  }
-
-                  pos = end
-                }
-              }
-            }
-            case Error(_) -> {}
-          }
-        }
-        case Error(_) -> {}
-      }
-    }
-    case (None, Some(mut d)) -> {
-      match d.feed(body_raw) {
-        case Ok(decoded) -> {
-          if decoded.size > 0 {
-            let decoded_str = decoded.into_string
-            let mut pos = 0
-
-            while pos < decoded_str.size {
-              let end = if pos + chunk_size > decoded_str.size {
-                decoded_str.size
-              } else {
-                pos + chunk_size
-              }
-              let chunk = decoded_str.substring(pos, end)
-
-              match handler.on_html_chunk(chunk) {
-                case Ok(_) -> {}
-                case Error(_) -> return
-              }
-
-              pos = end
-            }
-          }
-
-          match d.finish {
-            case Ok(decoded) -> {
-              if decoded.size > 0 {
-                let decoded_str = decoded.into_string
-                let mut pos = 0
-
-                while pos < decoded_str.size {
-                  let end = if pos + chunk_size > decoded_str.size {
-                    decoded_str.size
-                  } else {
-                    pos + chunk_size
-                  }
-                  let chunk = decoded_str.substring(pos, end)
-
-                  match handler.on_html_chunk(chunk) {
-                    case Ok(_) -> {}
-                    case Error(_) -> return
-                  }
-
-                  pos = end
-                }
-              }
-            }
-            case Error(_) -> {}
-          }
-        }
-        case Error(_) -> {}
-      }
-    }
-    case (None, None) -> {
-      match decode_body_impl(body_raw, encoding, 50_000_000) {
-        case Ok(decoded) -> {
-          let mut pos = 0
-
-          while pos < decoded.size {
-            let end = if pos + chunk_size > decoded.size {
-              decoded.size
-            } else {
-              pos + chunk_size
-            }
-            let chunk = decoded.substring(pos, end)
-
-            match handler.on_html_chunk(chunk) {
-              case Ok(_) -> {}
-              case Error(_) -> return
-            }
-
-            pos = end
-          }
-        }
-        case Error(_) -> {}
-      }
-    }
-    case _ -> {}
-  }
+  stream_body_impl(body_raw, encoding, chunk_size, max_size, true, handler)
 }
 
 # Helper type for multipart streaming parser
@@ -1284,7 +1186,12 @@ if
     content_type: String,
     is_attachment: Bool,
   ) {
-    @current_content_type = content_type
+    let main_type = match parse_content_type_impl(content_type) {
+      case Ok((mt, _)) -> mt
+      case Error(_) -> content_type
+    }
+
+    @current_content_type = main_type
 
     let content_disposition = get_header_value_impl(
       ref headers,
