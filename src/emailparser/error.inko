@@ -450,30 +450,34 @@ impl Error {
   # Get the severity level of this error
   fn pub severity -> Severity {
     let sev = match self {
-      case EmailSizeTooLarge(_, _, _, _, _, _) -> Severity.Error
-      case AttachmentSizeTooLarge(_, _, _, _, _, _) -> Severity.Error
-      case TooManyHeaders(_, _, _, _, _, _) -> Severity.Error
-      case MultipartDepthExceeded(_, _, _, _, _, _) -> Severity.Error
-      case InvalidHeaderFieldName(_, _, _, _, _) -> Severity.Error
-      case MalformedHeader(_, _, _, _, _) -> Severity.Error
-      case DuplicateHeader(_, _, _, _, _) -> Severity.Warning
-      case HeaderWithoutColon(_, _, _, _) -> Severity.Error
-      case InvalidEmailFormat(_, _, _, _, _) -> Severity.Error
-      case HeaderValueTooLarge(_, _, _, _, _, _) -> Severity.Error
-      case BoundaryNotFound(_, _, _, _) -> Severity.Error
-      case InvalidBoundary(_, _, _, _, _) -> Severity.Error
-      case MultipartWithoutParts(_, _, _, _) -> Severity.Error
-      case NoBodyInPart(_, _, _, _) -> Severity.Error
-      case ParseError(_, _, _, _, _) -> Severity.Error
-      case DecodingFailed(_, _, _, _, _, _) -> Severity.Error
-      case DecodedSizeTooLarge(_, _, _, _, _, _, _) -> Severity.Error
-      case MissingRequiredHeader(_, _, _, _, _) -> Severity.Error
-      case EmptyRequiredHeader(_, _, _, _, _) -> Severity.Error
-      case EmailSizeExceeded(_, _, _, _, _) -> Severity.Error
-      case InvalidContentType(_, _, _, _, _) -> Severity.Error
+      case EmailSizeTooLarge(sev, _, _, _, _, _) -> sev
+      case AttachmentSizeTooLarge(sev, _, _, _, _, _) -> sev
+      case TooManyHeaders(sev, _, _, _, _, _) -> sev
+      case MultipartDepthExceeded(sev, _, _, _, _, _) -> sev
+      case InvalidHeaderFieldName(sev, _, _, _, _) -> sev
+      case MalformedHeader(sev, _, _, _, _) -> sev
+      case DuplicateHeader(sev, _, _, _, _) -> sev
+      case HeaderWithoutColon(sev, _, _, _) -> sev
+      case InvalidEmailFormat(sev, _, _, _, _) -> sev
+      case HeaderValueTooLarge(sev, _, _, _, _, _) -> sev
+      case BoundaryNotFound(sev, _, _, _) -> sev
+      case InvalidBoundary(sev, _, _, _, _) -> sev
+      case MultipartWithoutParts(sev, _, _, _) -> sev
+      case NoBodyInPart(sev, _, _, _) -> sev
+      case ParseError(sev, _, _, _, _) -> sev
+      case DecodingFailed(sev, _, _, _, _, _) -> sev
+      case DecodedSizeTooLarge(sev, _, _, _, _, _, _) -> sev
+      case MissingRequiredHeader(sev, _, _, _, _) -> sev
+      case EmptyRequiredHeader(sev, _, _, _, _) -> sev
+      case EmailSizeExceeded(sev, _, _, _, _) -> sev
+      case InvalidContentType(sev, _, _, _, _) -> sev
     }
 
-    sev
+    match sev {
+      case Warning -> Severity.Warning
+      case Error -> Severity.Error
+      case Fatal -> Severity.Fatal
+    }
   }
 
   # Create a ParseError from a string message (for backward compatibility)
