@@ -987,180 +987,65 @@ fn stream_body_impl[H: mut + StreamHandler](
   is_html: Bool,
   handler: mut H,
 ) {
-  let mut decoder: Option[Base64StreamingDecoder] = Option.None
-  let mut qp_decoder: Option[QuotedPrintableStreamingDecoder] = Option.None
   let encoding_lower = encoding.to_lower
 
   if encoding_lower == 'base64' {
-    decoder = Option.Some(Base64StreamingDecoder.new(max_size, false))
+    let mut d = Base64StreamingDecoder.new(max_size, false)
+
+    match d.feed(body_raw) {
+      case Ok(decoded) -> {
+        if decoded.size > 0 {
+          send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+        }
+
+        match d.finish {
+          case Ok(decoded) -> {
+            if decoded.size > 0 {
+              send_text_chunks(
+                decoded.into_string,
+                chunk_size,
+                is_html,
+                handler,
+              )
+            }
+          }
+          case Error(_) -> {}
+        }
+      }
+      case Error(_) -> {}
+    }
   } else if encoding_lower == 'quoted-printable' {
-    qp_decoder = Option.Some(
-      QuotedPrintableStreamingDecoder.new(max_size, false, false),
-    )
-  }
+    let mut d = QuotedPrintableStreamingDecoder.new(max_size, false, false)
 
-  match (decoder, qp_decoder) {
-    case (Some(mut d), None) -> {
-      match d.feed(body_raw) {
-        case Ok(decoded) -> {
-          if decoded.size > 0 {
-            let decoded_str = decoded.into_string
-            let mut pos = 0
-
-            while pos < decoded_str.size {
-              let end = if pos + chunk_size > decoded_str.size {
-                decoded_str.size
-              } else {
-                pos + chunk_size
-              }
-              let chunk = decoded_str.substring(pos, end)
-
-              let result = if is_html {
-                handler.on_html_chunk(chunk)
-              } else {
-                handler.on_text_chunk(chunk)
-              }
-
-              match result {
-                case Ok(_) -> {}
-                case Error(_) -> return
-              }
-
-              pos = end
-            }
-          }
-
-          match d.finish {
-            case Ok(decoded) -> {
-              if decoded.size > 0 {
-                let decoded_str = decoded.into_string
-                let mut pos = 0
-
-                while pos < decoded_str.size {
-                  let end = if pos + chunk_size > decoded_str.size {
-                    decoded_str.size
-                  } else {
-                    pos + chunk_size
-                  }
-                  let chunk = decoded_str.substring(pos, end)
-
-                  let result = if is_html {
-                    handler.on_html_chunk(chunk)
-                  } else {
-                    handler.on_text_chunk(chunk)
-                  }
-
-                  match result {
-                    case Ok(_) -> {}
-                    case Error(_) -> return
-                  }
-
-                  pos = end
-                }
-              }
-            }
-            case Error(_) -> {}
-          }
+    match d.feed(body_raw) {
+      case Ok(decoded) -> {
+        if decoded.size > 0 {
+          send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
         }
-        case Error(_) -> {}
-      }
-    }
-    case (None, Some(mut d)) -> {
-      match d.feed(body_raw) {
-        case Ok(decoded) -> {
-          if decoded.size > 0 {
-            let decoded_str = decoded.into_string
-            let mut pos = 0
 
-            while pos < decoded_str.size {
-              let end = if pos + chunk_size > decoded_str.size {
-                decoded_str.size
-              } else {
-                pos + chunk_size
-              }
-              let chunk = decoded_str.substring(pos, end)
-
-              let result = if is_html {
-                handler.on_html_chunk(chunk)
-              } else {
-                handler.on_text_chunk(chunk)
-              }
-
-              match result {
-                case Ok(_) -> {}
-                case Error(_) -> return
-              }
-
-              pos = end
+        match d.finish {
+          case Ok(decoded) -> {
+            if decoded.size > 0 {
+              send_text_chunks(
+                decoded.into_string,
+                chunk_size,
+                is_html,
+                handler,
+              )
             }
           }
-
-          match d.finish {
-            case Ok(decoded) -> {
-              if decoded.size > 0 {
-                let decoded_str = decoded.into_string
-                let mut pos = 0
-
-                while pos < decoded_str.size {
-                  let end = if pos + chunk_size > decoded_str.size {
-                    decoded_str.size
-                  } else {
-                    pos + chunk_size
-                  }
-                  let chunk = decoded_str.substring(pos, end)
-
-                  let result = if is_html {
-                    handler.on_html_chunk(chunk)
-                  } else {
-                    handler.on_text_chunk(chunk)
-                  }
-
-                  match result {
-                    case Ok(_) -> {}
-                    case Error(_) -> return
-                  }
-
-                  pos = end
-                }
-              }
-            }
-            case Error(_) -> {}
-          }
+          case Error(_) -> {}
         }
-        case Error(_) -> {}
       }
+      case Error(_) -> {}
     }
-    case (None, None) -> {
-      match decode_body_impl(body_raw, encoding, max_size) {
-        case Ok(decoded) -> {
-          let mut pos = 0
-
-          while pos < decoded.size {
-            let end = if pos + chunk_size > decoded.size {
-              decoded.size
-            } else {
-              pos + chunk_size
-            }
-            let chunk = decoded.substring(pos, end)
-
-            let result = if is_html {
-              handler.on_html_chunk(chunk)
-            } else {
-              handler.on_text_chunk(chunk)
-            }
-
-            match result {
-              case Ok(_) -> {}
-              case Error(_) -> return
-            }
-
-            pos = end
-          }
-        }
-        case Error(_) -> {}
+  } else {
+    match decode_body_impl(body_raw, encoding, max_size) {
+      case Ok(decoded) -> {
+        send_text_chunks(decoded, chunk_size, is_html, handler)
       }
+      case Error(_) -> {}
     }
-    case _ -> {}
   }
 }
 
@@ -1614,7 +1499,9 @@ if
         }
       }
       case None -> {
-        if is_text_plain(@current_content_type) {
+        let is_html = is_text_html(@current_content_type)
+
+        if is_text_plain(@current_content_type) or is_html {
           let encoding_lower = content_transfer_encoding.to_lower
 
           if encoding_lower == 'base64' {
@@ -1632,24 +1519,12 @@ if
                 match d.feed(data_str.into_string) {
                   case Ok(decoded) -> {
                     if decoded.size > 0 {
-                      let decoded_str = decoded.into_string
-                      let mut pos = 0
-
-                      while pos < decoded_str.size {
-                        let end = if pos + @chunk_size > decoded_str.size {
-                          decoded_str.size
-                        } else {
-                          pos + @chunk_size
-                        }
-                        let chunk = decoded_str.substring(pos, end)
-
-                        match @handler.on_text_chunk(chunk) {
-                          case Ok(_) -> {}
-                          case Error(_) -> {}
-                        }
-
-                        pos = end
-                      }
+                      send_text_chunks(
+                        decoded.into_string,
+                        @chunk_size,
+                        is_html,
+                        @handler,
+                      )
                     }
                   }
                   case Error(_) -> {}
@@ -1672,24 +1547,12 @@ if
                 match d.feed(data_str.into_string) {
                   case Ok(decoded) -> {
                     if decoded.size > 0 {
-                      let decoded_str = decoded.into_string
-                      let mut pos = 0
-
-                      while pos < decoded_str.size {
-                        let end = if pos + @chunk_size > decoded_str.size {
-                          decoded_str.size
-                        } else {
-                          pos + @chunk_size
-                        }
-                        let chunk = decoded_str.substring(pos, end)
-
-                        match @handler.on_text_chunk(chunk) {
-                          case Ok(_) -> {}
-                          case Error(_) -> {}
-                        }
-
-                        pos = end
-                      }
+                      send_text_chunks(
+                        decoded.into_string,
+                        @chunk_size,
+                        is_html,
+                        @handler,
+                      )
                     }
                   }
                   case Error(_) -> {}
@@ -1698,99 +1561,12 @@ if
               case None -> {}
             }
           } else {
-            match @handler.on_text_chunk(data_str.into_string) {
-              case Ok(_) -> {}
-              case Error(_) -> {}
-            }
-          }
-        } else if is_text_html(@current_content_type) {
-          let encoding_lower = content_transfer_encoding.to_lower
-
-          if encoding_lower == 'base64' {
-            match @base64_decoder {
-              case None -> {
-                @base64_decoder = Option.Some(
-                  Base64StreamingDecoder.new(@max_size, false),
-                )
-              }
-              case Some(_) -> {}
-            }
-
-            match @base64_decoder {
-              case Some(mut d) -> {
-                match d.feed(data_str.into_string) {
-                  case Ok(decoded) -> {
-                    if decoded.size > 0 {
-                      let decoded_str = decoded.into_string
-                      let mut pos = 0
-
-                      while pos < decoded_str.size {
-                        let end = if pos + @chunk_size > decoded_str.size {
-                          decoded_str.size
-                        } else {
-                          pos + @chunk_size
-                        }
-                        let chunk = decoded_str.substring(pos, end)
-
-                        match @handler.on_html_chunk(chunk) {
-                          case Ok(_) -> {}
-                          case Error(_) -> {}
-                        }
-
-                        pos = end
-                      }
-                    }
-                  }
-                  case Error(_) -> {}
-                }
-              }
-              case None -> {}
-            }
-          } else if encoding_lower == 'quoted-printable' {
-            match @qp_decoder {
-              case None -> {
-                @qp_decoder = Option.Some(
-                  QuotedPrintableStreamingDecoder.new(@max_size, false, false),
-                )
-              }
-              case Some(_) -> {}
-            }
-
-            match @qp_decoder {
-              case Some(mut d) -> {
-                match d.feed(data_str.into_string) {
-                  case Ok(decoded) -> {
-                    if decoded.size > 0 {
-                      let decoded_str = decoded.into_string
-                      let mut pos = 0
-
-                      while pos < decoded_str.size {
-                        let end = if pos + @chunk_size > decoded_str.size {
-                          decoded_str.size
-                        } else {
-                          pos + @chunk_size
-                        }
-                        let chunk = decoded_str.substring(pos, end)
-
-                        match @handler.on_html_chunk(chunk) {
-                          case Ok(_) -> {}
-                          case Error(_) -> {}
-                        }
-
-                        pos = end
-                      }
-                    }
-                  }
-                  case Error(_) -> {}
-                }
-              }
-              case None -> {}
-            }
-          } else {
-            match @handler.on_html_chunk(data_str.into_string) {
-              case Ok(_) -> {}
-              case Error(_) -> {}
-            }
+            send_text_chunks(
+              data_str.into_string,
+              @chunk_size,
+              is_html,
+              @handler,
+            )
           }
         }
       }
@@ -1864,99 +1640,19 @@ if
       }
       case None -> {
         # Handle text/HTML parts without attachment info
-        if is_text_plain(@current_content_type) {
+        let is_html = is_text_html(@current_content_type)
+
+        if is_text_plain(@current_content_type) or is_html {
           match base64_decoded {
             case Some(data) -> {
-              let decoded_str = data.into_string
-              let mut pos = 0
-
-              while pos < decoded_str.size {
-                let end = if pos + @chunk_size > decoded_str.size {
-                  decoded_str.size
-                } else {
-                  pos + @chunk_size
-                }
-                let chunk = decoded_str.substring(pos, end)
-
-                match @handler.on_text_chunk(chunk) {
-                  case Ok(_) -> {}
-                  case Error(_) -> {}
-                }
-
-                pos = end
-              }
+              send_text_chunks(data.into_string, @chunk_size, is_html, @handler)
             }
             case None -> {}
           }
 
           match qp_decoded {
             case Some(data) -> {
-              let decoded_str = data.into_string
-              let mut pos = 0
-
-              while pos < decoded_str.size {
-                let end = if pos + @chunk_size > decoded_str.size {
-                  decoded_str.size
-                } else {
-                  pos + @chunk_size
-                }
-                let chunk = decoded_str.substring(pos, end)
-
-                match @handler.on_text_chunk(chunk) {
-                  case Ok(_) -> {}
-                  case Error(_) -> {}
-                }
-
-                pos = end
-              }
-            }
-            case None -> {}
-          }
-        } else if is_text_html(@current_content_type) {
-          match base64_decoded {
-            case Some(data) -> {
-              let decoded_str = data.into_string
-              let mut pos = 0
-
-              while pos < decoded_str.size {
-                let end = if pos + @chunk_size > decoded_str.size {
-                  decoded_str.size
-                } else {
-                  pos + @chunk_size
-                }
-                let chunk = decoded_str.substring(pos, end)
-
-                match @handler.on_html_chunk(chunk) {
-                  case Ok(_) -> {}
-                  case Error(_) -> {}
-                }
-
-                pos = end
-              }
-            }
-            case None -> {}
-          }
-
-          match qp_decoded {
-            case Some(data) -> {
-              let decoded_str = data.into_string
-              let mut pos = 0
-
-              while pos < decoded_str.size {
-                let end = if pos + @chunk_size > decoded_str.size {
-                  decoded_str.size
-                } else {
-                  pos + @chunk_size
-                }
-                let chunk = decoded_str.substring(pos, end)
-
-                match @handler.on_html_chunk(chunk) {
-                  case Ok(_) -> {}
-                  case Error(_) -> {}
-                }
-
-                pos = end
-              }
+              send_text_chunks(data.into_string, @chunk_size, is_html, @handler)
             }
             case None -> {}
           }
