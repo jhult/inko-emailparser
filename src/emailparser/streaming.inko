@@ -571,8 +571,9 @@ impl StreamingParser {
 
   # Parse an email from an async reader using streaming callbacks
   #
-  # Reads email data incrementally from an async reader and processes it using callbacks.
-  # Ideal for processing large emails from files or network streams.
+  # Reads email data incrementally from an async reader and processes it using
+  # callbacks. Body data is processed incrementally without buffering the entire
+  # body in memory.
   fn pub mut parse_async_reader[H: mut + StreamHandler](
     reader: AsyncReader,
     handler: mut H,
@@ -583,13 +584,13 @@ impl StreamingParser {
     }
 
     let mut buffer = ByteArray.new
-    let mut headers_parsed = false
     let mut headers: Array[(String, String)] = []
-    let mut body: ByteArray = ByteArray.new
+    let mut initial_body = ByteArray.new
 
     let chunk_size = @config.stream_chunk_size
     let mut total_bytes = 0
 
+    # Phase 1: Read chunks until headers are parsed
     loop {
       match reader.read(chunk_size) {
         case Ok(chunk) -> {
@@ -610,84 +611,70 @@ impl StreamingParser {
             )
           }
 
-          if !headers_parsed {
-            let mut i = 0
+          let mut i = 0
 
-            while i < chunk.size {
-              match chunk.get(i) {
-                case Ok(byte) -> buffer.push(byte)
-                case Error(_) -> {}
-              }
-
-              i = i + 1
+          while i < chunk.size {
+            match chunk.get(i) {
+              case Ok(byte) -> buffer.push(byte)
+              case Error(_) -> {}
             }
 
-            let buffer_str = buffer.clone.into_string
-            let double_newline_pos = buffer_str.index_of('\n\n', 0)
+            i = i + 1
+          }
 
-            match double_newline_pos {
-              case Some(pos) -> {
-                let headers_raw = buffer_str.substring(0, pos)
+          let buffer_str = buffer.clone.into_string
+          let double_newline_pos = buffer_str.index_of('\n\n', 0)
 
-                headers = match
-                  parse_headers_impl(
-                    headers_raw,
-                    @config.strict_mode,
-                    @config.max_email_size,
-                    @config.max_headers,
-                  )
-                {
-                  case Ok(h) -> h
-                  case Error(e) -> {
-                    match handler.on_error(e.to_message) {
-                      case Ok(_) -> {}
-                      case Error(err) -> {
-                        return Result.Error('Handler on_error failed: ${err}')
-                      }
+          match double_newline_pos {
+            case Some(pos) -> {
+              let headers_raw = buffer_str.substring(0, pos)
+
+              headers = match
+                parse_headers_impl(
+                  headers_raw,
+                  @config.strict_mode,
+                  @config.max_email_size,
+                  @config.max_headers,
+                )
+              {
+                case Ok(h) -> h
+                case Error(e) -> {
+                  match handler.on_error(e.to_message) {
+                    case Ok(_) -> {}
+                    case Error(err) -> {
+                      return Result.Error('Handler on_error failed: ${err}')
                     }
-
-                    return Result.Error(e.to_message)
-                  }
-                }
-
-                match handler.on_headers(ref headers) {
-                  case Ok(_) -> {}
-                  case Error(e) -> {
-                    return Result.Error('Handler on_headers failed: ${e}')
-                  }
-                }
-
-                headers_parsed = true
-
-                let mut j = pos + 2
-
-                while j < buffer.size {
-                  match buffer.get(j) {
-                    case Ok(byte) -> body.push(byte)
-                    case Error(_) -> {}
                   }
 
-                  j = j + 1
-                }
-
-                buffer = ByteArray.new
-              }
-              case None -> {
-                if buffer.size > 10000 {
-                  return Result.Error('Headers too large or malformed')
+                  return Result.Error(e.to_message)
                 }
               }
+
+              match handler.on_headers(ref headers) {
+                case Ok(_) -> {}
+                case Error(e) -> {
+                  return Result.Error('Handler on_headers failed: ${e}')
+                }
+              }
+
+              # Extract body bytes remaining in buffer after headers
+              let mut j = pos + 2
+
+              while j < buffer.size {
+                match buffer.get(j) {
+                  case Ok(byte) -> initial_body.push(byte)
+                  case Error(_) -> {}
+                }
+
+                j = j + 1
+              }
+
+              break
             }
-          } else {
-            let mut i = 0
-
-            while i < chunk.size {
-              match chunk.get(i) {
-                case Ok(byte) -> body.push(byte)
-                case Error(_) -> {}
+            case None -> {
+              if buffer.size > 10000 {
+                return Result.Error('Headers too large or malformed')
               }
-
-              i = i + 1
             }
           }
         }
@@ -704,6 +691,7 @@ impl StreamingParser {
       }
     }
 
+    # Extract metadata from headers
     let from_raw = get_header_value_impl(ref headers, 'From')
     let from_decoded = decode_header_value_stream(from_raw.clone.or(''))
     let from_list = parse_address_list_impl(ref from_raw, from_decoded)
@@ -772,28 +760,68 @@ impl StreamingParser {
       }
     }
 
-    let body_str = body.into_string
-    let attachment_count = match
-      parse_body_stream(
-        body_str,
-        ct_main,
-        boundary,
-        content_transfer_encoding,
-        handler,
-        @config,
-      )
-    {
-      case Ok(count) -> count
-      case Error(e) -> {
-        match handler.on_error(e) {
-          case Ok(_) -> {}
-          case Error(err) -> {
-            return Result.Error('Handler on_error failed: ${err}')
+    # Phase 2: Process body incrementally
+    let attachment_count = if is_multipart(ct_main) {
+      match boundary.clone {
+        case Some(b) -> {
+          match
+            process_body_reader_multipart(
+              reader,
+              initial_body,
+              b,
+              content_transfer_encoding,
+              @config.max_multipart_depth,
+              @config.max_attachment_size,
+              @config.max_headers,
+              chunk_size,
+              @config.max_email_size,
+              total_bytes,
+              handler,
+            )
+          {
+            case Ok(count) -> count
+            case Error(e) -> {
+              match handler.on_error(e) {
+                case Ok(_) -> {}
+                case Error(err) -> {
+                  return Result.Error('Handler on_error failed: ${err}')
+                }
+              }
+
+              return Result.Error(e)
+            }
           }
         }
-
-        return Result.Error(e)
+        case None -> 0
       }
+    } else if is_text_plain(ct_main) or is_text_html(ct_main) {
+      match
+        process_body_reader_text(
+          reader,
+          initial_body,
+          content_transfer_encoding,
+          is_text_html(ct_main),
+          chunk_size,
+          @config.max_attachment_size,
+          @config.max_email_size,
+          total_bytes,
+          handler,
+        )
+      {
+        case Ok(_) -> 0
+        case Error(e) -> {
+          match handler.on_error(e) {
+            case Ok(_) -> {}
+            case Error(err) -> {
+              return Result.Error('Handler on_error failed: ${err}')
+            }
+          }
+
+          return Result.Error(e)
+        }
+      }
+    } else {
+      0
     }
 
     let extra_headers = extract_extra_headers(headers)
@@ -1156,6 +1184,289 @@ fn stream_html_body[H: mut + StreamHandler](
   handler: mut H,
 ) {
   stream_body_impl(body_raw, encoding, chunk_size, max_size, true, handler)
+}
+
+# Process text/html body incrementally from an async reader
+#
+# Creates the appropriate decoder and feeds initial body data plus subsequent
+# chunks from the reader through it, streaming decoded text/html to the handler.
+fn process_body_reader_text[H: mut + StreamHandler](
+  reader: AsyncReader,
+  initial_body: ByteArray,
+  encoding: String,
+  is_html: Bool,
+  chunk_size: Int,
+  max_size: Int,
+  max_email_size: Int,
+  start_total_bytes: Int,
+  handler: mut H,
+) -> Result[Int, String] {
+  let mut total_bytes = start_total_bytes
+  let encoding_lower = encoding.to_lower
+
+  if encoding_lower == 'base64' {
+    let mut decoder = Base64StreamingDecoder.new(max_size, false)
+
+    # Feed initial body data
+    if initial_body.size > 0 {
+      match decoder.feed(initial_body.into_string) {
+        case Ok(decoded) -> {
+          if decoded.size > 0 {
+            send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+          }
+        }
+        case Error(_) -> {}
+      }
+    }
+
+    # Read and feed remaining chunks from reader
+    loop {
+      match reader.read(chunk_size) {
+        case Ok(chunk) -> {
+          if chunk.size == 0 { break }
+
+          total_bytes = total_bytes + chunk.size
+
+          if total_bytes > max_email_size {
+            return Result.Error(
+              'Email size ${total_bytes} exceeds maximum ${max_email_size}',
+            )
+          }
+
+          match decoder.feed(chunk.into_string) {
+            case Ok(decoded) -> {
+              if decoded.size > 0 {
+                send_text_chunks(
+                  decoded.into_string,
+                  chunk_size,
+                  is_html,
+                  handler,
+                )
+              }
+            }
+            case Error(_) -> {}
+          }
+        }
+        case Error(e) -> return Result.Error(e)
+      }
+    }
+
+    # Finish decoder
+    match decoder.finish {
+      case Ok(decoded) -> {
+        if decoded.size > 0 {
+          send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+        }
+      }
+      case Error(_) -> {}
+    }
+  } else if encoding_lower == 'quoted-printable' {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(
+      max_size,
+      false,
+      false,
+    )
+
+    # Feed initial body data
+    if initial_body.size > 0 {
+      match decoder.feed(initial_body.into_string) {
+        case Ok(decoded) -> {
+          if decoded.size > 0 {
+            send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+          }
+        }
+        case Error(_) -> {}
+      }
+    }
+
+    # Read and feed remaining chunks from reader
+    loop {
+      match reader.read(chunk_size) {
+        case Ok(chunk) -> {
+          if chunk.size == 0 { break }
+
+          total_bytes = total_bytes + chunk.size
+
+          if total_bytes > max_email_size {
+            return Result.Error(
+              'Email size ${total_bytes} exceeds maximum ${max_email_size}',
+            )
+          }
+
+          match decoder.feed(chunk.into_string) {
+            case Ok(decoded) -> {
+              if decoded.size > 0 {
+                send_text_chunks(
+                  decoded.into_string,
+                  chunk_size,
+                  is_html,
+                  handler,
+                )
+              }
+            }
+            case Error(_) -> {}
+          }
+        }
+        case Error(e) -> return Result.Error(e)
+      }
+    }
+
+    # Finish decoder
+    match decoder.finish {
+      case Ok(decoded) -> {
+        if decoded.size > 0 {
+          send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+        }
+      }
+      case Error(_) -> {}
+    }
+  } else {
+    # Passthrough encoding (7bit, 8bit, binary)
+    if initial_body.size > 0 {
+      match decode_body_impl(initial_body.into_string, encoding, max_size) {
+        case Ok(decoded) -> {
+          send_text_chunks(decoded, chunk_size, is_html, handler)
+        }
+        case Error(_) -> {}
+      }
+    }
+
+    loop {
+      match reader.read(chunk_size) {
+        case Ok(chunk) -> {
+          if chunk.size == 0 { break }
+
+          total_bytes = total_bytes + chunk.size
+
+          if total_bytes > max_email_size {
+            return Result.Error(
+              'Email size ${total_bytes} exceeds maximum ${max_email_size}',
+            )
+          }
+
+          match decode_body_impl(chunk.into_string, encoding, max_size) {
+            case Ok(decoded) -> {
+              send_text_chunks(decoded, chunk_size, is_html, handler)
+            }
+            case Error(_) -> {}
+          }
+        }
+        case Error(e) -> return Result.Error(e)
+      }
+    }
+  }
+
+  Result.Ok(0)
+}
+
+# Send decoded text/html in sized chunks to the handler
+fn send_text_chunks[H: mut + StreamHandler](
+  decoded_str: String,
+  chunk_size: Int,
+  is_html: Bool,
+  handler: mut H,
+) {
+  let mut pos = 0
+
+  while pos < decoded_str.size {
+    let end = if pos + chunk_size > decoded_str.size {
+      decoded_str.size
+    } else {
+      pos + chunk_size
+    }
+    let chunk = decoded_str.substring(pos, end)
+
+    let result = if is_html {
+      handler.on_html_chunk(chunk)
+    } else {
+      handler.on_text_chunk(chunk)
+    }
+
+    match result {
+      case Ok(_) -> {}
+      case Error(_) -> return
+    }
+
+    pos = end
+  }
+}
+
+# Process multipart body incrementally from an async reader
+#
+# Creates a MultipartStreamParser and feeds initial body data plus subsequent
+# chunks from the reader, processing parts incrementally.
+fn process_body_reader_multipart[H: mut + StreamHandler](
+  reader: AsyncReader,
+  initial_body: ByteArray,
+  boundary: String,
+  default_encoding: String,
+  max_depth: Int,
+  max_size: Int,
+  max_headers: Int,
+  chunk_size: Int,
+  max_email_size: Int,
+  start_total_bytes: Int,
+  handler: mut H,
+) -> Result[Int, String] {
+  let mut total_bytes = start_total_bytes
+  let mut parser = MultipartStreamParser.new(
+    boundary,
+    max_depth,
+    chunk_size,
+    false,
+    max_headers,
+    max_size,
+  )
+
+  let mut wrapper = MultipartHandlerWrapper(
+    handler: handler,
+    attachment_count: 0,
+    current_info: Option.None,
+    base64_decoder: Option.None,
+    qp_decoder: Option.None,
+    current_encoding: default_encoding,
+    current_content_type: 'text/plain',
+    max_size: max_size,
+    chunk_size: chunk_size,
+  )
+
+  # Feed initial body data
+  if initial_body.size > 0 {
+    match parser.feed(ref initial_body, wrapper, default_encoding) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e)
+    }
+  }
+
+  # Read and feed remaining chunks from reader
+  loop {
+    match reader.read(chunk_size) {
+      case Ok(chunk) -> {
+        if chunk.size == 0 { break }
+
+        total_bytes = total_bytes + chunk.size
+
+        if total_bytes > max_email_size {
+          return Result.Error(
+            'Email size ${total_bytes} exceeds maximum ${max_email_size}',
+          )
+        }
+
+        match parser.feed(ref chunk, wrapper, default_encoding) {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
+        }
+      }
+      case Error(e) -> return Result.Error(e)
+    }
+  }
+
+  match parser.finish(wrapper) {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
+  }
+
+  Result.Ok(wrapper.attachment_count)
 }
 
 # Helper type for multipart streaming parser
