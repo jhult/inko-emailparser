@@ -565,9 +565,27 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
       let mut i = 0
 
       # Copy body data up to boundary
-      # Note: In MIME spec, CRLF before boundary is part of the boundary,
-      # but our tests expect it in the body, so we include it
-      let body_end = pos
+      # Per RFC 2046, CRLF before boundary is part of the boundary delimiter, not the body
+      let body_end = if pos >= 2 {
+        match parser.buffer.get(pos - 1) {
+          case Ok(b1) -> {
+            match parser.buffer.get(pos - 2) {
+              case Ok(b2) -> {
+                if b2 == 13 and b1 == 10 {
+                  # Found CRLF before boundary, exclude it
+                  pos - 2
+                } else {
+                  pos
+                }
+              }
+              case Error(_) -> pos
+            }
+          }
+          case Error(_) -> pos
+        }
+      } else {
+        pos
+      }
 
       while i < body_end {
         match parser.buffer.get(i) {

@@ -512,18 +512,38 @@ fn parse_content_type_impl(
     case Some(pos) -> {
       let params_raw = trimmed.substring(pos + 1, trimmed_size)
 
-      # Split params_raw by semicolon
-      let mut param_start = 0
+      # Parse parameters with quote awareness
+      match parse_parameters_impl(params_raw) {
+        case Ok(parsed_params) -> params = parsed_params
+        case Error(e) -> return Result.Error(e)
+      }
+    }
+    case None -> {}
+  }
 
-      while param_start < params_raw.size {
-        let next_semi = params_raw.index_of(';', param_start).or(
-          params_raw.size,
-        )
+  Result.Ok((main_type, params))
+}
 
-        if next_semi > param_start {
-          let param = params_raw.substring(param_start, next_semi).trim
+# Parse parameters with quote-aware semicolon splitting
+# Handles quoted values that may contain semicolons
+fn parse_parameters_impl(
+  params_raw: String,
+) -> Result[Array[(String, String)], Error] {
+  let mut params = []
+  let mut i = 0
+  let mut in_quotes = false
+  let mut param_start = 0
 
-          # Skip empty parameters
+  while i < params_raw.size {
+    match params_raw.get(i) {
+      case Ok(byte) -> {
+        if byte == 34 {
+          # Toggle quote state
+          in_quotes = !in_quotes
+        } else if byte == 59 and !in_quotes {
+          # Found semicolon outside quotes - end of parameter
+          let param = params_raw.substring(param_start, i).trim
+
           if !param.empty? {
             let eq_pos = param.index_of('=', 0)
 
@@ -538,7 +558,7 @@ fn parse_content_type_impl(
                   return Result.Error(
                     Error.InvalidContentType(
                       Severity.Error,
-                      'boundary parameter value contains newline characters',
+                      'parameter value contains newline characters',
                       Option.None,
                       Option.None,
                       Option.Some(param.clone),
@@ -570,14 +590,67 @@ fn parse_content_type_impl(
             }
           }
 
-          param_start = next_semi + 1
+          param_start = i + 1
+        }
+      }
+      case Error(_) -> {}
+    }
+
+    i = i + 1
+  }
+
+  # Handle last parameter (after final semicolon)
+  if param_start < params_raw.size {
+    let param = params_raw.substring(param_start, params_raw.size).trim
+
+    if !param.empty? {
+      let eq_pos = param.index_of('=', 0)
+
+      match eq_pos {
+        case Some(eq) -> {
+          let key = param.substring(0, eq).trim
+          let raw_value = param.substring(eq + 1, param.size)
+          let value = raw_value.trim
+
+          # Check for newlines in parameter values (security issue)
+          if raw_value.contains?('\n') or raw_value.contains?('\r') {
+            return Result.Error(
+              Error.InvalidContentType(
+                Severity.Error,
+                'parameter value contains newline characters',
+                Option.None,
+                Option.None,
+                Option.Some(param.clone),
+              ),
+            )
+          }
+
+          # Remove quotes if present
+          let clean_value = if is_quoted_string(value) {
+            value.substring(1, value.size - 1)
+          } else {
+            value
+          }
+
+          params.push((key, clean_value))
+        }
+        case None -> {
+          # Parameter without = is malformed
+          return Result.Error(
+            Error.InvalidContentType(
+              Severity.Error,
+              'invalid parameter format: "' + param + '"',
+              Option.None,
+              Option.None,
+              Option.Some(param.clone),
+            ),
+          )
         }
       }
     }
-    case None -> {}
   }
 
-  Result.Ok((main_type, params))
+  Result.Ok(params)
 }
 
 # Parse Content-Disposition header value
@@ -614,77 +687,17 @@ fn parse_content_disposition_impl(
     )
   }
 
-  # Now parse parameters if present (same logic as Content-Type parameter parsing)
+  # Now parse parameters if present
   let mut params = []
 
   match semi_pos {
     case Some(pos) -> {
       let params_raw = trimmed.substring(pos + 1, trimmed_size)
 
-      # Split params_raw by semicolon
-      let mut param_start = 0
-
-      while param_start < params_raw.size {
-        let next_semi = params_raw.index_of(';', param_start).or(
-          params_raw.size,
-        )
-
-        if next_semi > param_start {
-          let param = params_raw.substring(param_start, next_semi).trim
-
-          # Skip empty parameters
-          if !param.empty? {
-            let eq_pos = param.index_of('=', 0)
-
-            match eq_pos {
-              case Some(eq) -> {
-                let key = param.substring(0, eq).trim
-                let raw_value = param.substring(eq + 1, param.size)
-                let value = raw_value.trim
-
-                # Check for newlines in parameter values (security issue)
-                if raw_value.contains?('\n') or raw_value.contains?('\r') {
-                  return Result.Error(
-                    Error.InvalidContentType(
-                      Severity.Error,
-                      'parameter value contains newline characters',
-                      Option.None,
-                      Option.None,
-                      Option.Some(param.clone),
-                    ),
-                  )
-                }
-
-                # Remove quotes if present
-                let value = if
-                  value.size >= 2
-                    and value.starts_with?('"')
-                    and value.ends_with?('"')
-                {
-                  value.substring(1, value.size - 1)
-                } else {
-                  value
-                }
-
-                params.push((key, value))
-              }
-              case None -> {
-                # Parameter without = is malformed
-                return Result.Error(
-                  Error.InvalidContentType(
-                    Severity.Error,
-                    'invalid parameter format: "' + param + '"',
-                    Option.None,
-                    Option.None,
-                    Option.Some(param.clone),
-                  ),
-                )
-              }
-            }
-          }
-
-          param_start = next_semi + 1
-        }
+      # Parse parameters with quote awareness
+      match parse_parameters_impl(params_raw) {
+        case Ok(parsed_params) -> params = parsed_params
+        case Error(e) -> return Result.Error(e)
       }
     }
     case None -> {}

@@ -446,6 +446,12 @@ fn decode_text_body(
       case Ok(decoded) -> html_body = Option.Some(decoded)
       case Error(_) -> {}
     }
+  } else {
+    # For non-text, non-multipart content types, store in text_body as fallback
+    match decode_body_impl(body_raw, content_transfer_encoding, max_size) {
+      case Ok(decoded) -> text_body = Option.Some(decoded)
+      case Error(_) -> {}
+    }
   }
 
   (text_body, html_body)
@@ -598,17 +604,17 @@ fn decode_header_value_impl(raw: String) -> String {
 
 # Check if content is text/plain
 fn is_text_plain(content_type: String) -> Bool {
-  content_type == 'text/plain'
+  content_type.to_lower == 'text/plain'
 }
 
 # Check if content is text/html
 fn is_text_html(content_type: String) -> Bool {
-  content_type == 'text/html'
+  content_type.to_lower == 'text/html'
 }
 
 # Check if content is multipart
 fn is_multipart(content_type: String) -> Bool {
-  content_type.starts_with?('multipart/')
+  content_type.to_lower.starts_with?('multipart/')
 }
 
 # Extract boundary from Content-Type params

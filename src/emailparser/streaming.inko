@@ -258,7 +258,8 @@ impl StreamingParser {
 
     # Parse addresses
     let from_raw = get_header_value_impl(ref headers, 'From')
-    let from_list = parse_address_list_impl(ref from_raw, from_raw.or(''))
+    let from_decoded = decode_header_value_stream(from_raw.clone.or(''))
+    let from_list = parse_address_list_impl(ref from_raw, from_decoded)
     let from = if from_list.empty? {
       EmailAddress(name: Option.None, address: '', raw: '')
     } else {
@@ -268,17 +269,20 @@ impl StreamingParser {
       }
     }
 
+    let to_raw = get_header_value_impl(ref headers, 'To')
     let to = parse_address_list_impl(
-      ref get_header_value_impl(ref headers, 'To'),
-      get_header_value_impl(ref headers, 'To').or(''),
+      ref to_raw,
+      decode_header_value_stream(to_raw.clone.or('')),
     )
+    let cc_raw = get_header_value_impl(ref headers, 'Cc')
     let cc = parse_address_list_impl(
-      ref get_header_value_impl(ref headers, 'Cc'),
-      get_header_value_impl(ref headers, 'Cc').or(''),
+      ref cc_raw,
+      decode_header_value_stream(cc_raw.clone.or('')),
     )
+    let bcc_raw = get_header_value_impl(ref headers, 'Bcc')
     let bcc = parse_address_list_impl(
-      ref get_header_value_impl(ref headers, 'Bcc'),
-      get_header_value_impl(ref headers, 'Bcc').or(''),
+      ref bcc_raw,
+      decode_header_value_stream(bcc_raw.clone.or('')),
     )
 
     # Extract basic headers
@@ -447,7 +451,8 @@ impl StreamingParser {
     }
 
     let from_raw = get_header_value_impl(ref headers, 'From')
-    let from_list = parse_address_list_impl(ref from_raw, from_raw.or(''))
+    let from_decoded = decode_header_value_stream(from_raw.clone.or(''))
+    let from_list = parse_address_list_impl(ref from_raw, from_decoded)
     let from = if from_list.empty? {
       EmailAddress(name: Option.None, address: '', raw: '')
     } else {
@@ -457,17 +462,20 @@ impl StreamingParser {
       }
     }
 
+    let to_raw = get_header_value_impl(ref headers, 'To')
     let to = parse_address_list_impl(
-      ref get_header_value_impl(ref headers, 'To'),
-      get_header_value_impl(ref headers, 'To').or(''),
+      ref to_raw,
+      decode_header_value_stream(to_raw.clone.or('')),
     )
+    let cc_raw = get_header_value_impl(ref headers, 'Cc')
     let cc = parse_address_list_impl(
-      ref get_header_value_impl(ref headers, 'Cc'),
-      get_header_value_impl(ref headers, 'Cc').or(''),
+      ref cc_raw,
+      decode_header_value_stream(cc_raw.clone.or('')),
     )
+    let bcc_raw = get_header_value_impl(ref headers, 'Bcc')
     let bcc = parse_address_list_impl(
-      ref get_header_value_impl(ref headers, 'Bcc'),
-      get_header_value_impl(ref headers, 'Bcc').or(''),
+      ref bcc_raw,
+      decode_header_value_stream(bcc_raw.clone.or('')),
     )
 
     let subject = decode_header_value_stream(
@@ -706,7 +714,8 @@ impl StreamingParser {
     }
 
     let from_raw = get_header_value_impl(ref headers, 'From')
-    let from_list = parse_address_list_impl(ref from_raw, from_raw.or(''))
+    let from_decoded = decode_header_value_stream(from_raw.clone.or(''))
+    let from_list = parse_address_list_impl(ref from_raw, from_decoded)
     let from = if from_list.empty? {
       EmailAddress(name: Option.None, address: '', raw: '')
     } else {
@@ -716,17 +725,20 @@ impl StreamingParser {
       }
     }
 
+    let to_raw = get_header_value_impl(ref headers, 'To')
     let to = parse_address_list_impl(
-      ref get_header_value_impl(ref headers, 'To'),
-      get_header_value_impl(ref headers, 'To').or(''),
+      ref to_raw,
+      decode_header_value_stream(to_raw.clone.or('')),
     )
+    let cc_raw = get_header_value_impl(ref headers, 'Cc')
     let cc = parse_address_list_impl(
-      ref get_header_value_impl(ref headers, 'Cc'),
-      get_header_value_impl(ref headers, 'Cc').or(''),
+      ref cc_raw,
+      decode_header_value_stream(cc_raw.clone.or('')),
     )
+    let bcc_raw = get_header_value_impl(ref headers, 'Bcc')
     let bcc = parse_address_list_impl(
-      ref get_header_value_impl(ref headers, 'Bcc'),
-      get_header_value_impl(ref headers, 'Bcc').or(''),
+      ref bcc_raw,
+      decode_header_value_stream(bcc_raw.clone.or('')),
     )
 
     let subject = decode_header_value_stream(
@@ -894,17 +906,17 @@ fn extract_boundary_from_params(
 
 # Check if content type is multipart
 fn is_multipart(content_type: String) -> Bool {
-  content_type.starts_with?('multipart/')
+  content_type.to_lower.starts_with?('multipart/')
 }
 
 # Check if content type is text/plain
 fn is_text_plain(content_type: String) -> Bool {
-  content_type == 'text/plain'
+  content_type.to_lower == 'text/plain'
 }
 
 # Check if content type is text/html
 fn is_text_html(content_type: String) -> Bool {
-  content_type == 'text/html'
+  content_type.to_lower == 'text/html'
 }
 
 # Parse body with streaming callbacks
@@ -1109,7 +1121,7 @@ fn stream_body_impl[H: mut + StreamHandler](
       }
     }
     case (None, None) -> {
-      match decode_body_impl(body_raw, encoding, 50_000_000) {
+      match decode_body_impl(body_raw, encoding, max_size) {
         case Ok(decoded) -> {
           let mut pos = 0
 
