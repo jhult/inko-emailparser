@@ -10,7 +10,6 @@
 #
 # See docs/streaming-api.md for complete design documentation.
 
-import emailparser (parse_message_ids_impl)
 import emailparser.address (EmailAddress)
 import emailparser.address (parse_address_list_impl)
 import emailparser.decoder (decode_body_impl, decode_rfc2047_word)
@@ -484,18 +483,10 @@ impl StreamingParser {
     let date = get_header_value_impl(ref headers, 'Date').or('')
     let message_id = get_header_value_impl(ref headers, 'Message-ID').or('')
 
-    let in_reply_to = get_header_value_impl(ref headers, 'In-Reply-To')
-    let references = parse_message_ids_impl(
-      get_header_value_impl(ref headers, 'References').or(''),
+    # Extract threading headers
+    let (in_reply_to, references, thread_id) = parse_threading_headers(
+      ref headers,
     )
-    let thread_id = if references.empty? {
-      message_id
-    } else {
-      match references.get(0) {
-        case Ok(r) -> r
-        case Error(_) -> message_id
-      }
-    }
 
     let content_type_raw = get_header_value_impl(ref headers, 'Content-Type')
       .or('text/plain')
@@ -747,18 +738,9 @@ impl StreamingParser {
     let date = get_header_value_impl(ref headers, 'Date').or('')
     let message_id = get_header_value_impl(ref headers, 'Message-ID').or('')
 
-    let in_reply_to = get_header_value_impl(ref headers, 'In-Reply-To')
-    let references = parse_message_ids_impl(
-      get_header_value_impl(ref headers, 'References').or(''),
+    let (in_reply_to, references, thread_id) = parse_threading_headers(
+      ref headers,
     )
-    let thread_id = if references.empty? {
-      message_id
-    } else {
-      match references.get(0) {
-        case Ok(r) -> r
-        case Error(_) -> message_id
-      }
-    }
 
     let content_type_raw = get_header_value_impl(ref headers, 'Content-Type')
       .or('text/plain')
