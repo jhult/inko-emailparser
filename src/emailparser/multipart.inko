@@ -158,6 +158,7 @@ fn pub handle_nested_multipart(
   disp_main: String,
   filename: Option[String],
   content_id: Option[String],
+  strict_mode: Bool,
 ) -> Result[(Option[String], Option[String], Array[EmailAttachment]), Error] {
   match get_header_value_impl(ct_params, 'boundary') {
     case Some(nested_boundary) -> {
@@ -171,6 +172,7 @@ fn pub handle_nested_multipart(
           max_attachment_size,
           max_attachments,
           max_headers,
+          strict_mode,
         )
       {
         case Ok(result) -> Result.Ok(result)
@@ -207,6 +209,7 @@ fn parse_multipart_impl(
   max_attachment_size: Int,
   max_attachments: Int,
   max_headers: Int,
+  strict_mode: Bool,
 ) -> Result[(Option[String], Option[String], Array[EmailAttachment]), Error] {
   if depth > max_depth {
     return Result.Error(
@@ -327,6 +330,7 @@ fn parse_multipart_impl(
                   disp_main,
                   filename,
                   content_id,
+                  strict_mode,
                 )
               {
                 case Ok((nested_text, nested_html, nested_atts)) -> {
@@ -376,7 +380,11 @@ fn parse_multipart_impl(
               }
             }
           }
-          case Error(_) -> {}
+          case Error(e) -> {
+            # In strict mode, fail on any part parsing error
+            # In permissive mode, skip malformed parts for resilience
+            if strict_mode { return Result.Error(e) }
+          }
         }
       }
 

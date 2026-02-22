@@ -404,6 +404,7 @@ fn parse_email_body(
   max_size: Int,
   max_atts: Int,
   max_hdrs: Int,
+  strict_mode: Bool,
 ) -> Result[(Option[String], Option[String], Array[EmailAttachment]), Error] {
   if is_multipart(ct_main) {
     match boundary {
@@ -417,6 +418,7 @@ fn parse_email_body(
           max_size,
           max_atts,
           max_hdrs,
+          strict_mode,
         )
       }
       case None -> Result.Ok((Option.None, Option.None, []))
@@ -826,6 +828,7 @@ impl EmailParser {
           max_size,
           max_atts,
           max_hdrs,
+          @config.strict_mode,
         )
       } else {
         let (text, html) = decode_text_body(
@@ -954,6 +957,7 @@ impl EmailParser {
         @config.max_attachment_size,
         @config.max_attachments,
         @config.max_headers,
+        @config.strict_mode,
       )
     {
       case Ok(r) -> Result.Ok(r)

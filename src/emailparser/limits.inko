@@ -164,6 +164,18 @@ let pub MAX_HEADERS = 1000
 # RFC reference: RFC 5322 section 2.2.3 (Long Header Fields)
 let pub MAX_HEADER_VALUE_LENGTH = 8192
 
+# Maximum headers section size in bytes (65536)
+#
+# Rationale:
+# - Used in streaming parsers to limit total headers section size
+# - Larger than MAX_HEADER_VALUE_LENGTH because includes multiple headers
+# - 64KB allows ~8 headers of maximum size or many smaller headers
+# - DoS prevention: prevents memory exhaustion from oversized headers section
+# - Real-world usage: most emails have headers section < 8KB
+#
+# Used in: streaming.inko, streaming_multipart.inko
+let pub MAX_HEADERS_SECTION_SIZE = 65536
+
 # Maximum number of message IDs to parse (100)
 #
 # Rationale:

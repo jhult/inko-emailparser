@@ -8,7 +8,9 @@
 # incrementally without loading entire parts into memory. Uses a state machine
 # to track parsing progress through multipart structure.
 
-import emailparser.header (parse_headers_impl)
+import emailparser.header (eq_ignore_case, parse_headers_impl)
+import emailparser.limits (MAX_HEADERS_SECTION_SIZE)
+import emailparser.validation (is_valid_boundary)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
@@ -123,20 +125,28 @@ impl MultipartStreamParser {
     strict_mode: Bool,
     max_headers: Int,
     max_attachment_size: Int,
-  ) -> MultipartStreamParser {
-    MultipartStreamParser(
-      state: MultipartState.Preamble,
-      boundary: boundary,
-      buffer: ByteArray.new,
-      max_depth: max_depth,
-      chunk_size: chunk_size,
-      strict_mode: strict_mode,
-      max_headers: max_headers,
-      max_attachment_size: max_attachment_size,
-      current_context: Option.None,
-      context_stack: [],
-      bytes_processed: 0,
-      attachment_count: 0,
+  ) -> Result[MultipartStreamParser, String] {
+    if !is_valid_boundary(boundary.clone) {
+      return Result.Error(
+        'Invalid boundary string: exceeds 70 characters or contains invalid characters',
+      )
+    }
+
+    Result.Ok(
+      MultipartStreamParser(
+        state: MultipartState.Preamble,
+        boundary: boundary,
+        buffer: ByteArray.new,
+        max_depth: max_depth,
+        chunk_size: chunk_size,
+        strict_mode: strict_mode,
+        max_headers: max_headers,
+        max_attachment_size: max_attachment_size,
+        current_context: Option.None,
+        context_stack: [],
+        bytes_processed: 0,
+        attachment_count: 0,
+      ),
     )
   }
 
@@ -537,7 +547,7 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
     case None -> {
       # Headers not complete yet - keep buffering
       # Check buffer size to prevent excessive memory use
-      if parser.buffer.size > 65536 {
+      if parser.buffer.size > MAX_HEADERS_SECTION_SIZE {
         return Result.Error('Part headers exceed maximum size')
       }
 
@@ -803,11 +813,6 @@ fn get_header_value(
   }
 
   Option.None
-}
-
-# Case-insensitive string comparison
-fn eq_ignore_case(a: String, b: String) -> Bool {
-  a.to_lower == b.to_lower
 }
 
 # Extract filename from Content-Disposition header

@@ -18,6 +18,7 @@ import emailparser.header (
   get_param_value_impl, parse_content_type_impl, parse_headers_impl,
 )
 import emailparser.header_extraction (parse_threading_headers)
+import emailparser.limits (MAX_HEADERS_SECTION_SIZE)
 import emailparser.streaming_decoder (
   Base64StreamingDecoder, QuotedPrintableStreamingDecoder,
 )
@@ -392,181 +393,9 @@ impl StreamingParser {
     raw: String,
     handler: mut H,
   ) -> Result[StreamingResult, String] {
-    match handler.on_begin {
-      case Ok(_) -> {}
-      case Error(e) -> return Result.Error('Handler on_begin failed: ${e}')
-    }
-
-    let normalized = normalize_line_endings_stream(raw)
-    let email_size = normalized.size
-
-    if email_size > @config.max_email_size {
-      match handler.on_error('Email size exceeds maximum') {
-        case Ok(_) -> {}
-        case Error(e) -> return Result.Error('Handler on_error failed: ${e}')
-      }
-
-      return Result.Error(
-        'Email size ${email_size} exceeds maximum ${@config.max_email_size}',
-      )
-    }
-
-    let split_pos = normalized.index_of('\n\n', 0)
-
-    let (headers_raw, body_raw) = match split_pos {
-      case Some(pos) -> {
-        (
-          normalized.substring(0, pos),
-          normalized.substring(pos + 2, normalized.size),
-        )
-      }
-      case None -> (normalized.clone(), '')
-    }
-
-    let headers = match
-      parse_headers_impl(
-        headers_raw,
-        @config.strict_mode,
-        @config.max_email_size,
-        @config.max_headers,
-      )
-    {
-      case Ok(h) -> h
-      case Error(e) -> {
-        match handler.on_error(e.to_message) {
-          case Ok(_) -> {}
-          case Error(err) -> {
-            return Result.Error('Handler on_error failed: ${err}')
-          }
-        }
-
-        return Result.Error(e.to_message)
-      }
-    }
-
-    match handler.on_headers(ref headers) {
-      case Ok(_) -> {}
-      case Error(e) -> return Result.Error('Handler on_headers failed: ${e}')
-    }
-
-    let from_raw = get_header_value_impl(ref headers, 'From')
-    let from_decoded = decode_header_value_stream(from_raw.clone.or(''))
-    let from_list = parse_address_list_impl(ref from_raw, from_decoded)
-    let from = if from_list.empty? {
-      EmailAddress(name: Option.None, address: '', raw: '')
-    } else {
-      match from_list.into_iter.next {
-        case Some(addr) -> addr
-        case None -> EmailAddress(name: Option.None, address: '', raw: '')
-      }
-    }
-
-    let to_raw = get_header_value_impl(ref headers, 'To')
-    let to = parse_address_list_impl(
-      ref to_raw,
-      decode_header_value_stream(to_raw.clone.or('')),
-    )
-    let cc_raw = get_header_value_impl(ref headers, 'Cc')
-    let cc = parse_address_list_impl(
-      ref cc_raw,
-      decode_header_value_stream(cc_raw.clone.or('')),
-    )
-    let bcc_raw = get_header_value_impl(ref headers, 'Bcc')
-    let bcc = parse_address_list_impl(
-      ref bcc_raw,
-      decode_header_value_stream(bcc_raw.clone.or('')),
-    )
-
-    let subject = decode_header_value_stream(
-      get_header_value_impl(ref headers, 'Subject').or(''),
-    )
-    let date = get_header_value_impl(ref headers, 'Date').or('')
-    let message_id = get_header_value_impl(ref headers, 'Message-ID').or('')
-
-    # Extract threading headers
-    let (in_reply_to, references, thread_id) = parse_threading_headers(
-      ref headers,
-    )
-
-    let content_type_raw = get_header_value_impl(ref headers, 'Content-Type')
-      .or('text/plain')
-    let (ct_main, ct_params) = match parse_content_type_impl(content_type_raw) {
-      case Ok(result) -> result
-      case Error(e) -> return Result.Error(e.to_message)
-    }
-    let content_transfer_encoding = get_header_value_impl(
-      ref headers,
-      'Content-Transfer-Encoding',
-    )
-      .or('7bit')
-    let charset = get_param_value_impl(ref ct_params, 'charset')
-
-    let boundary = extract_boundary_from_params(ref ct_params)
-
-    if is_multipart(ct_main) {
-      match boundary.clone {
-        case Some(b) -> {
-          if !is_valid_boundary(b.clone) {
-            return Result.Error('Invalid boundary string')
-          }
-        }
-        case None -> {
-          return Result.Error(
-            'Multipart content type requires boundary parameter',
-          )
-        }
-      }
-    }
-
-    let attachment_count = match
-      parse_body_stream(
-        body_raw,
-        ct_main,
-        boundary,
-        content_transfer_encoding,
-        handler,
-        @config,
-      )
-    {
-      case Ok(count) -> count
-      case Error(e) -> {
-        match handler.on_error(e) {
-          case Ok(_) -> {}
-          case Error(err) -> {
-            return Result.Error('Handler on_error failed: ${err}')
-          }
-        }
-
-        return Result.Error(e)
-      }
-    }
-
-    let extra_headers = extract_extra_headers(headers)
-
-    match handler.on_end {
-      case Ok(_) -> {}
-      case Error(e) -> return Result.Error('Handler on_end failed: ${e}')
-    }
-
-    Result.Ok(
-      StreamingResult(
-        from: from,
-        to: to,
-        cc: cc,
-        bcc: bcc,
-        subject: subject,
-        date: date,
-        message_id: message_id,
-        in_reply_to: in_reply_to,
-        references: references,
-        thread_id: thread_id,
-        content_type: ct_main,
-        content_transfer_encoding: content_transfer_encoding,
-        charset: charset,
-        extra_headers: extra_headers,
-        attachment_count: attachment_count,
-      ),
-    )
+    # Delegate to parse_stream since the logic is identical
+    # The difference is in the trait constraint which allows async handlers
+    self.parse_stream(raw, handler)
   }
 
   # Parse an email from an async reader using streaming callbacks
@@ -672,7 +501,7 @@ impl StreamingParser {
               break
             }
             case None -> {
-              if buffer.size > 10000 {
+              if buffer.size > MAX_HEADERS_SECTION_SIZE {
                 return Result.Error('Headers too large or malformed')
               }
             }
@@ -1294,14 +1123,19 @@ fn process_body_reader_multipart[H: mut + StreamHandler](
   handler: mut H,
 ) -> Result[Int, String] {
   let mut total_bytes = start_total_bytes
-  let mut parser = MultipartStreamParser.new(
-    boundary,
-    max_depth,
-    chunk_size,
-    false,
-    max_headers,
-    max_size,
-  )
+  let mut parser = match
+    MultipartStreamParser.new(
+      boundary,
+      max_depth,
+      chunk_size,
+      false,
+      max_headers,
+      max_size,
+    )
+  {
+    case Ok(p) -> p
+    case Error(e) -> return Result.Error(e)
+  }
 
   let mut wrapper = MultipartHandlerWrapper(
     handler: handler,
@@ -1688,14 +1522,19 @@ fn parse_multipart_stream[H: mut + StreamHandler](
   let mut current_encoding: String = default_encoding
   let mut current_content_type: String = 'text/plain'
 
-  let mut parser = MultipartStreamParser.new(
-    boundary,
-    max_depth,
-    chunk_size,
-    false,
-    max_headers,
-    max_size,
-  )
+  let mut parser = match
+    MultipartStreamParser.new(
+      boundary,
+      max_depth,
+      chunk_size,
+      false,
+      max_headers,
+      max_size,
+    )
+  {
+    case Ok(p) -> p
+    case Error(e) -> return Result.Error(e)
+  }
 
   let mut wrapper = MultipartHandlerWrapper(
     handler: handler,
