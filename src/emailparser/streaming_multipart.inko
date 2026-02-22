@@ -797,7 +797,14 @@ fn parse_part_headers(
   headers_raw: String,
   max_headers: Int,
 ) -> Result[Array[(String, String)], String] {
-  match parse_headers_impl(headers_raw, false, 100000, max_headers) {
+  match
+    parse_headers_impl(
+      headers_raw,
+      false,
+      MAX_HEADERS_SECTION_SIZE,
+      max_headers,
+    )
+  {
     case Ok(headers) -> Result.Ok(headers)
     case Error(e) -> Result.Error(e.to_message)
   }

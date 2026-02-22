@@ -2,17 +2,13 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+import emailparser.ascii (
+  ASCII_CR, ASCII_EQUALS, ASCII_HT, ASCII_LF, ASCII_SPACE,
+)
 import emailparser.hex (hex_char_to_value)
 import emailparser.size_tracker (SizeTracker)
 import std.base64 (Decoder)
 import std.bytes (ByteArray)
-
-# ASCII constants for base64 decoding
-let ASCII_CR = 13
-let ASCII_LF = 10
-let ASCII_SPACE = 32
-let ASCII_HT = 9
-let ASCII_EQUALS = 61
 
 type pub Base64StreamingDecoder {
   let mut @buffer: ByteArray
