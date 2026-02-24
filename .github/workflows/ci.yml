@@ -72,7 +72,7 @@ jobs:
         uses: benchmark-action/github-action-benchmark@v1
         if: github.event_name == 'push' && github.ref == 'refs/heads/trunk'
         with:
-          tool: 'inko'
+          tool: 'customSmallerIsBetter'
           output-file-path: benchmarks/results/benchmark-*.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: false

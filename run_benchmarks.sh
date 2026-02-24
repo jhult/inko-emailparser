@@ -105,19 +105,16 @@ QP_MS=$(parse_ms "Benchmark 4:")
 HEADER_MS=$(parse_ms "Benchmark 5:")
 ADDRESS_MS=$(parse_ms "Benchmark 6:")
 
-# Generate JSON results file
+# Generate JSON results file in benchmark-action format
 cat >"$RESULTS_FILE" <<EOF
-{
-  "timestamp": "$TIMESTAMP",
-  "benchmarks": {
-    "simple_email_1000": {"ms": ${SIMPLE_MS:-0}, "iterations": 1000},
-    "multipart_500": {"ms": ${MULTIPART_MS:-0}, "iterations": 500},
-    "base64_1000": {"ms": ${BASE64_MS:-0}, "iterations": 1000},
-    "quoted_printable_1000": {"ms": ${QP_MS:-0}, "iterations": 1000},
-    "header_parsing_10000": {"ms": ${HEADER_MS:-0}, "iterations": 10000},
-    "address_parsing_5000": {"ms": ${ADDRESS_MS:-0}, "iterations": 5000}
-  }
-}
+[
+  {"name": "simple_email_1000", "unit": "ms", "value": ${SIMPLE_MS:-0}},
+  {"name": "multipart_500", "unit": "ms", "value": ${MULTIPART_MS:-0}},
+  {"name": "base64_1000", "unit": "ms", "value": ${BASE64_MS:-0}},
+  {"name": "quoted_printable_1000", "unit": "ms", "value": ${QP_MS:-0}},
+  {"name": "header_parsing_10000", "unit": "ms", "value": ${HEADER_MS:-0}},
+  {"name": "address_parsing_5000", "unit": "ms", "value": ${ADDRESS_MS:-0}}
+]
 EOF
 
 echo ""
