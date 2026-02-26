@@ -77,7 +77,7 @@ mkdir -p "$RESULTS_DIR"
 
 # Get current timestamp
 TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
-RESULTS_FILE="$RESULTS_DIR/benchmark-$TIMESTAMP.json"
+RESULTS_FILE="$RESULTS_DIR/benchmark-latest.json"
 
 echo "==================================="
 echo "Running Email Parser Performance Benchmarks"

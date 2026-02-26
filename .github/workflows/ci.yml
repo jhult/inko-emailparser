@@ -6,11 +6,21 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [trunk]
+    paths:
+      - "**/*.inko"
+      - ".github/workflows/**"
   pull_request:
     branches: [trunk]
+    paths:
+      - "**/*.inko"
+      - ".github/workflows/**"
 
+permissions:
+  contents: write
+  pull-requests: write
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -73,11 +83,12 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/trunk'
         with:
           tool: 'customSmallerIsBetter'
-          output-file-path: benchmarks/results/benchmark-*.json
+          output-file-path: benchmarks/results/benchmark-latest.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: false
           alert-threshold: '200%'
-          comment-on-alert: true
+          comment-on-alert: ${{ github.event.pull_request.head.repo.fork == false }}
+          summary-always: true
           alert-comment-cc-users: '@jhult'
           fail-on-alert: true
           max-items-in-chart: 25
