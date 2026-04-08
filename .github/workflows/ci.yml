@@ -42,7 +42,7 @@ jobs:
     name: Check and Test
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/inko-lang/inko:main
+      image: ghcr.io/inko-lang/inko@sha256:8a3a8c8364ffbc245c8753dc7533a3611ddc8280f1ad23ced686de1cb613e362
     needs: [license-check]
 
     steps:
@@ -59,7 +59,7 @@ jobs:
     name: Performance Benchmarks
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/inko-lang/inko:main
+      image: ghcr.io/inko-lang/inko@sha256:8a3a8c8364ffbc245c8753dc7533a3611ddc8280f1ad23ced686de1cb613e362
     needs: [license-check, check-and-test]
 
     steps:
@@ -82,16 +82,16 @@ jobs:
           ./run_benchmarks.sh || echo "Benchmarks completed with issues"
 
       - name: Store benchmark result
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@a60cea5bc7b49e15c1f58f411161f99e0df48372 # v1.22.0
         if: github.event_name == 'push' && github.ref == 'refs/heads/trunk'
         with:
-          tool: 'customSmallerIsBetter'
+          tool: "customSmallerIsBetter"
           output-file-path: benchmarks/results/benchmark-latest.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: false
-          alert-threshold: '200%'
+          alert-threshold: "200%"
           comment-on-alert: ${{ github.event.pull_request.head.repo.fork == false }}
           summary-always: true
-          alert-comment-cc-users: '@jhult'
+          alert-comment-cc-users: "@jhult"
           fail-on-alert: true
           max-items-in-chart: 25
