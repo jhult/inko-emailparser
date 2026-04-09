@@ -13,9 +13,6 @@ build/
 dep/
 .inko/
 
-# Beads
-.beads/daemon-error
-.beads/interactions.jsonl
 
 # Node.js / Web UI
 web-ui/node_modules/

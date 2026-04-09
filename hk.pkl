@@ -4,12 +4,12 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-amends "package://github.com/jdx/hk/releases/download/v1.36.0/hk@1.36.0#/Config.pkl"
-import "package://github.com/jdx/hk/releases/download/v1.36.0/hk@1.36.0#/Builtins.pkl"
+amends "package://github.com/jdx/hk/releases/download/v1.41.0/hk@1.41.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v1.41.0/hk@1.41.0#/Builtins.pkl"
 
 local linters = new Mapping<String, Step> {
-    ["bd-sync"] {
-        check = "bd sync --flush-only"
+    ["grite-sync"] {
+        check = "grite sync --pull --push"
     }
     ["inko-fmt"] {
         glob = "*.inko"
@@ -29,7 +29,7 @@ local linters = new Mapping<String, Step> {
 hooks {
     ["pre-commit"] {
         steps {
-            ["bd-sync"] = linters["bd-sync"]
+            ["bd-sync"] = linters["grite-sync"]
             ["inko-fmt"] = linters["inko-fmt"]
             ["inko-test"] = linters["inko-test"]
             ["license-eye"] = linters["license-eye"]
