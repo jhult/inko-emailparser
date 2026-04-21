@@ -1,0 +1,73 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Unit tests for the hex.inko module
+
+import emailparser.hex (parse_hex_byte, two_bytes_to_hex_string)
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  # parse_hex_byte: valid uppercase hex
+  t.test('parse_hex_byte_uppercase', fn (t) {
+    t.equal(parse_hex_byte('3D'), Option.Some(61))
+    t.equal(parse_hex_byte('00'), Option.Some(0))
+    t.equal(parse_hex_byte('FF'), Option.Some(255))
+    t.equal(parse_hex_byte('0A'), Option.Some(10))
+    t.equal(parse_hex_byte('7F'), Option.Some(127))
+  })
+
+  # parse_hex_byte: valid lowercase hex
+  t.test('parse_hex_byte_lowercase', fn (t) {
+    t.equal(parse_hex_byte('3d'), Option.Some(61))
+    t.equal(parse_hex_byte('ff'), Option.Some(255))
+    t.equal(parse_hex_byte('0a'), Option.Some(10))
+  })
+
+  # parse_hex_byte: mixed case
+  t.test('parse_hex_byte_mixed_case', fn (t) {
+    t.equal(parse_hex_byte('3d'), Option.Some(61))
+    t.equal(parse_hex_byte('Ff'), Option.Some(255))
+    t.equal(parse_hex_byte('0A'), Option.Some(10))
+  })
+
+  # parse_hex_byte: invalid length
+  t.test('parse_hex_byte_invalid_length', fn (t) {
+    t.equal(parse_hex_byte(''), Option.None)
+    t.equal(parse_hex_byte('A'), Option.None)
+    t.equal(parse_hex_byte('ABC'), Option.None)
+  })
+
+  # parse_hex_byte: invalid hex characters
+  t.test('parse_hex_byte_invalid_chars', fn (t) {
+    t.equal(parse_hex_byte('GG'), Option.None)
+    t.equal(parse_hex_byte('3G'), Option.None)
+    t.equal(parse_hex_byte('G3'), Option.None)
+    t.equal(parse_hex_byte('!!'), Option.None)
+    t.equal(parse_hex_byte(' Z'), Option.None)
+  })
+
+  # parse_hex_byte: boundary values
+  t.test('parse_hex_byte_boundary_values', fn (t) {
+    t.equal(parse_hex_byte('00'), Option.Some(0))
+    t.equal(parse_hex_byte('09'), Option.Some(9))
+    t.equal(parse_hex_byte('0F'), Option.Some(15))
+    t.equal(parse_hex_byte('10'), Option.Some(16))
+    t.equal(parse_hex_byte('F0'), Option.Some(240))
+    t.equal(parse_hex_byte('FF'), Option.Some(255))
+  })
+
+  # two_bytes_to_hex_string: basic conversion
+  t.test('two_bytes_to_hex_string', fn (t) {
+    t.equal(two_bytes_to_hex_string(51, 68), '3D')
+    t.equal(two_bytes_to_hex_string(48, 48), '00')
+    t.equal(two_bytes_to_hex_string(70, 70), 'FF')
+  })
+
+  # parse_hex_byte roundtrip with two_bytes_to_hex_string
+  t.test('hex_roundtrip', fn (t) {
+    let hex = two_bytes_to_hex_string(51, 68)
+
+    t.equal(parse_hex_byte(hex), Option.Some(61))
+  })
+}
