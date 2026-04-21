@@ -165,7 +165,6 @@ let pub ASCII_AT = 64 # @
 # Used as replacement char for decoding errors instead of '?' (ASCII 63)
 # which could be confused with actual content in the original message
 let pub UNICODE_REPLACEMENT_CHAR_UTF8 = [239, 191, 189] # U+FFFD in UTF-8
-let pub ASCII_REPLACEMENT_CHAR = 63 # ? (legacy, deprecated - use UNICODE_REPLACEMENT_CHAR_UTF8)
 
 # Brackets and braces
 let pub ASCII_LEFT_BRACKET = 91 # [
