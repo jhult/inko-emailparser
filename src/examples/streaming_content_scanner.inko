@@ -15,8 +15,8 @@
 # - Fail-fast error handling (abort on detection)
 # - Configurable malicious pattern detection
 
+import emailparser.email_generator (TestAttachment, TestDataGenerator)
 import emailparser.streaming (AttachmentInfo, StreamHandler, StreamingParser)
-import emailparser.test_data_generator (TestAttachment, TestDataGenerator)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.stdio (Stderr, Stdout)

@@ -8,10 +8,10 @@
 # and that large emails can be parsed with minimal memory usage.
 
 import emailparser (EmailParser)
+import emailparser.email_generator (TestAttachment, TestDataGenerator)
 import emailparser.streaming (
   AttachmentInfo, StreamHandler, StreamingConfig, StreamingParser,
 )
-import emailparser.test_data_generator (TestAttachment, TestDataGenerator)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)

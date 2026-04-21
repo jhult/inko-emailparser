@@ -7,7 +7,7 @@
 # Provides structure for measuring memory usage and performance of streaming parsing.
 # Note: Actual memory measurement requires profiling tools or runtime metrics.
 
-import emailparser.test_data_generator (TestAttachment, TestDataGenerator)
+import emailparser.email_generator (TestAttachment, TestDataGenerator)
 import std.test (Tests)
 
 fn pub tests(t: mut Tests) {

@@ -14,10 +14,10 @@
 # - Verbose progress output
 # - I/O error handling
 
+import emailparser.email_generator (TestAttachment, TestDataGenerator)
 import emailparser.streaming (
   AttachmentInfo, StreamHandler, StreamingParser, StreamingResult,
 )
-import emailparser.test_data_generator (TestAttachment, TestDataGenerator)
 import std.stdio (Stderr, Stdout)
 
 # FileAttachmentSaver saves attachments to disk incrementally

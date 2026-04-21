@@ -12,8 +12,8 @@
 # - Mid-stream error handling and resource cleanup
 
 import emailparser (EmailParser, ParserConfig)
+import emailparser.email_generator (TestAttachment, TestDataGenerator)
 import emailparser.streaming (AttachmentInfo, StreamHandler, StreamingParser)
-import emailparser.test_data_generator (TestAttachment, TestDataGenerator)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)

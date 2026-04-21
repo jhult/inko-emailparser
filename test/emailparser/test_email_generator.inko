@@ -1,0 +1,142 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Unit tests for the email_generator module
+
+import emailparser (EmailParser)
+import emailparser.email_generator (TestAttachment, TestDataGenerator)
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  t.test('generate_simple_text_email', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_text_email('Test Subject', 'Test Body')
+
+    let parser = EmailParser.new
+
+    match parser.parse(email) {
+      case Ok(msg) -> {
+        t.equal(msg.subject, 'Test Subject')
+
+        match msg.text_body {
+          case Some(body) -> t.equal(body.trim, 'Test Body')
+          case None -> t.equal('should have text body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('generate_email_with_attachment', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_email_with_attachment(
+      'test.txt',
+      'Hello World',
+      'base64',
+    )
+
+    let parser = EmailParser.new
+
+    match parser.parse(email) {
+      case Ok(msg) -> {
+        t.equal(msg.attachments.size, 1)
+
+        match msg.attachments.get(0) {
+          case Ok(att) -> {
+            t.equal(att.filename, Option.Some('test.txt'))
+            t.equal(att.content_type, 'application/octet-stream')
+          }
+          case Error(_) -> t.equal('should have attachment', 'got error')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('generate_email_with_multiple_attachments', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let attachments = [
+      TestAttachment(
+        name: 'file1.txt',
+        content_type: 'text/plain',
+        content: 'Content 1',
+        encoding: 'base64',
+      ),
+      TestAttachment(
+        name: 'file2.txt',
+        content_type: 'text/plain',
+        content: 'Content 2',
+        encoding: 'quoted-printable',
+      ),
+    ]
+    let email = generator.generate_email_with_attachments(attachments)
+
+    let parser = EmailParser.new
+
+    match parser.parse(email) {
+      case Ok(msg) -> t.equal(msg.attachments.size, 2)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('generate_large_attachment', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let attachment = generator.generate_large_attachment(1000, 'PATTERN')
+
+    t.equal(attachment.size, 1000)
+  })
+
+  t.test('generate_nested_multipart_email', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_nested_multipart_email(2, 1, 100)
+
+    let parser = EmailParser.new
+
+    match parser.parse(email) {
+      case Ok(msg) -> {
+        t.equal(msg.mime.content_type, 'multipart/mixed')
+        t.true(msg.attachments.size >= 1)
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+    }
+  })
+
+  t.test('encode_bytes_base64', fn (t) {
+    let encoded = TestDataGenerator.encode_bytes('Hello World', 'base64')
+
+    t.true(encoded.contains?('SGVsbG8gV29ybGQ'))
+  })
+
+  t.test('encode_bytes_quoted_printable', fn (t) {
+    let encoded = TestDataGenerator.encode_bytes(
+      'Hello World',
+      'quoted-printable',
+    )
+
+    t.equal(encoded, 'Hello World')
+  })
+
+  t.test('generate_boundary_unique', fn (t) {
+    let mut generator = TestDataGenerator.new
+
+    let boundary1 = generator.generate_boundary
+    let boundary2 = generator.generate_boundary
+    let boundary3 = generator.generate_boundary
+
+    t.true(boundary1 != boundary2)
+    t.true(boundary2 != boundary3)
+    t.true(boundary1 != boundary3)
+  })
+
+  t.test('generate_id_increments', fn (t) {
+    let mut generator = TestDataGenerator.new
+
+    let id1 = generator.generate_id
+    let id2 = generator.generate_id
+    let id3 = generator.generate_id
+
+    t.true(id1 < id2)
+    t.true(id2 < id3)
+  })
+}
