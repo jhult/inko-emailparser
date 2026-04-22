@@ -28,12 +28,9 @@ local linters = new Mapping<String, Step> {
 
 hooks {
     ["pre-commit"] {
-        steps {
-            ["grite-sync"] = linters["grite-sync"]
-            ["inko-fmt"] = linters["inko-fmt"]
-            ["inko-test"] = linters["inko-test"]
-            ["license-eye"] = linters["license-eye"]
-        }
+        fix = true
+        stash = "git"
+        steps = linters
     }
     ["fix"] {
         fix = true
