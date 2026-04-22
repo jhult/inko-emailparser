@@ -517,16 +517,19 @@ The project includes a benchmark suite to measure parsing performance and track 
 
 ### Running Benchmarks
 
-To run all benchmarks:
-
 ```bash
-./scripts/benchmark.sh
+# Run benchmarks, save text results
+./test/benchmark/benchmark.sh
+
+# Run with JSON output (for CI regression detection)
+./test/benchmark/benchmark.sh --json
 ```
 
 This will:
 1. Run the full benchmark suite
-2. Save results with a timestamp to `benchmark-results/benchmark_YYYYMMDD_HHMMSS.txt`
-3. Create a symlink at `benchmark-results/latest.txt` for easy access
+2. Save text results with timestamp to `test/benchmark/results/benchmark_YYYYMMDD_HHMMSS.txt`
+3. Create a symlink at `test/benchmark/results/latest.txt` for easy access
+4. With `--json`, save machine-readable results to `test/benchmark/results/benchmark-latest.json`
 
 ### Benchmark Categories
 
@@ -544,7 +547,7 @@ The benchmark suite tests:
 To compare benchmark results between runs:
 
 ```bash
-diff benchmark-results/latest.txt benchmark-results/benchmark_PREVIOUS_TIMESTAMP.txt
+diff test/benchmark/results/latest.txt test/benchmark/results/benchmark_PREVIOUS_TIMESTAMP.txt
 ```
 
 This helps identify performance regressions or improvements after code changes.

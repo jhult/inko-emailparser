@@ -20,5 +20,6 @@ header:
     - ".gitattributes"
     - "inko.pkg"
     - "test/fixtures/**"
+    - "**/.gitkeep"
   comment: on-failure
   license-location-threshold: 80

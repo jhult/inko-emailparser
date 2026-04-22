@@ -43,4 +43,5 @@ logs/
 coverage/
 
 # Benchmark results
-benchmark-results/
+test/benchmark/results/*
+!test/benchmark/results/.gitkeep
