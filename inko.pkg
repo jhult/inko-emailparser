@@ -1,4 +1,4 @@
 # inko-emailparser
 # A comprehensive email parsing library for Inko
 # Implements RFC 5322, RFC 2045 (MIME), and related email standards
-require inko 0.19.1
+require inko 0.20.0
