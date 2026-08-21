@@ -18,7 +18,7 @@ local linters = new Mapping<String, Step> {
     }
     ["inko-test"] {
 	glob = "*.inko"
-        check = "inko test"
+        check = "inko test --release"
     }
     ["license-eye"] {
         check = "license-eye header check {{files}}"
