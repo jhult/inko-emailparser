@@ -1260,6 +1260,11 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
     current_content_type: 'text/plain',
     max_size: max_size,
     chunk_size: chunk_size,
+    max_headers: max_headers,
+    depth: 0,
+    max_depth: max_depth,
+    nested_buffer: Option.None,
+    nested_boundary: Option.None,
   )
 
   # Feed initial body data
@@ -1312,6 +1317,11 @@ type MultipartHandlerWrapper[H: mut + StreamHandler] {
   let mut @current_content_type: String
   let @max_size: Int
   let @chunk_size: Int
+  let @max_headers: Int
+  let @depth: Int
+  let @max_depth: Int
+  let mut @nested_buffer: Option[ByteArray]
+  let mut @nested_boundary: Option[String]
 }
 
 impl MultipartStreamHandler for MultipartHandlerWrapper
@@ -1323,12 +1333,25 @@ if
     content_type: String,
     is_attachment: Bool,
   ) -> Result[Int, String] {
-    let main_type = match parse_content_type_impl(content_type) {
-      case Ok((mt, _)) -> mt
-      case Error(_) -> content_type
+    let (main_type, ct_params) = match parse_content_type_impl(content_type) {
+      case Ok((mt, params)) -> (mt, params)
+      case Error(_) -> (content_type, [])
     }
 
     @current_content_type = main_type
+
+    # Nested multipart: buffer the part body and parse it as a new multipart
+    # document when the part ends.
+    if main_type.starts_with?('multipart/') {
+      match get_param_value_impl(ref ct_params, 'boundary') {
+        case Some(nested_boundary) -> {
+          @nested_buffer = Option.Some(ByteArray.new)
+          @nested_boundary = Option.Some(nested_boundary)
+          return Result.Ok(0)
+        }
+        case None -> {}
+      }
+    }
 
     let content_disposition = get_header_value_impl(
       ref headers,
@@ -1382,6 +1405,14 @@ if
     data: ref ByteArray,
     content_transfer_encoding: String,
   ) -> Result[Int, String] {
+    match @nested_buffer {
+      case Some(mut buffer) -> {
+        buffer.append(data.clone)
+        return Result.Ok(0)
+      }
+      case None -> {}
+    }
+
     @current_encoding = content_transfer_encoding
 
     let data_str = data.clone
@@ -1552,6 +1583,80 @@ if
   }
 
   fn pub mut on_part_end -> Result[Int, String] {
+    # Nested multipart: parse the buffered body with a child parser.
+    let mut is_nested = false
+    let mut nested_buffer = ByteArray.new
+    let mut nested_boundary = ''
+
+    match @nested_buffer {
+      case Some(b) -> {
+        nested_buffer = b.clone
+        is_nested = true
+      }
+      case None -> {}
+    }
+
+    if is_nested {
+      match @nested_boundary {
+        case Some(b) -> nested_boundary = b
+        case None -> {}
+      }
+
+      @nested_buffer = Option.None
+      @nested_boundary = Option.None
+
+      if nested_boundary.empty? { return Result.Ok(0) }
+
+      if @depth + 1 > @max_depth {
+        return Result.Error('Maximum multipart depth exceeded')
+      }
+
+      let mut nested_parser = match
+        MultipartStreamParser.new(
+          nested_boundary,
+          @max_depth,
+          @chunk_size,
+          false,
+          @max_headers,
+          @max_size,
+        )
+      {
+        case Ok(p) -> p
+        case Error(e) -> return Result.Error(e)
+      }
+
+      let mut nested_wrapper = MultipartHandlerWrapper(
+        handler: @handler,
+        attachment_count: @attachment_count,
+        current_info: Option.None,
+        base64_decoder: Option.None,
+        qp_decoder: Option.None,
+        current_encoding: '7bit',
+        current_content_type: 'text/plain',
+        max_size: @max_size,
+        chunk_size: @chunk_size,
+        max_headers: @max_headers,
+        depth: @depth + 1,
+        max_depth: @max_depth,
+        nested_buffer: Option.None,
+        nested_boundary: Option.None,
+      )
+
+      match nested_parser.feed(ref nested_buffer, nested_wrapper, '7bit') {
+        case Ok(_) -> {}
+        case Error(e) -> return Result.Error(e)
+      }
+
+      match nested_parser.finish(nested_wrapper) {
+        case Ok(_) -> {}
+        case Error(e) -> return Result.Error(e)
+      }
+
+      @attachment_count = nested_wrapper.attachment_count
+
+      return Result.Ok(0)
+    }
+
     # Collect decoded data before calling handler methods
     let mut base64_decoded: Option[ByteArray] = Option.None
     let mut qp_decoded: Option[ByteArray] = Option.None
@@ -1718,6 +1823,11 @@ fn parse_multipart_stream[H: mut + StreamHandler](
     current_content_type: current_content_type,
     max_size: max_size,
     chunk_size: chunk_size,
+    max_headers: max_headers,
+    depth: 0,
+    max_depth: max_depth,
+    nested_buffer: Option.None,
+    nested_boundary: Option.None,
   )
 
   let data = raw.to_byte_array

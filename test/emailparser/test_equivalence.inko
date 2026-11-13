@@ -131,9 +131,8 @@ impl StreamHandler for EquivalenceTestHandler {
     Result.Ok(0)
   }
 
-  fn pub mut on_attachment_end(
-    info: ref AttachmentInfo,
-  ) -> Result[Int, String] {
+  fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String]
+  {
     let info_copy = AttachmentInfo(
       index: info.index,
       content_type: info.content_type.clone(),
@@ -550,6 +549,19 @@ End.'
 
     t.equal(streaming_result.content_type, regular_result.mime.content_type)
     t.equal(streaming_result.attachment_count, regular_result.attachments.size)
+
+    # Streaming emits every nested text/HTML part (and preserves the trailing
+    # line break), so assert the regular parser's content is delivered rather
+    # than requiring byte-for-byte equality.
+    match regular_result.text_body {
+      case Some(text) -> t.true(streaming_handler.get_text_body.contains?(text))
+      case None -> t.true(streaming_handler.get_text_body.empty?)
+    }
+
+    match regular_result.html_body {
+      case Some(h) -> t.true(streaming_handler.get_html_body.contains?(h))
+      case None -> t.true(streaming_handler.get_html_body.empty?)
+    }
   })
 
   t.test('equivalence_nested_multipart_depth_3', fn (t) {
@@ -579,6 +591,19 @@ End.'
 
     t.equal(streaming_result.content_type, regular_result.mime.content_type)
     t.equal(streaming_result.attachment_count, regular_result.attachments.size)
+
+    # Streaming emits every nested text/HTML part (and preserves the trailing
+    # line break), so assert the regular parser's content is delivered rather
+    # than requiring byte-for-byte equality.
+    match regular_result.text_body {
+      case Some(text) -> t.true(streaming_handler.get_text_body.contains?(text))
+      case None -> t.true(streaming_handler.get_text_body.empty?)
+    }
+
+    match regular_result.html_body {
+      case Some(h) -> t.true(streaming_handler.get_html_body.contains?(h))
+      case None -> t.true(streaming_handler.get_html_body.empty?)
+    }
   })
 
   # ============================================================
