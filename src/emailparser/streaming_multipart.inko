@@ -8,6 +8,8 @@
 # incrementally without loading entire parts into memory. Uses a state machine
 # to track parsing progress through multipart structure.
 
+import emailparser.error (Error)
+import emailparser.error (Severity)
 import emailparser.header (
   eq_ignore_case, extract_filename_param, parse_headers_impl,
 )
@@ -79,16 +81,16 @@ trait pub MultipartStreamHandler {
     headers: ref Array[(String, String)],
     content_type: String,
     is_attachment: Bool,
-  ) -> Result[Int, String]
+  ) -> Result[Int, Error]
 
   # Called when part body data is available
   fn pub mut on_part_data(
     data: ref ByteArray,
     content_transfer_encoding: String,
-  ) -> Result[Int, String]
+  ) -> Result[Int, Error]
 
   # Called when a part ends (before next boundary)
-  fn pub mut on_part_end -> Result[Int, String]
+  fn pub mut on_part_end -> Result[Int, Error]
 }
 
 # Multipart streaming parser with state machine
@@ -124,10 +126,16 @@ impl MultipartStreamParser {
     strict_mode: Bool,
     max_headers: Int,
     max_attachment_size: Int,
-  ) -> Result[MultipartStreamParser, String] {
+  ) -> Result[MultipartStreamParser, Error] {
     if !is_valid_boundary(boundary.clone) {
       return Result.Error(
-        'Invalid boundary string: exceeds 70 characters or contains invalid characters',
+        Error.InvalidBoundary(
+          Severity.Error,
+          'exceeds 70 characters or contains invalid characters',
+          Option.None,
+          Option.None,
+          Option.Some(boundary.clone),
+        ),
       )
     }
 
@@ -154,12 +162,12 @@ impl MultipartStreamParser {
   # Feed data to the parser
   #
   # Processes incoming data and emits handler callbacks as parts are discovered.
-  # Returns Ok(Nil) on success, Error(String) on parse errors.
+  # Returns Ok(0) on success, Error on parse errors.
   fn pub mut feed[H: mut + MultipartStreamHandler](
     data: ref ByteArray,
     handler: mut H,
     default_encoding: String,
-  ) -> Result[Int, String] {
+  ) -> Result[Int, Error] {
     # Append new data to buffer
     let mut i = 0
 
@@ -230,10 +238,10 @@ impl MultipartStreamParser {
   # Finalize parsing
   #
   # Must be called after all data has been fed to ensure proper validation
-  # and cleanup. Returns Ok(Nil) if parsing completed successfully.
+  # and cleanup. Returns Ok(0) if parsing completed successfully.
   fn pub mut finish[H: mut + MultipartStreamHandler](
     handler: mut H,
-  ) -> Result[Int, String] {
+  ) -> Result[Int, Error] {
     # If we're at a boundary, check if it's end boundary
     match @state {
       case AtBoundary -> {
@@ -253,14 +261,28 @@ impl MultipartStreamParser {
       case Preamble -> {
         # No parts found - could be valid for empty multipart
         if @strict_mode {
-          Result.Error('No parts found in multipart message')
+          Result.Error(
+            Error.MultipartWithoutParts(
+              Severity.Error,
+              Option.None,
+              Option.None,
+              Option.None,
+            ),
+          )
         } else {
           Result.Ok(0)
         }
       }
       case AtBoundary -> {
         # Parser stopped at boundary - still incomplete after processing
-        Result.Error('Incomplete multipart message: stopped at boundary')
+        Result.Error(
+          Error.BoundaryNotFound(
+            Severity.Error,
+            Option.None,
+            Option.None,
+            Option.None,
+          ),
+        )
       }
       case ReadingHeaders -> {
         # Parser stopped while reading headers
@@ -270,7 +292,13 @@ impl MultipartStreamParser {
           case None -> Result.Ok(0)
           case Some(_) -> {
             Result.Error(
-              'Incomplete multipart message: stopped while reading headers',
+              Error.MalformedHeader(
+                Severity.Error,
+                'incomplete multipart message: stopped while reading headers',
+                Option.None,
+                Option.None,
+                Option.None,
+              ),
             )
           }
         }
@@ -293,7 +321,7 @@ impl MultipartStreamParser {
 fn process_preamble[H: mut + MultipartStreamHandler](
   parser: mut MultipartStreamParser,
   handler: mut H,
-) -> Result[Int, String] {
+) -> Result[Int, Error] {
   let boundary_marker = '--' + parser.boundary
   let boundary_bytes = boundary_marker.to_byte_array
 
@@ -358,7 +386,7 @@ fn process_preamble[H: mut + MultipartStreamHandler](
 fn process_at_boundary[H: mut + MultipartStreamHandler](
   parser: mut MultipartStreamParser,
   handler: mut H,
-) -> Result[Int, String] {
+) -> Result[Int, Error] {
   # Check if this is end boundary (--boundary--)
   if parser.buffer.size >= 2 {
     match parser.buffer.get(0) {
@@ -394,7 +422,7 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
   parser: mut MultipartStreamParser,
   handler: mut H,
   default_encoding: String,
-) -> Result[Int, String] {
+) -> Result[Int, Error] {
   # Look for double newline indicating end of headers
   let header_end = find_double_newline(ref parser.buffer)
 
@@ -559,7 +587,16 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
       # Headers not complete yet - keep buffering
       # Check buffer size to prevent excessive memory use
       if parser.buffer.size > MAX_HEADERS_SECTION_SIZE {
-        return Result.Error('Part headers exceed maximum size')
+        return Result.Error(
+          Error.HeaderValueTooLarge(
+            Severity.Error,
+            parser.buffer.size,
+            MAX_HEADERS_SECTION_SIZE,
+            Option.None,
+            Option.None,
+            Option.None,
+          ),
+        )
       }
 
       Result.Ok(0)
@@ -574,7 +611,7 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
   parser: mut MultipartStreamParser,
   handler: mut H,
   default_encoding: String,
-) -> Result[Int, String] {
+) -> Result[Int, Error] {
   let boundary_marker = '--' + parser.boundary
   let boundary_bytes = boundary_marker.to_byte_array
 
@@ -929,7 +966,7 @@ fn parse_part_headers(
   headers_raw: String,
   max_headers: Int,
   strict_mode: Bool,
-) -> Result[Array[(String, String)], String] {
+) -> Result[Array[(String, String)], Error] {
   match
     parse_headers_impl(
       headers_raw,
@@ -939,7 +976,7 @@ fn parse_part_headers(
     )
   {
     case Ok(headers) -> Result.Ok(headers)
-    case Error(e) -> Result.Error(e.to_message)
+    case Error(e) -> Result.Error(e)
   }
 }
 

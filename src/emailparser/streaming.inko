@@ -386,7 +386,7 @@ impl StreamingParser {
     {
       case Ok(count) -> count
       case Error(e) -> {
-        let failure = Error.from_string(e)
+        let failure = e
 
         match handler.on_error(failure) {
           case Ok(_) -> {}
@@ -695,7 +695,7 @@ impl StreamingParser {
           {
             case Ok(count) -> count
             case Error(e) -> {
-              let failure = Error.from_string(e)
+              let failure = e
 
               match handler.on_error(failure) {
                 case Ok(_) -> {}
@@ -729,7 +729,7 @@ impl StreamingParser {
       {
         case Ok(_) -> 0
         case Error(e) -> {
-          let failure = Error.from_string(e)
+          let failure = e
 
           match handler.on_error(failure) {
             case Ok(_) -> {}
@@ -898,7 +898,7 @@ fn parse_body_stream[H: mut + StreamHandler](
   content_transfer_encoding: String,
   handler: mut H,
   config: mut StreamingConfig,
-) -> Result[Int, String] {
+) -> Result[Int, Error] {
   if is_multipart(ct_main) {
     match boundary {
       case Some(b) -> {
@@ -950,7 +950,7 @@ fn stream_body_impl[H: mut + StreamHandler](
   is_html: Bool,
   strict_mode: Bool,
   handler: mut H,
-) -> Result[Int, String] {
+) -> Result[Int, Error] {
   let encoding_lower = encoding.to_lower
 
   if encoding_lower == 'base64' {
@@ -1050,7 +1050,7 @@ fn stream_text_body[H: mut + StreamHandler](
   max_size: Int,
   strict_mode: Bool,
   handler: mut H,
-) -> Result[Int, String] {
+) -> Result[Int, Error] {
   stream_body_impl(
     body_raw,
     encoding,
@@ -1070,7 +1070,7 @@ fn stream_html_body[H: mut + StreamHandler](
   max_size: Int,
   strict_mode: Bool,
   handler: mut H,
-) -> Result[Int, String] {
+) -> Result[Int, Error] {
   stream_body_impl(
     body_raw,
     encoding,
@@ -1097,7 +1097,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
   max_email_size: Int,
   start_total_bytes: Int,
   handler: mut H,
-) -> Result[Int, String] {
+) -> Result[Int, Error] {
   let mut total_bytes = start_total_bytes
   let encoding_lower = encoding.to_lower
 
@@ -1136,7 +1136,13 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
 
           if total_bytes > max_email_size {
             return Result.Error(
-              'Email size ${total_bytes} exceeds maximum ${max_email_size}',
+              Error.EmailSizeExceeded(
+                Severity.Error,
+                max_email_size,
+                total_bytes,
+                Option.None,
+                Option.None,
+              ),
             )
           }
 
@@ -1159,7 +1165,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
             case Error(_) -> {}
           }
         }
-        case Error(e) -> return Result.Error(e)
+        case Error(e) -> return Result.Error(Error.from_string(e))
       }
     }
 
@@ -1216,7 +1222,13 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
 
           if total_bytes > max_email_size {
             return Result.Error(
-              'Email size ${total_bytes} exceeds maximum ${max_email_size}',
+              Error.EmailSizeExceeded(
+                Severity.Error,
+                max_email_size,
+                total_bytes,
+                Option.None,
+                Option.None,
+              ),
             )
           }
 
@@ -1239,7 +1251,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
             case Error(_) -> {}
           }
         }
-        case Error(e) -> return Result.Error(e)
+        case Error(e) -> return Result.Error(Error.from_string(e))
       }
     }
 
@@ -1280,7 +1292,13 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
 
           if total_bytes > max_email_size {
             return Result.Error(
-              'Email size ${total_bytes} exceeds maximum ${max_email_size}',
+              Error.EmailSizeExceeded(
+                Severity.Error,
+                max_email_size,
+                total_bytes,
+                Option.None,
+                Option.None,
+              ),
             )
           }
 
@@ -1294,7 +1312,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
             case Error(_) -> {}
           }
         }
-        case Error(e) -> return Result.Error(e)
+        case Error(e) -> return Result.Error(Error.from_string(e))
       }
     }
   }
@@ -1308,7 +1326,7 @@ fn send_text_chunks[H: mut + StreamHandler](
   chunk_size: Int,
   is_html: Bool,
   handler: mut H,
-) -> Result[Int, String] {
+) -> Result[Int, Error] {
   let mut pos = 0
 
   while pos < decoded_str.size {
@@ -1327,7 +1345,11 @@ fn send_text_chunks[H: mut + StreamHandler](
 
     match result {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error('Handler text callback failed: ${e}')
+      case Error(e) -> {
+        return Result.Error(
+          Error.from_string('Handler text callback failed: ${e}'),
+        )
+      }
     }
 
     pos = end
@@ -1354,7 +1376,7 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
   max_email_size: Int,
   start_total_bytes: Int,
   handler: mut H,
-) -> Result[Int, String] {
+) -> Result[Int, Error] {
   let mut total_bytes = start_total_bytes
   let mut parser = match
     MultipartStreamParser.new(
@@ -1408,7 +1430,13 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
 
         if total_bytes > max_email_size {
           return Result.Error(
-            'Email size ${total_bytes} exceeds maximum ${max_email_size}',
+            Error.EmailSizeExceeded(
+              Severity.Error,
+              max_email_size,
+              total_bytes,
+              Option.None,
+              Option.None,
+            ),
           )
         }
 
@@ -1417,7 +1445,7 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
           case Error(e) -> return Result.Error(e)
         }
       }
-      case Error(e) -> return Result.Error(e)
+      case Error(e) -> return Result.Error(Error.from_string(e))
     }
   }
 
@@ -1458,7 +1486,7 @@ if
     headers: ref Array[(String, String)],
     content_type: String,
     is_attachment: Bool,
-  ) -> Result[Int, String] {
+  ) -> Result[Int, Error] {
     let (main_type, ct_params) = match parse_content_type_impl(content_type) {
       case Ok((mt, params)) -> (mt, params)
       case Error(_) -> (content_type, [])
@@ -1519,7 +1547,9 @@ if
       match @handler.on_attachment_begin(info) {
         case Ok(_) -> {}
         case Error(e) -> {
-          return Result.Error('Handler on_attachment_begin failed: ${e}')
+          return Result.Error(
+            Error.from_string('Handler on_attachment_begin failed: ${e}'),
+          )
         }
       }
 
@@ -1532,7 +1562,7 @@ if
   fn pub mut on_part_data(
     data: ref ByteArray,
     content_transfer_encoding: String,
-  ) -> Result[Int, String] {
+  ) -> Result[Int, Error] {
     match @nested_buffer {
       case Some(mut buffer) -> {
         buffer.append(data.clone)
@@ -1568,14 +1598,25 @@ if
                       + decoded.size
 
                     if @current_attachment_size > @max_size {
-                      return Result.Error('Attachment exceeds maximum size')
+                      return Result.Error(
+                        Error.AttachmentSizeTooLarge(
+                          Severity.Error,
+                          @current_attachment_size,
+                          @max_size,
+                          Option.None,
+                          Option.None,
+                          Option.None,
+                        ),
+                      )
                     }
 
                     match @handler.on_attachment_chunk(decoded, info) {
                       case Ok(_) -> {}
                       case Error(e) -> {
                         return Result.Error(
-                          'Handler on_attachment_chunk failed: ${e}',
+                          Error.from_string(
+                            'Handler on_attachment_chunk failed: ${e}',
+                          ),
                         )
                       }
                     }
@@ -1605,14 +1646,25 @@ if
                       + decoded.size
 
                     if @current_attachment_size > @max_size {
-                      return Result.Error('Attachment exceeds maximum size')
+                      return Result.Error(
+                        Error.AttachmentSizeTooLarge(
+                          Severity.Error,
+                          @current_attachment_size,
+                          @max_size,
+                          Option.None,
+                          Option.None,
+                          Option.None,
+                        ),
+                      )
                     }
 
                     match @handler.on_attachment_chunk(decoded, info) {
                       case Ok(_) -> {}
                       case Error(e) -> {
                         return Result.Error(
-                          'Handler on_attachment_chunk failed: ${e}',
+                          Error.from_string(
+                            'Handler on_attachment_chunk failed: ${e}',
+                          ),
                         )
                       }
                     }
@@ -1627,13 +1679,24 @@ if
           @current_attachment_size = @current_attachment_size + data_str.size
 
           if @current_attachment_size > @max_size {
-            return Result.Error('Attachment exceeds maximum size')
+            return Result.Error(
+              Error.AttachmentSizeTooLarge(
+                Severity.Error,
+                @current_attachment_size,
+                @max_size,
+                Option.None,
+                Option.None,
+                Option.None,
+              ),
+            )
           }
 
           match @handler.on_attachment_chunk(data_str, info) {
             case Ok(_) -> {}
             case Error(e) -> {
-              return Result.Error('Handler on_attachment_chunk failed: ${e}')
+              return Result.Error(
+                Error.from_string('Handler on_attachment_chunk failed: ${e}'),
+              )
             }
           }
         }
@@ -1730,7 +1793,7 @@ if
     Result.Ok(0)
   }
 
-  fn pub mut on_part_end -> Result[Int, String] {
+  fn pub mut on_part_end -> Result[Int, Error] {
     # Nested multipart: parse the buffered body with a child parser.
     let mut is_nested = false
     let mut nested_buffer = ByteArray.new
@@ -1756,7 +1819,16 @@ if
       if nested_boundary.empty? { return Result.Ok(0) }
 
       if @depth + 1 > @max_depth {
-        return Result.Error('Maximum multipart depth exceeded')
+        return Result.Error(
+          Error.MultipartDepthExceeded(
+            Severity.Error,
+            @depth + 1,
+            @max_depth,
+            Option.None,
+            Option.None,
+            Option.None,
+          ),
+        )
       }
 
       let mut nested_parser = match
@@ -1850,13 +1922,24 @@ if
             @current_attachment_size = @current_attachment_size + data.size
 
             if @current_attachment_size > @max_size {
-              return Result.Error('Attachment exceeds maximum size')
+              return Result.Error(
+                Error.AttachmentSizeTooLarge(
+                  Severity.Error,
+                  @current_attachment_size,
+                  @max_size,
+                  Option.None,
+                  Option.None,
+                  Option.None,
+                ),
+              )
             }
 
             match @handler.on_attachment_chunk(data, info) {
               case Ok(_) -> {}
               case Error(e) -> {
-                return Result.Error('Handler on_attachment_chunk failed: ${e}')
+                return Result.Error(
+                  Error.from_string('Handler on_attachment_chunk failed: ${e}'),
+                )
               }
             }
           }
@@ -1868,13 +1951,24 @@ if
             @current_attachment_size = @current_attachment_size + data.size
 
             if @current_attachment_size > @max_size {
-              return Result.Error('Attachment exceeds maximum size')
+              return Result.Error(
+                Error.AttachmentSizeTooLarge(
+                  Severity.Error,
+                  @current_attachment_size,
+                  @max_size,
+                  Option.None,
+                  Option.None,
+                  Option.None,
+                ),
+              )
             }
 
             match @handler.on_attachment_chunk(data, info) {
               case Ok(_) -> {}
               case Error(e) -> {
-                return Result.Error('Handler on_attachment_chunk failed: ${e}')
+                return Result.Error(
+                  Error.from_string('Handler on_attachment_chunk failed: ${e}'),
+                )
               }
             }
           }
@@ -1884,12 +1978,23 @@ if
         match @handler.on_attachment_end(info) {
           case Ok(_) -> {}
           case Error(e) -> {
-            return Result.Error('Handler on_attachment_end failed: ${e}')
+            return Result.Error(
+              Error.from_string('Handler on_attachment_end failed: ${e}'),
+            )
           }
         }
 
         if @attachment_count >= @max_attachments {
-          return Result.Error('Maximum number of attachments exceeded')
+          return Result.Error(
+            Error.TooManyAttachments(
+              Severity.Error,
+              @attachment_count,
+              @max_attachments,
+              Option.None,
+              Option.None,
+              Option.None,
+            ),
+          )
         }
 
         @attachment_count = @attachment_count + 1
@@ -1956,9 +2061,18 @@ fn parse_multipart_stream[H: mut + StreamHandler](
   max_attachments: Int,
   chunk_size: Int,
   handler: mut H,
-) -> Result[Int, String] {
+) -> Result[Int, Error] {
   if current_depth >= max_depth {
-    return Result.Error('Maximum multipart depth exceeded')
+    return Result.Error(
+      Error.MultipartDepthExceeded(
+        Severity.Error,
+        current_depth,
+        max_depth,
+        Option.None,
+        Option.None,
+        Option.None,
+      ),
+    )
   }
 
   let mut attachment_count = 0

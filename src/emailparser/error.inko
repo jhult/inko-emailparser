@@ -37,6 +37,14 @@ type pub enum Error {
     Option[Int],
     Option[String],
   )
+  case TooManyAttachments(
+    Severity,
+    Int,
+    Int,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
   case TooManyHeaders(
     Severity,
     Int,
@@ -226,6 +234,19 @@ impl Error {
             + ' bytes (max: '
             + max_size.to_string
             + ' bytes)',
+          line: line.clone,
+          position: pos.clone,
+          fragment: frag.clone,
+        )
+      }
+      case TooManyAttachments(sev, count, max_count, line, pos, frag) -> {
+        ErrorContext(
+          severity: sev.copy,
+          message: 'Maximum number of attachments exceeded: '
+            + count.to_string
+            + ' (max: '
+            + max_count.to_string
+            + ')',
           line: line.clone,
           position: pos.clone,
           fragment: frag.clone,
@@ -442,6 +463,7 @@ impl Error {
     match self {
       case EmailSizeTooLarge(_, _, _, _, _, _) -> 'EmailSizeTooLarge'
       case AttachmentSizeTooLarge(_, _, _, _, _, _) -> 'AttachmentSizeTooLarge'
+      case TooManyAttachments(_, _, _, _, _, _) -> 'TooManyAttachments'
       case TooManyHeaders(_, _, _, _, _, _) -> 'TooManyHeaders'
       case MultipartDepthExceeded(_, _, _, _, _, _) -> 'MultipartDepthExceeded'
       case InvalidHeaderFieldName(_, _, _, _, _) -> 'InvalidHeaderFieldName'

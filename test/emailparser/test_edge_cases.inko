@@ -1049,7 +1049,7 @@ Malformed attachment
 
     match parser.parse_stream(email, handler) {
       case Ok(_) -> t.false(true)
-      case Error(e) -> t.true(e.to_message.contains?('maximum size'))
+      case Error(e) -> t.equal(e.variant, 'AttachmentSizeTooLarge')
     }
   })
 
@@ -1065,9 +1065,7 @@ Malformed attachment
 
     match parser.parse_stream(email, handler) {
       case Ok(_) -> t.false(true)
-      case Error(e) -> {
-        t.true(e.to_message.contains?('Maximum number of attachments'))
-      }
+      case Error(e) -> t.equal(e.variant, 'TooManyAttachments')
     }
   })
 
