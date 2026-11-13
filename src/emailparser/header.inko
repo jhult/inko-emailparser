@@ -223,6 +223,7 @@ fn parse_headers_impl(
         }
 
         let new_size = current_value.size + 1 + line_str.trim.size
+        let mut append = true
 
         match
           SizeTracker.check_allocation(0, new_size, MAX_HEADER_VALUE_LENGTH)
@@ -241,12 +242,14 @@ fn parse_headers_impl(
                 ),
               )
             } else {
-              break
+              # Permissive mode: drop only this continuation and keep parsing.
+              # Breaking here would discard every following header.
+              append = false
             }
           }
         }
 
-        current_value = current_value + ' ' + line_str.trim
+        if append { current_value = current_value + ' ' + line_str.trim }
       }
     } else {
       # New header

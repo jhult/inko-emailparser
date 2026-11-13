@@ -303,4 +303,26 @@ fn pub tests(t: mut Tests) {
       case Error(_) -> t.true(false)
     }
   })
+
+  t.test('oversized_folded_header_keeps_following_headers', fn (t) {
+    let parser = EmailParser.new
+
+    let mut continuation = ''
+
+    while continuation.size < 9000 { continuation = continuation + 'x' }
+
+    let raw = 'Subject: start
+ '
+      + continuation
+      + '
+From: sender@example.com
+To: recipient@example.com
+
+Body'
+
+    match parser.parse_headers(raw) {
+      case Ok(headers) -> t.equal(headers.size, 3)
+      case Error(e) -> panic('parse_headers failed: ${e}')
+    }
+  })
 }
