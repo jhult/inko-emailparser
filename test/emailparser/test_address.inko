@@ -386,4 +386,16 @@ fn pub tests(t: mut Tests) {
 
     t.equal(addrs.size, 2)
   })
+
+  t.test('is_valid_email_format_rejects_bad_dot_atom_local', fn (t) {
+    t.false(is_valid_email_format('a..b@example.com'))
+    t.false(is_valid_email_format('.abc@example.com'))
+    t.false(is_valid_email_format('abc.@example.com'))
+  })
+
+  t.test('is_valid_email_format_rejects_bad_domain_labels', fn (t) {
+    t.false(is_valid_email_format('a@b..com'))
+    t.false(is_valid_email_format('a@b.-c.com'))
+    t.false(is_valid_email_format('a@b.c-.com'))
+  })
 }

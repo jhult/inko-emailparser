@@ -176,6 +176,15 @@ fn pub is_valid_email_format(email: String) -> Bool {
 
   if local_part.empty? { return false }
 
+  # dot-atom-text: no leading/trailing/consecutive dots (RFC 5322 3.2.3)
+  if
+    local_part.starts_with?('.')
+      or local_part.ends_with?('.')
+      or local_part.contains?('..')
+  {
+    return false
+  }
+
   let mut local_valid = false
   let mut i = 0
 
@@ -200,6 +209,13 @@ fn pub is_valid_email_format(email: String) -> Bool {
   if domain.starts_with?('.') or domain.starts_with?('-') { return false }
 
   if domain.ends_with?('.') or domain.ends_with?('-') { return false }
+
+  # No empty labels and no label starting/ending with a hyphen
+  if
+    domain.contains?('..') or domain.contains?('.-') or domain.contains?('-.')
+  {
+    return false
+  }
 
   let mut i = 0
   let mut domain_valid = false
