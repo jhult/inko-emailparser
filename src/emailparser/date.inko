@@ -140,15 +140,16 @@ import std.time (DateTime)
 # Date formatter for email headers
 type pub EmailDateFormatter {
   let pub @timezone: String
+  let @use_local_offset: Bool
 }
 
 impl EmailDateFormatter {
   fn pub static new -> EmailDateFormatter {
-    EmailDateFormatter(timezone: '0000')
+    EmailDateFormatter(timezone: '0000', use_local_offset: true)
   }
 
   fn pub static with_timezone(tz: String) -> EmailDateFormatter {
-    EmailDateFormatter(timezone: tz)
+    EmailDateFormatter(timezone: tz, use_local_offset: false)
   }
 
   # Format current time as RFC 5322 date
@@ -159,28 +160,51 @@ impl EmailDateFormatter {
 
   # Format a DateTime as RFC 5322 date
   fn pub format_datetime(date: DateTime) -> String {
-    let weekday = self.format_weekday(date.day_of_week)
-    let month = self.format_month(date.month)
-    let day = if date.day < 10 { '0${date.day}' } else { date.day.to_string }
-    let year = date.year.to_string
-    let hour = if date.hour < 10 {
-      '0${date.hour}'
+    # Convert the instant to the target offset so the wall-clock fields and
+    # the numeric offset agree. Without this a local time could be emitted
+    # with a +0000 suffix.
+    let offset = if @use_local_offset {
+      date.utc_offset
     } else {
-      date.hour.to_string
+      match parse_timezone_seconds(@timezone) {
+        case Some(seconds) -> seconds
+        case None -> date.utc_offset
+      }
     }
-    let minute = if date.minute < 10 {
-      '0${date.minute}'
-    } else {
-      date.minute.to_string
+
+    let local_date = match
+      DateTime.from_timestamp(time: date.to_float, utc_offset: offset)
+    {
+      case Some(d) -> d
+      case None -> date
     }
-    let second = if date.second < 10 {
-      '0${date.second}'
+
+    let weekday = self.format_weekday(local_date.day_of_week)
+    let month = self.format_month(local_date.month)
+    let day = if local_date.day < 10 {
+      '0${local_date.day}'
     } else {
-      date.second.to_string
+      local_date.day.to_string
+    }
+    let year = local_date.year.to_string
+    let hour = if local_date.hour < 10 {
+      '0${local_date.hour}'
+    } else {
+      local_date.hour.to_string
+    }
+    let minute = if local_date.minute < 10 {
+      '0${local_date.minute}'
+    } else {
+      local_date.minute.to_string
+    }
+    let second = if local_date.second < 10 {
+      '0${local_date.second}'
+    } else {
+      local_date.second.to_string
     }
 
     # Format timezone as ±HHMM
-    let tz = self.format_timezone_offset
+    let tz = format_offset_seconds(offset)
 
     '${weekday}, ${day} ${month} ${year} ${hour}:${minute}:${second} ${tz}'
   }
@@ -305,4 +329,80 @@ fn pub format_email_date_with_tz(date: DateTime, timezone: String) -> String {
   let formatter = EmailDateFormatter.with_timezone(timezone)
 
   formatter.format_datetime(date)
+}
+
+# Parse a "+HHMM"/"-HHMM"/"HHMM" offset into seconds
+fn parse_timezone_seconds(timezone: String) -> Option[Int] {
+  if timezone.size != 5 and timezone.size != 4 { return Option.None }
+
+  let has_sign = timezone.size == 5
+  let mut sign = 1
+  let mut start = 0
+
+  if has_sign {
+    match timezone.get(0) {
+      case Ok(byte) -> {
+        if byte == ASCII_HYPHEN {
+          sign = -1
+        } else if byte != ASCII_PLUS {
+          return Option.None
+        }
+
+        start = 1
+      }
+      case Error(_) -> return Option.None
+    }
+  }
+
+  let h1 = match digit_at(timezone, start) {
+    case Some(v) -> v
+    case None -> return Option.None
+  }
+  let h2 = match digit_at(timezone, start + 1) {
+    case Some(v) -> v
+    case None -> return Option.None
+  }
+  let m1 = match digit_at(timezone, start + 2) {
+    case Some(v) -> v
+    case None -> return Option.None
+  }
+  let m2 = match digit_at(timezone, start + 3) {
+    case Some(v) -> v
+    case None -> return Option.None
+  }
+
+  let hours = (h1 * 10) + h2
+  let minutes = (m1 * 10) + m2
+
+  if minutes > 59 { return Option.None }
+
+  Option.Some(sign * ((hours * 3600) + (minutes * 60)))
+}
+
+# Value of an ASCII digit at `index`, if present
+fn digit_at(text: String, index: Int) -> Option[Int] {
+  if index >= text.size { return Option.None }
+
+  match text.get(index) {
+    case Ok(byte) -> {
+      if byte < ASCII_DIGIT_0 or byte > ASCII_DIGIT_9 {
+        Option.None
+      } else {
+        Option.Some(byte - ASCII_DIGIT_0)
+      }
+    }
+    case Error(_) -> Option.None
+  }
+}
+
+# Format an offset in seconds as "+HHMM"
+fn format_offset_seconds(offset: Int) -> String {
+  let sign = if offset < 0 { '-' } else { '+' }
+  let abs = if offset < 0 { 0 - offset } else { offset }
+  let hours = abs / 3600
+  let minutes = (abs % 3600) / 60
+  let hours_str = if hours < 10 { '0${hours}' } else { hours.to_string }
+  let minutes_str = if minutes < 10 { '0${minutes}' } else { minutes.to_string }
+
+  '${sign}${hours_str}${minutes_str}'
 }

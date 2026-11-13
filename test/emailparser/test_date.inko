@@ -209,4 +209,24 @@ fn pub tests(t: mut Tests) {
         or month == 'Dec',
     )
   })
+
+  t.test('format_datetime_with_custom_timezone_shifts_clock', fn (t) {
+    let formatter = EmailDateFormatter.with_timezone('-0500')
+    let epoch = match DateTime.from_timestamp(time: 0, utc_offset: 0) {
+      case Some(d) -> d
+      case None -> panic('Failed to build DateTime')
+    }
+
+    t.equal(formatter.format_datetime(epoch), 'Wed, 31 Dec 1969 19:00:00 -0500')
+  })
+
+  t.test('format_datetime_defaults_to_datetime_offset', fn (t) {
+    let formatter = EmailDateFormatter.new
+    let date = match DateTime.from_timestamp(time: 0, utc_offset: 0 - 21600) {
+      case Some(d) -> d
+      case None -> panic('Failed to build DateTime')
+    }
+
+    t.equal(formatter.format_datetime(date), 'Wed, 31 Dec 1969 18:00:00 -0600')
+  })
 }
