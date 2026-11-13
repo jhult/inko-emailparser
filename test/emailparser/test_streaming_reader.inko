@@ -4,8 +4,72 @@
 
 # Tests for streaming reader (AsyncReader trait and ByteArrayReader)
 
+import emailparser.streaming (AttachmentInfo, StreamHandler, StreamingParser)
 import emailparser.streaming_reader (ByteArrayReader)
+import std.result (Result)
 import std.test (Tests)
+
+# Handler that records delivered text
+type pub CollectingHandler {
+  let pub mut @text: String
+  let pub mut @headers_received: Bool
+  let pub mut @ended: Bool
+}
+
+impl CollectingHandler {
+  fn pub static new -> CollectingHandler {
+    CollectingHandler(text: '', headers_received: false, ended: false)
+  }
+}
+
+impl StreamHandler for CollectingHandler {
+  fn pub mut on_begin -> Result[Int, String] {
+    Result.Ok(0)
+  }
+
+  fn pub mut on_headers(
+    headers: ref Array[(String, String)],
+  ) -> Result[Int, String] {
+    @headers_received = headers.size > 0
+    Result.Ok(0)
+  }
+
+  fn pub mut on_text_chunk(chunk: String) -> Result[Int, String] {
+    @text = @text + chunk
+    Result.Ok(0)
+  }
+
+  fn pub mut on_html_chunk(chunk: String) -> Result[Int, String] {
+    Result.Ok(0)
+  }
+
+  fn pub mut on_attachment_begin(
+    info: ref AttachmentInfo,
+  ) -> Result[Int, String] {
+    Result.Ok(0)
+  }
+
+  fn pub mut on_attachment_chunk(
+    chunk: ByteArray,
+    info: ref AttachmentInfo,
+  ) -> Result[Int, String] {
+    Result.Ok(0)
+  }
+
+  fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String]
+  {
+    Result.Ok(0)
+  }
+
+  fn pub mut on_end -> Result[Int, String] {
+    @ended = true
+    Result.Ok(0)
+  }
+
+  fn pub mut on_error(error: String) -> Result[Int, String] {
+    Result.Ok(0)
+  }
+}
 
 fn pub tests(t: mut Tests) {
   t.test('byte_array_reader_new', fn (t) {
@@ -163,6 +227,38 @@ fn pub tests(t: mut Tests) {
         }
       }
       case Error(e) -> panic('Failed: ${e}')
+    }
+  })
+
+  t.test('parse_async_reader_lf_headers', fn (t) {
+    let mut parser = StreamingParser.new
+    let mut handler = CollectingHandler.new
+    let raw = 'From: a@example.com\nTo: b@example.com\nSubject: LF test\nContent-Type: text/plain\n\nHello LF body'
+    let mut reader = ByteArrayReader.from_string(raw)
+
+    match parser.parse_async_reader(mut reader, mut handler) {
+      case Ok(result) -> {
+        t.equal(result.subject, 'LF test')
+        t.true(handler.headers_received)
+        t.true(handler.text.contains?('Hello LF body'))
+      }
+      case Error(e) -> panic('parse_async_reader failed: ${e}')
+    }
+  })
+
+  t.test('parse_async_reader_crlf_headers', fn (t) {
+    let mut parser = StreamingParser.new
+    let mut handler = CollectingHandler.new
+    let raw = 'From: a@example.com\r\nTo: b@example.com\r\nSubject: CRLF test\r\nContent-Type: text/plain\r\n\r\nHello CRLF body'
+    let mut reader = ByteArrayReader.from_string(raw)
+
+    match parser.parse_async_reader(mut reader, mut handler) {
+      case Ok(result) -> {
+        t.equal(result.subject, 'CRLF test')
+        t.true(handler.headers_received)
+        t.true(handler.text.contains?('Hello CRLF body'))
+      }
+      case Error(e) -> panic('parse_async_reader failed: ${e}')
     }
   })
 }
