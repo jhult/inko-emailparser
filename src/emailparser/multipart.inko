@@ -415,9 +415,130 @@ fn pub split_multipart_body(
     )
   }
 
-  let parts = raw.split(boundary_delim).map(fn (s) { s.to_string }).to_array
+  # Split only on delimiters that start a line. A plain substring split lets
+  # body text such as "before --boundary after" truncate or hide content.
+  let parts = split_on_boundary(raw, boundary_delim)
 
   Result.Ok(parts)
+}
+
+# Split `raw` on `marker`, but only where `marker` starts a line
+fn split_on_boundary(raw: String, marker: String) -> Array[String] {
+  let bytes = raw.to_byte_array
+  let marker_bytes = marker.to_byte_array
+  let mut parts: Array[String] = []
+
+  if marker_bytes.size == 0 { return [raw.clone] }
+
+  if bytes.size < marker_bytes.size { return [raw.clone] }
+
+  let mut start = 0
+  let mut i = 0
+  let max_i = bytes.size - marker_bytes.size
+
+  while i <= max_i {
+    if boundary_at(ref bytes, ref marker_bytes, i) {
+      parts.push(bytes_range_to_string(ref bytes, start, i))
+      start = i + marker_bytes.size
+      i = start
+    } else {
+      i = i + 1
+    }
+  }
+
+  parts.push(bytes_range_to_string(ref bytes, start, bytes.size))
+  parts
+}
+
+# Whether a valid boundary delimiter appears at `pos`
+fn boundary_at(bytes: ref ByteArray, marker: ref ByteArray, pos: Int) -> Bool {
+  if pos > 0 {
+    match bytes.get(pos - 1) {
+      case Ok(b) -> if b != 10 { return false }
+      case Error(_) -> return false
+    }
+  }
+
+  let mut j = 0
+
+  while j < marker.size {
+    match bytes.get(pos + j) {
+      case Ok(a) -> {
+        match marker.get(j) {
+          case Ok(b) -> if a != b { return false }
+          case Error(_) -> return false
+        }
+      }
+      case Error(_) -> return false
+    }
+
+    j = j + 1
+  }
+
+  # Validate what follows the marker: CRLF, bare LF, transport padding, close
+  # delimiter ("--"), or end of input.
+  let tail = pos + marker.size
+
+  if tail >= bytes.size { return true }
+
+  match bytes.get(tail) {
+    case Ok(b) -> {
+      if b == 13 or b == 10 {
+        true
+      } else if b == 45 {
+        if tail + 1 >= bytes.size { return true }
+
+        match bytes.get(tail + 1) {
+          case Ok(b2) -> b2 == 45
+          case Error(_) -> false
+        }
+      } else if b == 32 or b == 9 {
+        padding_ends_line(ref bytes, tail)
+      } else {
+        false
+      }
+    }
+    case Error(_) -> false
+  }
+}
+
+# Whether transport padding at `pos` is terminated by CRLF/LF or end of input
+fn padding_ends_line(bytes: ref ByteArray, pos: Int) -> Bool {
+  let mut i = pos
+
+  while i < bytes.size {
+    match bytes.get(i) {
+      case Ok(b) -> {
+        if b == 32 or b == 9 {
+          i = i + 1
+        } else if b == 13 or b == 10 {
+          return true
+        } else {
+          return false
+        }
+      }
+      case Error(_) -> return false
+    }
+  }
+
+  true
+}
+
+# Convert the byte range [start, end) of `bytes` to a String
+fn bytes_range_to_string(bytes: ref ByteArray, start: Int, end: Int) -> String {
+  let mut result = ByteArray.new
+  let mut i = start
+
+  while i < end {
+    match bytes.get(i) {
+      case Ok(b) -> result.push(b)
+      case Error(_) -> {}
+    }
+
+    i = i + 1
+  }
+
+  result.into_string
 }
 
 # Parse headers from a single multipart part

@@ -159,9 +159,8 @@ impl StreamHandler for ErrorTestingHandler {
     Result.Ok(0)
   }
 
-  fn pub mut on_attachment_end(
-    info: ref AttachmentInfo,
-  ) -> Result[Int, String] {
+  fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String]
+  {
     let info_copy = AttachmentInfo(
       index: info.index,
       content_type: info.content_type.clone(),
@@ -608,6 +607,34 @@ Content-Type: text/html
         # May fail on malformed headers
         t.true(true)
       }
+    }
+  })
+
+  t.test('boundary_text_inside_body_is_not_split', fn (t) {
+    let parser = EmailParser.new
+
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Test
+Message-ID: <test@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+before --b after
+--b--
+'
+
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        match msg.text_body {
+          case Some(text) -> t.true(text.contains?('after'))
+          case None -> t.true(false)
+        }
+      }
+      case Error(e) -> t.true(e.contains?('error'))
     }
   })
 

@@ -700,40 +700,121 @@ fn find_boundary_in_buffer(
   let max_i = buffer.size - boundary.size
 
   while i <= max_i {
-    let mut match_found = true
-    let mut j = 0
-
-    while j < boundary.size {
-      match buffer.get(i + j) {
-        case Ok(buf_byte) -> {
-          match boundary.get(j) {
-            case Ok(bound_byte) -> {
-              if buf_byte != bound_byte {
-                match_found = false
-                break
-              }
-            }
-            case Error(_) -> {
-              match_found = false
-              break
-            }
-          }
-        }
-        case Error(_) -> {
-          match_found = false
-          break
-        }
-      }
-
-      j = j + 1
+    # RFC 2046: the delimiter must start a line, i.e. be at the start of the
+    # buffer or immediately follow an LF (the CR of a CRLF is optional).
+    if
+      is_line_start(ref buffer, i)
+        and bytes_match_at(ref buffer, ref boundary, i)
+        and is_valid_boundary_tail(ref buffer, i + boundary.size)
+    {
+      return Option.Some(i)
     }
-
-    if match_found { return Option.Some(i) }
 
     i = i + 1
   }
 
   Option.None
+}
+
+# Whether position `pos` starts a line in `buffer`
+fn is_line_start(buffer: ref ByteArray, pos: Int) -> Bool {
+  if pos == 0 { return true }
+
+  match buffer.get(pos - 1) {
+    case Ok(b) -> b == 10
+    case Error(_) -> false
+  }
+}
+
+# Whether `needle` occurs in `buffer` starting at `pos`
+fn bytes_match_at(
+  buffer: ref ByteArray,
+  needle: ref ByteArray,
+  pos: Int,
+) -> Bool {
+  let mut j = 0
+
+  while j < needle.size {
+    match buffer.get(pos + j) {
+      case Ok(buf_byte) -> {
+        match needle.get(j) {
+          case Ok(needle_byte) -> if buf_byte != needle_byte { return false }
+          case Error(_) -> return false
+        }
+      }
+      case Error(_) -> return false
+    }
+
+    j = j + 1
+  }
+
+  true
+}
+
+# Whether the bytes after a boundary marker form a valid delimiter tail
+#
+# RFC 2046 allows transport padding (spaces/tabs) followed by CRLF, a bare LF,
+# or a second "--" for the close delimiter. An incomplete tail (end of buffer)
+# is rejected so a partial delimiter is not mistaken for a boundary.
+fn is_valid_boundary_tail(buffer: ref ByteArray, pos: Int) -> Bool {
+  if pos >= buffer.size { return false }
+
+  match buffer.get(pos) {
+    case Ok(b) -> {
+      if b == 13 {
+        if pos + 1 >= buffer.size { return false }
+
+        match buffer.get(pos + 1) {
+          case Ok(b2) -> b2 == 10
+          case Error(_) -> false
+        }
+      } else if b == 10 {
+        true
+      } else if b == 45 {
+        # Close delimiter is exactly "--"
+        if pos + 1 >= buffer.size { return false }
+
+        match buffer.get(pos + 1) {
+          case Ok(b2) -> b2 == 45
+          case Error(_) -> false
+        }
+      } else if b == 32 or b == 9 {
+        valid_transport_padding(ref buffer, pos)
+      } else {
+        false
+      }
+    }
+    case Error(_) -> false
+  }
+}
+
+# Whether `pos` begins transport padding terminated by CRLF/LF
+fn valid_transport_padding(buffer: ref ByteArray, pos: Int) -> Bool {
+  let mut i = pos
+
+  loop {
+    if i >= buffer.size { return false }
+
+    match buffer.get(i) {
+      case Ok(b) -> {
+        if b == 32 or b == 9 {
+          i = i + 1
+        } else if b == 13 {
+          if i + 1 >= buffer.size { return false }
+
+          match buffer.get(i + 1) {
+            case Ok(b2) -> return b2 == 10
+            case Error(_) -> return false
+          }
+        } else if b == 10 {
+          return true
+        } else {
+          return false
+        }
+      }
+      case Error(_) -> return false
+    }
+  }
 }
 
 # Number of bytes taken up by a line break at the start of the buffer

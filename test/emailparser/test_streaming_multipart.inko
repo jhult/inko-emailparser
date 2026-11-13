@@ -456,6 +456,39 @@ Content-Type: text/html
     t.equal(handler.data_chunks.get(0).or(''), 'Test')
   })
 
+  t.test('boundary_text_inside_body_is_not_delimiter', fn (t) {
+    let mut parser = match
+      MultipartStreamParser.new(
+        boundary: 'b',
+        max_depth: 10,
+        chunk_size: 8192,
+        strict_mode: false,
+        max_headers: 100,
+        max_attachment_size: 10_000_000,
+      )
+    {
+      case Ok(p) -> p
+      case Error(e) -> panic('Failed to create parser: ${e}')
+    }
+
+    let mut handler = TestHandler.new
+    let raw = '--b\nContent-Type: text/plain\n\nbefore --b after\n--b--'
+    let data = raw.to_byte_array
+
+    match parser.feed(ref data, mut handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic('Feed failed: ${e}')
+    }
+
+    match parser.finish(mut handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic('Finish failed: ${e}')
+    }
+
+    t.equal(handler.parts_begun, 1)
+    t.equal(handler.data_chunks.get(0).or(''), 'before --b after\n')
+  })
+
   t.test('multipart_preamble_handling', fn (t) {
     let mut parser = match
       MultipartStreamParser.new(
