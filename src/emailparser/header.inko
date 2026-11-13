@@ -521,7 +521,9 @@ fn parse_content_type_impl(
     case None -> {}
   }
 
-  Result.Ok((main_type, params))
+  # MIME types are case-insensitive (RFC 2045 section 5.1); normalize once so
+  # all downstream comparisons can be exact.
+  Result.Ok((main_type.to_lower, params))
 }
 
 # Parse parameters with quote-aware semicolon splitting
@@ -703,7 +705,8 @@ fn parse_content_disposition_impl(
     case None -> {}
   }
 
-  Result.Ok((disp_type, params))
+  # Disposition types are case-insensitive (RFC 2183).
+  Result.Ok((disp_type.to_lower, params))
 }
 
 # Get parameter value from params list

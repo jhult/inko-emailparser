@@ -435,8 +435,10 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
       }
 
       # Extract key header values
+      # RFC 2045 section 5.2: a part without Content-Type defaults to
+      # text/plain.
       let content_type = get_header_value(ref headers, 'Content-Type').or(
-        'application/octet-stream',
+        'text/plain',
       )
       let content_disposition = get_header_value(
         ref headers,
@@ -450,8 +452,10 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
         .or(default_encoding)
       let content_id = get_header_value(ref headers, 'Content-ID')
 
-      # Determine if attachment
-      let is_attachment = content_disposition.starts_with?('attachment')
+      # Determine if attachment (RFC 2183 values are case-insensitive)
+      let is_attachment = content_disposition.to_lower.starts_with?(
+        'attachment',
+      )
 
       # Extract filename if present
       let filename = if is_attachment {

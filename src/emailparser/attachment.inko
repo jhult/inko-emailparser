@@ -150,12 +150,12 @@ impl EmailAttachment {
 
   # Check if this attachment is inline (for HTML email images)
   fn pub is_inline? -> Bool {
-    @content_disposition == 'inline'
+    @content_disposition.to_lower == 'inline'
   }
 
   # Check if this attachment is a regular attachment
   fn pub is_attachment? -> Bool {
-    @content_disposition == 'attachment'
+    @content_disposition.to_lower == 'attachment'
   }
 
   # Check if this is an image attachment

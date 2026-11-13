@@ -728,8 +728,8 @@ Plain text without headers
 
     t.equal(handler.parts_begun, 1)
 
-    # Should default to application/octet-stream
-    t.equal(handler.content_types.get(0).or(''), 'application/octet-stream')
+    # RFC 2045 section 5.2: no Content-Type defaults to text/plain
+    t.equal(handler.content_types.get(0).or(''), 'text/plain')
   })
 
   t.test('multipart_mixed_line_endings', fn (t) {

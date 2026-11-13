@@ -716,6 +716,84 @@ ZGF0YQ==
     }
   })
 
+  t.test('mixed_case_mime_types_non_streaming', fn (t) {
+    let parser = EmailParser.new
+
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Mixed case
+Message-ID: <mixed@example.com>
+MIME-Version: 1.0
+Content-Type: Multipart/Mixed; boundary=b
+
+--b
+Content-Type: Text/Plain
+
+Hello there
+--b
+Content-Type: Application/Octet-Stream
+Content-Disposition: Attachment; filename="f.bin"
+Content-Transfer-Encoding: base64
+
+ZGF0YQ==
+--b--
+'
+
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        match msg.text_body {
+          case Some(text) -> t.true(text.contains?('Hello there'))
+          case None -> t.true(false)
+        }
+
+        t.equal(msg.attachments.size, 1)
+
+        match msg.attachments.get(0) {
+          case Ok(att) -> {
+            t.equal(att.content_type, 'application/octet-stream')
+            t.true(att.is_attachment?)
+          }
+          case Error(_) -> t.true(false)
+        }
+      }
+      case Error(e) -> panic('Parse failed: ${e}')
+    }
+  })
+
+  t.test('mixed_case_mime_types_streaming', fn (t) {
+    let parser = StreamingParser.new
+    let mut handler = ErrorTestingHandler.new(0, false)
+
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Mixed case
+Content-Type: Multipart/Mixed; boundary=b
+
+--b
+Content-Type: Text/Plain
+
+Hello there
+--b
+Content-Type: Application/Octet-Stream
+Content-Disposition: Attachment; filename="f.bin"
+Content-Transfer-Encoding: base64
+
+ZGF0YQ==
+--b--
+'
+
+    match parser.parse_stream(raw_email, handler) {
+      case Ok(_) -> {
+        t.true(handler.get_text_body.contains?('Hello there'))
+
+        let attachments = handler.get_attachments
+
+        t.equal(attachments.size, 1)
+      }
+      case Error(e) -> panic('Parse failed: ${e}')
+    }
+  })
+
   t.test('boundary_text_inside_body_is_not_split', fn (t) {
     let parser = EmailParser.new
 
