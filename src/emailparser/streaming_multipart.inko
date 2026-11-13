@@ -8,7 +8,9 @@
 # incrementally without loading entire parts into memory. Uses a state machine
 # to track parsing progress through multipart structure.
 
-import emailparser.header (eq_ignore_case, parse_headers_impl)
+import emailparser.header (
+  eq_ignore_case, parse_headers_impl, sanitize_filename,
+)
 import emailparser.limits (MAX_HEADERS_SECTION_SIZE)
 import emailparser.validation (is_valid_boundary)
 import std.bytes (ByteArray)
@@ -934,8 +936,16 @@ fn get_header_value(
   Option.None
 }
 
-# Extract filename from Content-Disposition header
+# Extract and sanitize the filename from a Content-Disposition header
 fn extract_filename_from_disposition(disposition: String) -> Option[String] {
+  match extract_filename_from_disposition_raw(disposition) {
+    case Some(name) -> sanitize_filename(name)
+    case None -> Option.None
+  }
+}
+
+fn extract_filename_from_disposition_raw(disposition: String) -> Option[String]
+{
   let filename_key = 'filename='
 
   match disposition.index_of(filename_key, 0) {

@@ -53,10 +53,10 @@ The `sanitize_filename` function protects against path traversal attacks by:
 - Limiting filename length to 255 characters
 - Requiring at least one printable character
 
-```inko
-# Automatically applied when parsing attachments
-case Some(f) -> sanitize_filename(f)
-```
+Sanitization is applied to attachments produced by both the regular parser
+(`EmailParser.parse`) and the streaming parser (`StreamingParser`), including
+`AttachmentInfo.filename`. A rejected filename becomes `None`; callers must
+still validate names before using them in filesystem paths.
 
 #### Input Validation
 

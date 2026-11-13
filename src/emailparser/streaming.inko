@@ -16,6 +16,7 @@ import emailparser.decoder (decode_body_impl, decode_rfc2047_word)
 import emailparser.header (
   eq_ignore_case, extract_extra_headers, get_header_value_impl,
   get_param_value_impl, parse_content_type_impl, parse_headers_impl,
+  sanitize_filename,
 )
 import emailparser.header_extraction (parse_threading_headers)
 import emailparser.limits (MAX_HEADERS_SECTION_SIZE)
@@ -1723,7 +1724,15 @@ fn parse_multipart_stream[H: mut + StreamHandler](
   Result.Ok(wrapper.attachment_count)
 }
 
+# Extract and sanitize the filename from a Content-Disposition value
 fn extract_filename(content_disposition: String) -> Option[String] {
+  match extract_filename_raw(content_disposition) {
+    case Some(name) -> sanitize_filename(name)
+    case None -> Option.None
+  }
+}
+
+fn extract_filename_raw(content_disposition: String) -> Option[String] {
   # Simple extraction - looks for filename= parameter
   let filename_key = 'filename='
 
