@@ -8,6 +8,7 @@ import emailparser.streaming_multipart (
   MultipartStreamHandler, MultipartStreamParser,
 )
 import std.bytes (ByteArray)
+import std.result (Result)
 import std.test (Tests)
 
 # Test handler that collects parts for verification
@@ -47,7 +48,7 @@ impl MultipartStreamHandler for TestHandler {
     headers: ref Array[(String, String)],
     content_type: String,
     is_attachment: Bool,
-  ) {
+  ) -> Result[Int, String] {
     @parts_begun = @parts_begun + 1
 
     # Clone headers for verification
@@ -58,12 +59,13 @@ impl MultipartStreamHandler for TestHandler {
     @headers_seen.push(cloned_headers)
     @content_types.push(content_type)
     @is_attachments.push(is_attachment)
+    Result.Ok(0)
   }
 
   fn pub mut on_part_data(
     data: ref ByteArray,
     content_transfer_encoding: String,
-  ) {
+  ) -> Result[Int, String] {
     # Convert ByteArray to String for verification
     let mut cloned_data = ByteArray.new
     let mut i = 0
@@ -78,10 +80,12 @@ impl MultipartStreamHandler for TestHandler {
     }
 
     @data_chunks.push(cloned_data.into_string)
+    Result.Ok(0)
   }
 
-  fn pub mut on_part_end {
+  fn pub mut on_part_end -> Result[Int, String] {
     @parts_ended = @parts_ended + 1
+    Result.Ok(0)
   }
 }
 

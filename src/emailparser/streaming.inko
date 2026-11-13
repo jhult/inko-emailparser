@@ -822,7 +822,6 @@ fn parse_body_stream[H: mut + StreamHandler](
       config.max_attachment_size,
       handler,
     )
-    Result.Ok(0)
   } else if is_text_html(ct_main) {
     stream_html_body(
       body_raw,
@@ -831,7 +830,6 @@ fn parse_body_stream[H: mut + StreamHandler](
       config.max_attachment_size,
       handler,
     )
-    Result.Ok(0)
   } else {
     Result.Ok(0)
   }
@@ -845,7 +843,7 @@ fn stream_body_impl[H: mut + StreamHandler](
   max_size: Int,
   is_html: Bool,
   handler: mut H,
-) {
+) -> Result[Int, String] {
   let encoding_lower = encoding.to_lower
 
   if encoding_lower == 'base64' {
@@ -854,18 +852,28 @@ fn stream_body_impl[H: mut + StreamHandler](
     match d.feed(body_raw) {
       case Ok(decoded) -> {
         if decoded.size > 0 {
-          send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+          match
+            send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+          {
+            case Ok(_) -> {}
+            case Error(e) -> return Result.Error(e)
+          }
         }
 
         match d.finish {
           case Ok(decoded) -> {
             if decoded.size > 0 {
-              send_text_chunks(
-                decoded.into_string,
-                chunk_size,
-                is_html,
-                handler,
-              )
+              match
+                send_text_chunks(
+                  decoded.into_string,
+                  chunk_size,
+                  is_html,
+                  handler,
+                )
+              {
+                case Ok(_) -> {}
+                case Error(e) -> return Result.Error(e)
+              }
             }
           }
           case Error(_) -> {}
@@ -879,18 +887,28 @@ fn stream_body_impl[H: mut + StreamHandler](
     match d.feed(body_raw) {
       case Ok(decoded) -> {
         if decoded.size > 0 {
-          send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+          match
+            send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+          {
+            case Ok(_) -> {}
+            case Error(e) -> return Result.Error(e)
+          }
         }
 
         match d.finish {
           case Ok(decoded) -> {
             if decoded.size > 0 {
-              send_text_chunks(
-                decoded.into_string,
-                chunk_size,
-                is_html,
-                handler,
-              )
+              match
+                send_text_chunks(
+                  decoded.into_string,
+                  chunk_size,
+                  is_html,
+                  handler,
+                )
+              {
+                case Ok(_) -> {}
+                case Error(e) -> return Result.Error(e)
+              }
             }
           }
           case Error(_) -> {}
@@ -901,11 +919,16 @@ fn stream_body_impl[H: mut + StreamHandler](
   } else {
     match decode_body_impl(body_raw, encoding, max_size) {
       case Ok(decoded) -> {
-        send_text_chunks(decoded, chunk_size, is_html, handler)
+        match send_text_chunks(decoded, chunk_size, is_html, handler) {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
+        }
       }
       case Error(_) -> {}
     }
   }
+
+  Result.Ok(0)
 }
 
 # Stream text body in chunks
@@ -915,7 +938,7 @@ fn stream_text_body[H: mut + StreamHandler](
   chunk_size: Int,
   max_size: Int,
   handler: mut H,
-) {
+) -> Result[Int, String] {
   stream_body_impl(body_raw, encoding, chunk_size, max_size, false, handler)
 }
 
@@ -926,7 +949,7 @@ fn stream_html_body[H: mut + StreamHandler](
   chunk_size: Int,
   max_size: Int,
   handler: mut H,
-) {
+) -> Result[Int, String] {
   stream_body_impl(body_raw, encoding, chunk_size, max_size, true, handler)
 }
 
@@ -956,7 +979,17 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
       match decoder.feed(initial_body.into_string) {
         case Ok(decoded) -> {
           if decoded.size > 0 {
-            send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+            match
+              send_text_chunks(
+                decoded.into_string,
+                chunk_size,
+                is_html,
+                handler,
+              )
+            {
+              case Ok(_) -> {}
+              case Error(e) -> return Result.Error(e)
+            }
           }
         }
         case Error(_) -> {}
@@ -980,12 +1013,17 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
           match decoder.feed(chunk.into_string) {
             case Ok(decoded) -> {
               if decoded.size > 0 {
-                send_text_chunks(
-                  decoded.into_string,
-                  chunk_size,
-                  is_html,
-                  handler,
-                )
+                match
+                  send_text_chunks(
+                    decoded.into_string,
+                    chunk_size,
+                    is_html,
+                    handler,
+                  )
+                {
+                  case Ok(_) -> {}
+                  case Error(e) -> return Result.Error(e)
+                }
               }
             }
             case Error(_) -> {}
@@ -999,7 +1037,12 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
     match decoder.finish {
       case Ok(decoded) -> {
         if decoded.size > 0 {
-          send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+          match
+            send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+          {
+            case Ok(_) -> {}
+            case Error(e) -> return Result.Error(e)
+          }
         }
       }
       case Error(_) -> {}
@@ -1016,7 +1059,17 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
       match decoder.feed(initial_body.into_string) {
         case Ok(decoded) -> {
           if decoded.size > 0 {
-            send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+            match
+              send_text_chunks(
+                decoded.into_string,
+                chunk_size,
+                is_html,
+                handler,
+              )
+            {
+              case Ok(_) -> {}
+              case Error(e) -> return Result.Error(e)
+            }
           }
         }
         case Error(_) -> {}
@@ -1040,12 +1093,17 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
           match decoder.feed(chunk.into_string) {
             case Ok(decoded) -> {
               if decoded.size > 0 {
-                send_text_chunks(
-                  decoded.into_string,
-                  chunk_size,
-                  is_html,
-                  handler,
-                )
+                match
+                  send_text_chunks(
+                    decoded.into_string,
+                    chunk_size,
+                    is_html,
+                    handler,
+                  )
+                {
+                  case Ok(_) -> {}
+                  case Error(e) -> return Result.Error(e)
+                }
               }
             }
             case Error(_) -> {}
@@ -1059,7 +1117,12 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
     match decoder.finish {
       case Ok(decoded) -> {
         if decoded.size > 0 {
-          send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+          match
+            send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+          {
+            case Ok(_) -> {}
+            case Error(e) -> return Result.Error(e)
+          }
         }
       }
       case Error(_) -> {}
@@ -1069,7 +1132,10 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
     if initial_body.size > 0 {
       match decode_body_impl(initial_body.into_string, encoding, max_size) {
         case Ok(decoded) -> {
-          send_text_chunks(decoded, chunk_size, is_html, handler)
+          match send_text_chunks(decoded, chunk_size, is_html, handler) {
+            case Ok(_) -> {}
+            case Error(e) -> return Result.Error(e)
+          }
         }
         case Error(_) -> {}
       }
@@ -1090,7 +1156,10 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
 
           match decode_body_impl(chunk.into_string, encoding, max_size) {
             case Ok(decoded) -> {
-              send_text_chunks(decoded, chunk_size, is_html, handler)
+              match send_text_chunks(decoded, chunk_size, is_html, handler) {
+                case Ok(_) -> {}
+                case Error(e) -> return Result.Error(e)
+              }
             }
             case Error(_) -> {}
           }
@@ -1109,7 +1178,7 @@ fn send_text_chunks[H: mut + StreamHandler](
   chunk_size: Int,
   is_html: Bool,
   handler: mut H,
-) {
+) -> Result[Int, String] {
   let mut pos = 0
 
   while pos < decoded_str.size {
@@ -1128,11 +1197,13 @@ fn send_text_chunks[H: mut + StreamHandler](
 
     match result {
       case Ok(_) -> {}
-      case Error(_) -> return
+      case Error(e) -> return Result.Error('Handler text callback failed: ${e}')
     }
 
     pos = end
   }
+
+  Result.Ok(0)
 }
 
 # Process multipart body incrementally from an async reader
@@ -1239,7 +1310,7 @@ if
     headers: ref Array[(String, String)],
     content_type: String,
     is_attachment: Bool,
-  ) {
+  ) -> Result[Int, String] {
     let main_type = match parse_content_type_impl(content_type) {
       case Ok((mt, _)) -> mt
       case Error(_) -> content_type
@@ -1284,17 +1355,21 @@ if
 
       match @handler.on_attachment_begin(info) {
         case Ok(_) -> {}
-        case Error(_) -> {}
+        case Error(e) -> {
+          return Result.Error('Handler on_attachment_begin failed: ${e}')
+        }
       }
 
       @current_info = Option.Some(info)
     }
+
+    Result.Ok(0)
   }
 
   fn pub mut on_part_data(
     data: ref ByteArray,
     content_transfer_encoding: String,
-  ) {
+  ) -> Result[Int, String] {
     @current_encoding = content_transfer_encoding
 
     let data_str = data.clone
@@ -1320,7 +1395,11 @@ if
                   if decoded.size > 0 {
                     match @handler.on_attachment_chunk(decoded, info) {
                       case Ok(_) -> {}
-                      case Error(_) -> {}
+                      case Error(e) -> {
+                        return Result.Error(
+                          'Handler on_attachment_chunk failed: ${e}',
+                        )
+                      }
                     }
                   }
                 }
@@ -1346,7 +1425,11 @@ if
                   if decoded.size > 0 {
                     match @handler.on_attachment_chunk(decoded, info) {
                       case Ok(_) -> {}
-                      case Error(_) -> {}
+                      case Error(e) -> {
+                        return Result.Error(
+                          'Handler on_attachment_chunk failed: ${e}',
+                        )
+                      }
                     }
                   }
                 }
@@ -1358,7 +1441,9 @@ if
         } else {
           match @handler.on_attachment_chunk(data_str, info) {
             case Ok(_) -> {}
-            case Error(_) -> {}
+            case Error(e) -> {
+              return Result.Error('Handler on_attachment_chunk failed: ${e}')
+            }
           }
         }
       }
@@ -1383,12 +1468,17 @@ if
                 match d.feed(data_str.into_string) {
                   case Ok(decoded) -> {
                     if decoded.size > 0 {
-                      send_text_chunks(
-                        decoded.into_string,
-                        @chunk_size,
-                        is_html,
-                        @handler,
-                      )
+                      match
+                        send_text_chunks(
+                          decoded.into_string,
+                          @chunk_size,
+                          is_html,
+                          @handler,
+                        )
+                      {
+                        case Ok(_) -> {}
+                        case Error(e) -> return Result.Error(e)
+                      }
                     }
                   }
                   case Error(_) -> {}
@@ -1411,12 +1501,17 @@ if
                 match d.feed(data_str.into_string) {
                   case Ok(decoded) -> {
                     if decoded.size > 0 {
-                      send_text_chunks(
-                        decoded.into_string,
-                        @chunk_size,
-                        is_html,
-                        @handler,
-                      )
+                      match
+                        send_text_chunks(
+                          decoded.into_string,
+                          @chunk_size,
+                          is_html,
+                          @handler,
+                        )
+                      {
+                        case Ok(_) -> {}
+                        case Error(e) -> return Result.Error(e)
+                      }
                     }
                   }
                   case Error(_) -> {}
@@ -1425,19 +1520,26 @@ if
               case None -> {}
             }
           } else {
-            send_text_chunks(
-              data_str.into_string,
-              @chunk_size,
-              is_html,
-              @handler,
-            )
+            match
+              send_text_chunks(
+                data_str.into_string,
+                @chunk_size,
+                is_html,
+                @handler,
+              )
+            {
+              case Ok(_) -> {}
+              case Error(e) -> return Result.Error(e)
+            }
           }
         }
       }
     }
+
+    Result.Ok(0)
   }
 
-  fn pub mut on_part_end {
+  fn pub mut on_part_end -> Result[Int, String] {
     # Collect decoded data before calling handler methods
     let mut base64_decoded: Option[ByteArray] = Option.None
     let mut qp_decoded: Option[ByteArray] = Option.None
@@ -1479,7 +1581,9 @@ if
           case Some(data) -> {
             match @handler.on_attachment_chunk(data, info) {
               case Ok(_) -> {}
-              case Error(_) -> {}
+              case Error(e) -> {
+                return Result.Error('Handler on_attachment_chunk failed: ${e}')
+              }
             }
           }
           case None -> {}
@@ -1489,7 +1593,9 @@ if
           case Some(data) -> {
             match @handler.on_attachment_chunk(data, info) {
               case Ok(_) -> {}
-              case Error(_) -> {}
+              case Error(e) -> {
+                return Result.Error('Handler on_attachment_chunk failed: ${e}')
+              }
             }
           }
           case None -> {}
@@ -1497,7 +1603,9 @@ if
 
         match @handler.on_attachment_end(info) {
           case Ok(_) -> {}
-          case Error(_) -> {}
+          case Error(e) -> {
+            return Result.Error('Handler on_attachment_end failed: ${e}')
+          }
         }
 
         @attachment_count = @attachment_count + 1
@@ -1509,14 +1617,34 @@ if
         if is_text_plain(@current_content_type) or is_html {
           match base64_decoded {
             case Some(data) -> {
-              send_text_chunks(data.into_string, @chunk_size, is_html, @handler)
+              match
+                send_text_chunks(
+                  data.into_string,
+                  @chunk_size,
+                  is_html,
+                  @handler,
+                )
+              {
+                case Ok(_) -> {}
+                case Error(e) -> return Result.Error(e)
+              }
             }
             case None -> {}
           }
 
           match qp_decoded {
             case Some(data) -> {
-              send_text_chunks(data.into_string, @chunk_size, is_html, @handler)
+              match
+                send_text_chunks(
+                  data.into_string,
+                  @chunk_size,
+                  is_html,
+                  @handler,
+                )
+              {
+                case Ok(_) -> {}
+                case Error(e) -> return Result.Error(e)
+              }
             }
             case None -> {}
           }
@@ -1526,6 +1654,8 @@ if
 
     # Clear current_info last
     @current_info = Option.None
+
+    Result.Ok(0)
   }
 }
 

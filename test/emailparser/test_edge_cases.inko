@@ -789,6 +789,45 @@ Malformed attachment
     }
   })
 
+  t.test('streaming_text_callback_error_aborts', fn (t) {
+    let parser = StreamingParser.new
+    let handler = ErrorTestingHandler.new(0, true)
+    let email = 'From: a@example.com\nTo: b@example.com\nSubject: Abort\nContent-Type: text/plain\n\nhello world'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.true(e.contains?('Simulated error'))
+    }
+  })
+
+  t.test('streaming_multipart_text_callback_error_aborts', fn (t) {
+    let parser = StreamingParser.new
+    let handler = ErrorTestingHandler.new(0, true)
+    let email = 'From: a@example.com\nTo: b@example.com\nSubject: Abort\nContent-Type: multipart/mixed; boundary=b\n\n--b\nContent-Type: text/plain\n\nhello world\n--b--\n'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.true(e.contains?('Simulated error'))
+    }
+  })
+
+  t.test('streaming_attachment_callback_error_aborts', fn (t) {
+    let parser = StreamingParser.new
+    let handler = ErrorTestingHandler.new(0, true)
+
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_email_with_attachment(
+      'large.bin',
+      'ATTACHMENTDATA',
+      'base64',
+    )
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.true(e.contains?('Simulated error'))
+    }
+  })
+
   t.test('streaming_abort_on_attachment_chunk', fn (t) {
     let parser = StreamingParser.new
     let handler = ErrorTestingHandler.new(5, true)

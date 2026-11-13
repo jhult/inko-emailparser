@@ -77,16 +77,16 @@ trait pub MultipartStreamHandler {
     headers: ref Array[(String, String)],
     content_type: String,
     is_attachment: Bool,
-  )
+  ) -> Result[Int, String]
 
   # Called when part body data is available
   fn pub mut on_part_data(
     data: ref ByteArray,
     content_transfer_encoding: String,
-  )
+  ) -> Result[Int, String]
 
   # Called when a part ends (before next boundary)
-  fn pub mut on_part_end
+  fn pub mut on_part_end -> Result[Int, String]
 }
 
 # Multipart streaming parser with state machine
@@ -282,10 +282,7 @@ impl MultipartStreamParser {
       case ReadingBody -> {
         # Parser stopped while reading body - try to finalize current part
         match @current_context {
-          case Some(_) -> {
-            handler.on_part_end
-            Result.Ok(0)
-          }
+          case Some(_) -> handler.on_part_end
           case None -> Result.Ok(0)
         }
       }
@@ -468,7 +465,12 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
       if is_attachment { parser.attachment_count = parser.attachment_count + 1 }
 
       # Notify handler before creating context (to avoid moving headers)
-      handler.on_part_begin(ref headers, content_type.clone, is_attachment)
+      match
+        handler.on_part_begin(ref headers, content_type.clone, is_attachment)
+      {
+        case Ok(_) -> {}
+        case Error(e) -> return Result.Error(e)
+      }
 
       # Create part context
       let context = CurrentPartContext(
@@ -599,14 +601,22 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
       if body_data.size > 0 {
         match parser.current_context {
           case Some(ctx) -> {
-            handler.on_part_data(ref body_data, ctx.content_transfer_encoding)
+            match
+              handler.on_part_data(ref body_data, ctx.content_transfer_encoding)
+            {
+              case Ok(_) -> {}
+              case Error(e) -> return Result.Error(e)
+            }
           }
           case None -> {}
         }
       }
 
       # Notify end of part
-      handler.on_part_end
+      match handler.on_part_end {
+        case Ok(_) -> {}
+        case Error(e) -> return Result.Error(e)
+      }
 
       # Remove body and boundary from buffer
       let new_buffer = ByteArray.new
@@ -661,7 +671,12 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
         # Emit body data
         match parser.current_context {
           case Some(ctx) -> {
-            handler.on_part_data(ref body_data, ctx.content_transfer_encoding)
+            match
+              handler.on_part_data(ref body_data, ctx.content_transfer_encoding)
+            {
+              case Ok(_) -> {}
+              case Error(e) -> return Result.Error(e)
+            }
           }
           case None -> {}
         }
