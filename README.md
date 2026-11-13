@@ -191,6 +191,7 @@ let parser = EmailParser.new.with_limits(
   max_attachment_size: 50_000_000,
   max_multipart_depth: 15,
   max_attachments: 200,
+  max_headers: 2000,
 )
 ```
 

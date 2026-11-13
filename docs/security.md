@@ -30,10 +30,12 @@ This library includes the following built-in protections:
 - **`max_attachment_size`**: Default 25 MB - Limits individual attachment size
 
 ```inko
-let parser = EmailParser.with_limits(
+let parser = EmailParser.new.with_limits(
   max_email_size: 100_000_000,      # 100 MB
   max_attachment_size: 50_000_000,  # 50 MB
-  max_multipart_depth: 10
+  max_multipart_depth: 10,
+  max_attachments: 100,
+  max_headers: 1000
 )
 ```
 
@@ -96,10 +98,12 @@ Adjust limits based on your use case:
 
 ```inko
 # Conservative limits for untrusted input
-let parser = EmailParser.with_limits(
+let parser = EmailParser.new.with_limits(
   max_email_size: 10_000_000,       # 10 MB
   max_attachment_size: 5_000_000,   # 5 MB
-  max_multipart_depth: 5
+  max_multipart_depth: 5,
+  max_attachments: 50,
+  max_headers: 500
 )
 ```
 

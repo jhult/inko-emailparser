@@ -21,7 +21,10 @@ import emailparser.header (
   sanitize_filename,
 )
 import emailparser.header_extraction (parse_threading_headers)
-import emailparser.limits (MAX_HEADERS_SECTION_SIZE)
+import emailparser.limits (
+  MAX_ATTACHMENT_SIZE, MAX_EMAIL_SIZE, MAX_HEADERS, MAX_HEADERS_SECTION_SIZE,
+  MAX_MULTIPART_DEPTH,
+)
 import emailparser.streaming_decoder (
   Base64StreamingDecoder, QuotedPrintableStreamingDecoder,
 )
@@ -82,10 +85,10 @@ impl StreamingConfig {
     StreamingConfig(
       strict_mode: false,
       fail_fast: false,
-      max_email_size: 50_000_000,
-      max_attachment_size: 25_000_000,
-      max_multipart_depth: 10,
-      max_headers: 1000,
+      max_email_size: MAX_EMAIL_SIZE,
+      max_attachment_size: MAX_ATTACHMENT_SIZE,
+      max_multipart_depth: MAX_MULTIPART_DEPTH,
+      max_headers: MAX_HEADERS,
       stream_chunk_size: 65536,
     )
   }

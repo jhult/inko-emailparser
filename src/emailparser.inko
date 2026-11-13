@@ -27,7 +27,10 @@ import emailparser.header (
   parse_headers_impl,
 )
 import emailparser.header_extraction (parse_threading_headers)
-import emailparser.limits (MAX_HEADER_ITERATIONS, MAX_MESSAGE_IDS)
+import emailparser.limits (
+  MAX_ATTACHMENTS, MAX_ATTACHMENT_SIZE, MAX_EMAIL_SIZE, MAX_HEADERS,
+  MAX_HEADER_ITERATIONS, MAX_MESSAGE_IDS, MAX_MULTIPART_DEPTH,
+)
 import emailparser.multipart (parse_multipart_impl)
 import emailparser.validation (is_valid_boundary)
 import std.bytes (ByteArray)
@@ -117,11 +120,11 @@ impl ParserConfig {
   fn pub static new -> ParserConfig {
     ParserConfig(
       strict_mode: false,
-      max_email_size: 50_000_000,
-      max_attachment_size: 25_000_000,
-      max_multipart_depth: 10,
-      max_attachments: 100,
-      max_headers: 1000,
+      max_email_size: MAX_EMAIL_SIZE,
+      max_attachment_size: MAX_ATTACHMENT_SIZE,
+      max_multipart_depth: MAX_MULTIPART_DEPTH,
+      max_attachments: MAX_ATTACHMENTS,
+      max_headers: MAX_HEADERS,
     )
   }
 
@@ -167,11 +170,13 @@ impl ParserConfig {
     max_attachment_size: Int,
     max_multipart_depth: Int,
     max_attachments: Int,
+    max_headers: Int,
   ) -> mut Self {
     @max_email_size = max_email_size
     @max_attachment_size = max_attachment_size
     @max_multipart_depth = max_multipart_depth
     @max_attachments = max_attachments
+    @max_headers = max_headers
     self
   }
 }
@@ -682,11 +687,13 @@ impl EmailParser {
     max_attachment_size: Int,
     max_multipart_depth: Int,
     max_attachments: Int,
+    max_headers: Int,
   ) -> EmailParser {
     @config.max_email_size = max_email_size
     @config.max_attachment_size = max_attachment_size
     @config.max_multipart_depth = max_multipart_depth
     @config.max_attachments = max_attachments
+    @config.max_headers = max_headers
     self
   }
 
