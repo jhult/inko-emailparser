@@ -186,4 +186,54 @@ fn pub tests(t: mut Tests) {
     t.true(message.contains?('10'))
     t.true(message.contains?('Maximum multipart nesting depth exceeded'))
   })
+
+  t.test('context_exposes_severity_and_location', fn (t) {
+    let error = Error.DuplicateHeader(
+      Severity.Warning,
+      'Subject',
+      Option.Some(7),
+      Option.Some(12),
+      Option.Some('Subject: x'),
+    )
+
+    let ctx = error.context
+
+    t.equal(ctx.severity.to_string, 'WARNING')
+    t.true(ctx.message.contains?('Duplicate header detected: Subject'))
+    t.true(error.to_message.contains?(ctx.message))
+
+    match ctx.line {
+      case Some(line) -> t.equal(line, 7)
+      case None -> t.true(false)
+    }
+
+    match ctx.position {
+      case Some(position) -> t.equal(position, 12)
+      case None -> t.true(false)
+    }
+
+    match ctx.fragment {
+      case Some(fragment) -> t.equal(fragment, 'Subject: x')
+      case None -> t.true(false)
+    }
+  })
+
+  t.test('context_omits_missing_location', fn (t) {
+    let error = Error.BoundaryNotFound(
+      Severity.Fatal,
+      Option.None,
+      Option.None,
+      Option.None,
+    )
+
+    let ctx = error.context
+
+    t.equal(ctx.severity.to_string, 'FATAL')
+    t.equal(ctx.message, 'Boundary marker not found in message body')
+
+    match ctx.line {
+      case Some(_) -> t.true(false)
+      case None -> {}
+    }
+  })
 }

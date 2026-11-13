@@ -267,7 +267,7 @@ fn pub tests(t: mut Tests) {
 
     match result {
       case Ok(headers) -> t.equal(headers.size, 1)
-      case Error(e) -> panic('parse_headers failed: ${e}')
+      case Error(e) -> panic('parse_headers failed: ${e.to_message}')
     }
   })
 
@@ -279,7 +279,7 @@ fn pub tests(t: mut Tests) {
 
     match result {
       case Ok(headers) -> t.equal(headers.size, 1)
-      case Error(e) -> panic('parse_headers failed: ${e}')
+      case Error(e) -> panic('parse_headers failed: ${e.to_message}')
     }
   })
 
@@ -292,7 +292,9 @@ fn pub tests(t: mut Tests) {
 
     match parser.parse_headers(raw) {
       case Ok(_) -> t.true(false)
-      case Error(e) -> t.true(e.contains?('Maximum number of headers exceeded'))
+      case Error(e) -> {
+        t.true(e.to_message.contains?('Maximum number of headers exceeded'))
+      }
     }
   })
 
@@ -303,7 +305,9 @@ fn pub tests(t: mut Tests) {
 
     match parser.parse_headers(raw) {
       case Ok(_) -> t.true(false)
-      case Error(e) -> t.true(e.contains?('Invalid header field name'))
+      case Error(e) -> {
+        t.true(e.to_message.contains?('Invalid header field name'))
+      }
     }
   })
 
@@ -313,7 +317,7 @@ fn pub tests(t: mut Tests) {
 
     match parser.parse_headers(raw) {
       case Ok(_) -> t.true(false)
-      case Error(e) -> t.true(e.contains?('no colon found'))
+      case Error(e) -> t.true(e.to_message.contains?('no colon found'))
     }
   })
 
@@ -358,7 +362,7 @@ fn pub tests(t: mut Tests) {
         t.equal(headers.size, 2)
         t.equal(get_header_value_impl(ref headers, 'Subject').or(''), 'First')
       }
-      case Error(e) -> panic('parse_headers failed: ${e}')
+      case Error(e) -> panic('parse_headers failed: ${e.to_message}')
     }
   })
 
@@ -368,7 +372,7 @@ fn pub tests(t: mut Tests) {
 
     match parser.parse_headers(raw) {
       case Ok(_) -> t.true(false)
-      case Error(e) -> t.true(e.contains?('Duplicate'))
+      case Error(e) -> t.true(e.to_message.contains?('Duplicate'))
     }
   })
 
@@ -379,7 +383,7 @@ fn pub tests(t: mut Tests) {
 
     match parser.parse(raw) {
       case Ok(_) -> t.true(true)
-      case Error(e) -> panic('Parse failed: ${e}')
+      case Error(e) -> panic('Parse failed: ${e.to_message}')
     }
   })
 
@@ -401,7 +405,7 @@ Body'
 
     match parser.parse_headers(raw) {
       case Ok(headers) -> t.equal(headers.size, 3)
-      case Error(e) -> panic('parse_headers failed: ${e}')
+      case Error(e) -> panic('parse_headers failed: ${e.to_message}')
     }
   })
 }

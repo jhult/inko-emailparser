@@ -34,7 +34,9 @@ Body text here.'
 
     match result {
       case Ok(_) -> t.false(true) # Should fail
-      case Error(e) -> t.true(e.contains?('From') or e.contains?('from'))
+      case Error(e) -> {
+        t.true(e.to_message.contains?('From') or e.to_message.contains?('from'))
+      }
     }
   })
 
@@ -54,7 +56,7 @@ Body text here.'
       case Ok(_) -> t.false(true) # Should fail
       case Error(e) -> {
         # Fixed error check
-        t.true(e.contains?('To') or e.contains?('to'))
+        t.true(e.to_message.contains?('To') or e.to_message.contains?('to'))
       }
     }
   })
@@ -127,7 +129,10 @@ Text
       case Ok(_) -> t.false(true) # Should fail
       case Error(e) -> {
         # Fixed error check
-        t.true(e.contains?('boundary') or e.contains?('Boundary'))
+        t.true(
+          e.to_message.contains?('boundary')
+            or e.to_message.contains?('Boundary'),
+        )
       }
     }
   })
@@ -151,7 +156,10 @@ Just plain text.
       case Ok(_) -> t.false(true) # Should fail
       case Error(e) -> {
         # Fixed error check
-        t.true(e.contains?('boundary') or e.contains?('Boundary'))
+        t.true(
+          e.to_message.contains?('boundary')
+            or e.to_message.contains?('Boundary'),
+        )
       }
     }
   })
@@ -178,7 +186,10 @@ Text
       case Ok(_) -> t.false(true) # Should fail
       case Error(e) -> {
         # Fixed error check
-        t.true(e.contains?('boundary') or e.contains?('Boundary'))
+        t.true(
+          e.to_message.contains?('boundary')
+            or e.to_message.contains?('Boundary'),
+        )
       }
     }
   })
@@ -249,7 +260,10 @@ Body text.'
       case Ok(_) -> t.false(true) # Should fail
       case Error(e) -> {
         # Fixed error check
-        t.true(e.contains?('Content-Type') or e.contains?('content'))
+        t.true(
+          e.to_message.contains?('Content-Type')
+            or e.to_message.contains?('content'),
+        )
       }
     }
   })
@@ -470,7 +484,9 @@ Body text.'
       case Ok(_) -> t.false(true) # Should fail
       case Error(e) -> {
         # Fixed error check
-        t.true(e.contains?('colon') or e.contains?('header'))
+        t.true(
+          e.to_message.contains?('colon') or e.to_message.contains?('header'),
+        )
       }
     }
   })
@@ -516,7 +532,10 @@ Body text.'
       }
       case Error(e) -> {
         # Fixed error check
-        t.true(e.contains?('duplicate') or e.contains?('Duplicate'))
+        t.true(
+          e.to_message.contains?('duplicate')
+            or e.to_message.contains?('Duplicate'),
+        )
       }
     }
   })
@@ -589,7 +608,10 @@ Text
       case Ok(_) -> t.false(true) # Should fail
       case Error(e) -> {
         # Fixed error check
-        t.true(e.contains?('boundary') or e.contains?('Boundary'))
+        t.true(
+          e.to_message.contains?('boundary')
+            or e.to_message.contains?('Boundary'),
+        )
       }
     }
   })
@@ -613,10 +635,10 @@ Body text.'
       case Error(e) -> {
         # Check for error - either header without colon or boundary/folding issue
         t.true(
-          e.contains?('colon')
-            or e.contains?('folding')
-            or e.contains?('boundary')
-            or e.contains?('Boundary'),
+          e.to_message.contains?('colon')
+            or e.to_message.contains?('folding')
+            or e.to_message.contains?('boundary')
+            or e.to_message.contains?('Boundary'),
         )
       }
     }
@@ -700,7 +722,7 @@ Content-Type: text/plain
       case Ok(_) -> t.false(true) # Should fail
       case Error(e) -> {
         # Fixed error check
-        t.true(e.contains?('size') or e.contains?('Size'))
+        t.true(e.to_message.contains?('size') or e.to_message.contains?('Size'))
       }
     }
   })
@@ -766,7 +788,7 @@ Content-Disposition: attachment; filename="test.bin"
       }
       case Error(e) -> {
         # Fixed error check
-        t.true(e.contains?('size') or e.contains?('Size'))
+        t.true(e.to_message.contains?('size') or e.to_message.contains?('Size'))
       }
     }
   })
@@ -823,7 +845,9 @@ Deep text
       case Ok(_) -> t.false(true) # Should fail
       case Error(e) -> {
         # Fixed error check
-        t.true(e.contains?('depth') or e.contains?('Depth'))
+        t.true(
+          e.to_message.contains?('depth') or e.to_message.contains?('Depth'),
+        )
       }
     }
   })
@@ -1019,7 +1043,7 @@ Body text.'
       }
       case Error(e) -> {
         # Fixed error check
-        t.true(e.contains?('size') or e.contains?('Size'))
+        t.true(e.to_message.contains?('size') or e.to_message.contains?('Size'))
       }
     }
   })

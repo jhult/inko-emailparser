@@ -90,7 +90,7 @@ Sender'
           case None -> t.equal('should have text body', 'got none')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -216,7 +216,7 @@ AAACv/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AT//Z
           }
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -324,7 +324,7 @@ UEsDBBQABgAIAAAAIQAAAAAAAAAAAAAAAA==
           case Error(_) -> {}
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -387,7 +387,7 @@ Content-Type: text/html;
           case None -> t.equal('should have html body', 'got none')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -438,7 +438,7 @@ Jos=C3=A9
           case None -> t.equal('should have text body', 'got none')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -487,7 +487,7 @@ Andr=C3=A9
           case None -> {}
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -579,7 +579,7 @@ ago=
           case Error(_) -> {}
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -648,7 +648,7 @@ SGVsbG8gV29ybGQ=
           case Error(_) -> {}
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -693,7 +693,7 @@ Email with multiple Received headers tracking the path.
           case None -> t.equal('should have text body', 'got none')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -733,7 +733,7 @@ Email with authentication headers (SPF, DKIM, DMARC, ARC).
 
         t.true(has_auth_results)
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 }

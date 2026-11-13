@@ -24,7 +24,7 @@ fn pub tests(t: mut Tests) {
           case None -> t.equal('should have text body', 'got none')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -50,7 +50,7 @@ fn pub tests(t: mut Tests) {
           case Error(_) -> t.equal('should have attachment', 'got error')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -76,7 +76,7 @@ fn pub tests(t: mut Tests) {
 
     match parser.parse(email) {
       case Ok(msg) -> t.equal(msg.attachments.size, 2)
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -98,7 +98,7 @@ fn pub tests(t: mut Tests) {
         t.equal(msg.mime.content_type, 'multipart/mixed')
         t.true(msg.attachments.size >= 1)
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 

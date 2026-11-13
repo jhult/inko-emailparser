@@ -9,6 +9,7 @@
 
 import emailparser (EmailParser)
 import emailparser.email_generator (TestAttachment, TestDataGenerator)
+import emailparser.error (Error)
 import emailparser.streaming (
   AttachmentInfo, StreamHandler, StreamingConfig, StreamingParser,
 )
@@ -137,9 +138,8 @@ impl StreamHandler for MemoryBufferingHandler {
     Result.Ok(0)
   }
 
-  fn pub mut on_attachment_end(
-    info: ref AttachmentInfo,
-  ) -> Result[Int, String] {
+  fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String]
+  {
     # Use the info parameter instead of stored attachment
     # Create a copy to store
     let info_copy = AttachmentInfo(
@@ -170,8 +170,8 @@ impl StreamHandler for MemoryBufferingHandler {
     Result.Ok(0)
   }
 
-  fn pub mut on_error(error: String) -> Result[Int, String] {
-    @errors.push(error)
+  fn pub mut on_error(error: ref Error) -> Result[Int, String] {
+    @errors.push(error.to_message)
     Result.Ok(0)
   }
 }
@@ -203,7 +203,7 @@ fn pub tests(t: mut Tests) {
           case _ -> t.equal('text/plain', result.content_type)
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -222,7 +222,7 @@ fn pub tests(t: mut Tests) {
     {
       case Ok(r) -> r
       case Error(e) -> {
-        t.equal('should parse streaming', 'got error: ' + e)
+        t.equal('should parse streaming', 'got error: ' + e.to_message)
         return
       }
     }
@@ -231,7 +231,7 @@ fn pub tests(t: mut Tests) {
     let regular_result = match regular_parser.parse(email) {
       case Ok(r) -> r
       case Error(e) -> {
-        t.equal('should parse regular', 'got error: ' + e)
+        t.equal('should parse regular', 'got error: ' + e.to_message)
         return
       }
     }
@@ -272,7 +272,7 @@ fn pub tests(t: mut Tests) {
           case Error(_) -> t.equal('should have attachment', 'got error')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -326,7 +326,7 @@ fn pub tests(t: mut Tests) {
           case Error(_) -> {}
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -361,7 +361,7 @@ fn pub tests(t: mut Tests) {
           case Error(_) -> t.equal('should have attachment', 'got error')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -381,7 +381,7 @@ fn pub tests(t: mut Tests) {
 
         t.true(handler_attachments.size >= 2)
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -397,7 +397,7 @@ fn pub tests(t: mut Tests) {
     {
       case Ok(r) -> r
       case Error(e) -> {
-        t.equal('should parse streaming', 'got error: ' + e)
+        t.equal('should parse streaming', 'got error: ' + e.to_message)
         return
       }
     }
@@ -406,7 +406,7 @@ fn pub tests(t: mut Tests) {
     let regular_result = match regular_parser.parse(email) {
       case Ok(r) -> r
       case Error(e) -> {
-        t.equal('should parse regular', 'got error: ' + e)
+        t.equal('should parse regular', 'got error: ' + e.to_message)
         return
       }
     }
@@ -429,7 +429,9 @@ fn pub tests(t: mut Tests) {
 
     match parser.parse_stream(email, handler) {
       case Ok(_) -> t.true(true)
-      case Error(e) -> t.equal('should parse in strict mode', 'got error: ' + e)
+      case Error(e) -> {
+        t.equal('should parse in strict mode', 'got error: ' + e.to_message)
+      }
     }
   })
 
@@ -477,7 +479,7 @@ fn pub tests(t: mut Tests) {
           case Error(_) -> t.equal('should have attachment', 'got error')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -498,7 +500,7 @@ fn pub tests(t: mut Tests) {
         t.true(handler.get_text_body.contains?('Plain text'))
         t.true(handler.get_html_body.contains?('HTML'))
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 }

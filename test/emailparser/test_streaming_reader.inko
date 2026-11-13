@@ -4,6 +4,7 @@
 
 # Tests for streaming reader (AsyncReader trait and ByteArrayReader)
 
+import emailparser.error (Error)
 import emailparser.streaming (AttachmentInfo, StreamHandler, StreamingParser)
 import emailparser.streaming_reader (ByteArrayReader)
 import std.result (Result)
@@ -66,7 +67,7 @@ impl StreamHandler for CollectingHandler {
     Result.Ok(0)
   }
 
-  fn pub mut on_error(error: String) -> Result[Int, String] {
+  fn pub mut on_error(error: ref Error) -> Result[Int, String] {
     Result.Ok(0)
   }
 }
@@ -242,7 +243,7 @@ fn pub tests(t: mut Tests) {
         t.true(handler.headers_received)
         t.true(handler.text.contains?('Hello LF body'))
       }
-      case Error(e) -> panic('parse_async_reader failed: ${e}')
+      case Error(e) -> panic('parse_async_reader failed: ${e.to_message}')
     }
   })
 
@@ -258,7 +259,7 @@ fn pub tests(t: mut Tests) {
         t.true(handler.headers_received)
         t.true(handler.text.contains?('Hello CRLF body'))
       }
-      case Error(e) -> panic('parse_async_reader failed: ${e}')
+      case Error(e) -> panic('parse_async_reader failed: ${e.to_message}')
     }
   })
 }

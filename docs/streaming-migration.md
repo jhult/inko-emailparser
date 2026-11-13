@@ -231,9 +231,9 @@ impl StreamHandler for MyHandler {
     Result.Ok(0)
   }
   
-  fn pub mut on_error(error: String) -> Result[Int, String] {
-    # Log error
-    log_error(error)
+  fn pub mut on_error(error: ref Error) -> Result[Int, String] {
+    # Log error (Error.to_message renders severity and location)
+    log_error(error.to_message)
     Result.Ok(0)
   }
 }
@@ -970,7 +970,7 @@ impl StreamHandler for MyHandler {
   fn pub mut on_attachment_chunk(chunk: ByteArray, info: ref AttachmentInfo) -> Result[Int, String] { Result.Ok(0) }
   fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String] { Result.Ok(0) }
   fn pub mut on_end -> Result[Int, String] { Result.Ok(0) }
-  fn pub mut on_error(error: String) -> Result[Int, String] { Result.Ok(0) }
+  fn pub mut on_error(error: ref Error) -> Result[Int, String] { Result.Ok(0) }
 }
 ```
 

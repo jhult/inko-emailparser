@@ -308,7 +308,7 @@ fn parse_email_addresses(
 # Extract MIME headers (Content-Type, Content-Transfer-Encoding, charset, boundary)
 fn parse_mime_headers(
   headers: ref Array[(String, String)],
-) -> Result[(String, Array[(String, String)], String, Option[String]), String] {
+) -> Result[(String, Array[(String, String)], String, Option[String]), Error] {
   let content_type = get_header_value_impl(headers, 'Content-Type').or(
     'text/plain',
   )
@@ -325,7 +325,7 @@ fn parse_mime_headers(
 
       Result.Ok((ct_main, ct_params, content_transfer_encoding, charset))
     }
-    case Error(e) -> Result.Error(e.to_message)
+    case Error(e) -> Result.Error(e)
   }
 }
 
@@ -699,7 +699,11 @@ impl EmailParser {
   }
 
   # Parse raw email message
-  fn pub parse(raw: String) -> Result[ParsedEmailMessage, String] {
+  #
+  # Returns a typed `Error` on failure, so callers can match on the specific
+  # variant (and its severity) instead of parsing an error string. Use
+  # `Error.to_message` when a human-readable representation is needed.
+  fn pub parse(raw: String) -> Result[ParsedEmailMessage, Error] {
     # Normalize line endings for consistent parsing
     # RFC 5322 specifies CRLF, but we also accept LF-only for compatibility
     let normalized = normalize_line_endings(raw)
@@ -708,15 +712,13 @@ impl EmailParser {
     # Check total email size limit before parsing
     if email_size > @config.max_email_size {
       return Result.Error(
-        Error
-          .EmailSizeExceeded(
-            Severity.Error,
-            @config.max_email_size,
-            email_size,
-            Option.None,
-            Option.None,
-          )
-          .to_message,
+        Error.EmailSizeExceeded(
+          Severity.Error,
+          @config.max_email_size,
+          email_size,
+          Option.None,
+          Option.None,
+        ),
       )
     }
 
@@ -748,13 +750,13 @@ impl EmailParser {
       )
     {
       case Ok(h) -> h
-      case Error(e) -> return Result.Error(e.to_message)
+      case Error(e) -> return Result.Error(e)
     }
 
     # Validate required headers in strict mode
     match validate_required_headers(ref headers, @config.strict_mode) {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error(e.to_message)
+      case Error(e) -> return Result.Error(e)
     }
 
     # Extract email addresses (From, To, Cc, Bcc)
@@ -765,7 +767,7 @@ impl EmailParser {
       validate_addresses(ref from, ref to, ref cc, ref bcc, @config.strict_mode)
     {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error(e.to_message)
+      case Error(e) -> return Result.Error(e)
     }
 
     # Extract basic headers
@@ -794,15 +796,13 @@ impl EmailParser {
         # RFC 2046 requires boundary to be 1-70 chars with valid characters
         if !is_valid_boundary(b) {
           return Result.Error(
-            Error
-              .InvalidBoundary(
-                Severity.Error,
-                'boundary string exceeds 70 characters or contains invalid characters',
-                Option.None,
-                Option.None,
-                Option.Some(b),
-              )
-              .to_message,
+            Error.InvalidBoundary(
+              Severity.Error,
+              'boundary string exceeds 70 characters or contains invalid characters',
+              Option.None,
+              Option.None,
+              Option.Some(b),
+            ),
           )
         }
 
@@ -814,15 +814,13 @@ impl EmailParser {
     # Validate that multipart Content-Type has boundary parameter
     if is_multipart(ct_main) and !boundary_valid {
       return Result.Error(
-        Error
-          .InvalidBoundary(
-            Severity.Error,
-            'missing boundary parameter for multipart Content-Type',
-            Option.None,
-            Option.None,
-            Option.Some(ct_main),
-          )
-          .to_message,
+        Error.InvalidBoundary(
+          Severity.Error,
+          'missing boundary parameter for multipart Content-Type',
+          Option.None,
+          Option.None,
+          Option.Some(ct_main),
+        ),
       )
     }
 
@@ -905,7 +903,7 @@ impl EmailParser {
       }
     {
       case Ok(result) -> result
-      case Error(e) -> return Result.Error(e.to_message)
+      case Error(e) -> return Result.Error(e)
     }
 
     # Extract non-standard headers
@@ -939,7 +937,7 @@ impl EmailParser {
   }
 
   # Parse headers from raw string
-  fn pub parse_headers(raw: String) -> Result[Array[(String, String)], String] {
+  fn pub parse_headers(raw: String) -> Result[Array[(String, String)], Error] {
     match
       parse_headers_impl(
         raw,
@@ -949,7 +947,7 @@ impl EmailParser {
       )
     {
       case Ok(h) -> Result.Ok(h)
-      case Error(e) -> Result.Error(e.to_message)
+      case Error(e) -> Result.Error(e)
     }
   }
 
@@ -962,6 +960,11 @@ impl EmailParser {
   }
 
   # Parse address list
+  #
+  # Returns an `Array[EmailAddress]` directly, not a `Result`: the parser is
+  # lenient by design and skips entries it cannot interpret, so a malformed
+  # address list yields fewer (or zero) addresses instead of an error. Callers
+  # that need validation should use `emailparser.address.is_valid_email_format`.
   fn pub parse_address_list(raw: Option[String]) -> Array[EmailAddress] {
     let decoded = match raw.clone {
       case Some(v) -> decode_header_value_impl(v)
@@ -979,10 +982,10 @@ impl EmailParser {
   # Parse Content-Type header
   fn pub parse_content_type(
     raw: String,
-  ) -> Result[(String, Array[(String, String)]), String] {
+  ) -> Result[(String, Array[(String, String)]), Error] {
     match parse_content_type_impl(raw) {
       case Ok(result) -> Result.Ok(result)
-      case Error(e) -> Result.Error(e.to_message)
+      case Error(e) -> Result.Error(e)
     }
   }
 
@@ -1009,8 +1012,7 @@ impl EmailParser {
     raw: String,
     boundary: String,
     default_encoding: String,
-  ) -> Result[(Option[String], Option[String], Array[EmailAttachment]), String]
-  {
+  ) -> Result[(Option[String], Option[String], Array[EmailAttachment]), Error] {
     match
       parse_multipart_impl(
         raw,
@@ -1025,7 +1027,7 @@ impl EmailParser {
       )
     {
       case Ok(r) -> Result.Ok(r)
-      case Error(e) -> Result.Error(e.to_message)
+      case Error(e) -> Result.Error(e)
     }
   }
 

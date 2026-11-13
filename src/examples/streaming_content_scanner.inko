@@ -16,6 +16,7 @@
 # - Configurable malicious pattern detection
 
 import emailparser.email_generator (TestAttachment, TestDataGenerator)
+import emailparser.error (Error)
 import emailparser.streaming (AttachmentInfo, StreamHandler, StreamingParser)
 import std.bytes (ByteArray)
 import std.option (Option)
@@ -160,7 +161,9 @@ impl StreamHandler for ContentScanner {
   fn pub mut on_headers(
     headers: ref Array[(String, String)],
   ) -> Result[Int, String] {
-    if @verbose { let _ = Stdout.new.print('Headers parsed successfully') }
+    if @verbose {
+      let _ = Stdout.new.print('Headers parsed successfully')
+    }
 
     for (name, value) in headers.iter {
       match scan_text(value.clone) {
@@ -293,9 +296,8 @@ impl StreamHandler for ContentScanner {
     Result.Ok(0)
   }
 
-  fn pub mut on_attachment_end(
-    info: ref AttachmentInfo,
-  ) -> Result[Int, String] {
+  fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String]
+  {
     if @verbose {
       let _ = Stdout.new.print(
         '  Attachment #' + info.index.to_string + ' scan complete',
@@ -325,8 +327,8 @@ impl StreamHandler for ContentScanner {
     Result.Ok(0)
   }
 
-  fn pub mut on_error(error: String) -> Result[Int, String] {
-    let _ = Stderr.new.print('Scan error: ' + error)
+  fn pub mut on_error(error: ref Error) -> Result[Int, String] {
+    let _ = Stderr.new.print('Scan error: ' + error.to_message)
 
     Result.Ok(0)
   }
@@ -359,7 +361,7 @@ type async Main {
         let _ = out.print('Result: CLEAN - No malicious patterns detected')
         let _ = out.print('Subject: ' + result.subject)
       }
-      case Error(e) -> let _ = err.print('Result: ERROR - ' + e)
+      case Error(e) -> let _ = err.print('Result: ERROR - ' + e.to_message)
     }
 
     let _ = out.print('')
@@ -382,7 +384,7 @@ type async Main {
         let _ = out.print('Subject: ' + result.subject)
       }
       case Error(e) -> {
-        let _ = out.print('Result: BLOCKED - ' + e)
+        let _ = out.print('Result: BLOCKED - ' + e.to_message)
         let _ = out.print(
           'Patterns found: ' + scanner2.get_patterns_found.size.to_string,
         )
@@ -408,7 +410,7 @@ type async Main {
         let _ = out.print('Subject: ' + result.subject)
       }
       case Error(e) -> {
-        let _ = out.print('Result: BLOCKED - ' + e)
+        let _ = out.print('Result: BLOCKED - ' + e.to_message)
         let _ = out.print(
           'Patterns found: ' + scanner3.get_patterns_found.size.to_string,
         )
@@ -450,7 +452,7 @@ type async Main {
         )
       }
       case Error(e) -> {
-        let _ = out.print('Result: BLOCKED - ' + e)
+        let _ = out.print('Result: BLOCKED - ' + e.to_message)
         let _ = out.print(
           'Patterns found: ' + scanner4.get_patterns_found.size.to_string,
         )
@@ -483,7 +485,7 @@ type async Main {
           let _ = out.print('  - ' + pattern)
         }
       }
-      case Error(e) -> let _ = err.print('Unexpected error: ' + e)
+      case Error(e) -> let _ = err.print('Unexpected error: ' + e.to_message)
     }
 
     let _ = out.print('')

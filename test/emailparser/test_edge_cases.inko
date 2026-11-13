@@ -13,6 +13,7 @@
 
 import emailparser (EmailParser, ParserConfig)
 import emailparser.email_generator (TestAttachment, TestDataGenerator)
+import emailparser.error (Error)
 import emailparser.streaming (
   AttachmentInfo, StreamHandler, StreamingConfig, StreamingParser,
 )
@@ -190,8 +191,8 @@ impl StreamHandler for ErrorTestingHandler {
     Result.Ok(0)
   }
 
-  fn pub mut on_error(error: String) -> Result[Int, String] {
-    @errors.push(error)
+  fn pub mut on_error(error: ref Error) -> Result[Int, String] {
+    @errors.push(error.to_message)
     Result.Ok(0)
   }
 }
@@ -243,7 +244,7 @@ Content-Type: text/plain
       }
       case Error(e) -> {
         # May fail if our size calculation is slightly off
-        t.true(e.contains?('size') or e.contains?('Size'))
+        t.true(e.to_message.contains?('size') or e.to_message.contains?('Size'))
       }
     }
   })
@@ -287,7 +288,7 @@ Content-Type: text/plain
       }
       case Error(e) -> {
         # Edge case: may accept or reject at exactly max_size
-        t.true(e.contains?('size') or e.contains?('Size'))
+        t.true(e.to_message.contains?('size') or e.to_message.contains?('Size'))
       }
     }
   })
@@ -331,7 +332,7 @@ Content-Type: text/plain
       }
       case Error(e) -> {
         # Should reject with size error
-        t.true(e.contains?('size') or e.contains?('Size'))
+        t.true(e.to_message.contains?('size') or e.to_message.contains?('Size'))
       }
     }
   })
@@ -399,7 +400,9 @@ Content-Disposition: attachment; filename="test.bin"
       case Error(e) -> {
         # May fail if our calculation is off
         t.true(
-          e.contains?('size') or e.contains?('Size') or e.contains?('boundary'),
+          e.to_message.contains?('size')
+            or e.to_message.contains?('Size')
+            or e.to_message.contains?('boundary'),
         )
       }
     }
@@ -460,7 +463,7 @@ Content-Disposition: attachment; filename="test.bin"
       }
       case Error(e) -> {
         # Edge case: may accept or reject at exactly max_size
-        t.true(e.contains?('size') or e.contains?('Size'))
+        t.true(e.to_message.contains?('size') or e.to_message.contains?('Size'))
       }
     }
   })
@@ -519,7 +522,7 @@ Content-Disposition: attachment; filename="test.bin"
       }
       case Error(e) -> {
         # Should reject with size error
-        t.true(e.contains?('size') or e.contains?('Size'))
+        t.true(e.to_message.contains?('size') or e.to_message.contains?('Size'))
       }
     }
   })
@@ -567,7 +570,9 @@ Valid attachment content
       }
       case Error(e) -> {
         # May fail on malformed headers
-        t.true(e.contains?('header') or e.contains?('Header'))
+        t.true(
+          e.to_message.contains?('header') or e.to_message.contains?('Header'),
+        )
       }
     }
   })
@@ -650,7 +655,7 @@ Content-Transfer-Encoding: base64
           case Error(_) -> t.true(false)
         }
       }
-      case Error(e) -> panic('Parse failed: ${e}')
+      case Error(e) -> panic('Parse failed: ${e.to_message}')
     }
   })
 
@@ -682,7 +687,7 @@ JVBERi0=
           case Error(_) -> t.true(false)
         }
       }
-      case Error(e) -> panic('Parse failed: ${e}')
+      case Error(e) -> panic('Parse failed: ${e.to_message}')
     }
   })
 
@@ -720,7 +725,7 @@ JVBERi0=
           case Error(_) -> t.true(false)
         }
       }
-      case Error(e) -> panic('Parse failed: ${e}')
+      case Error(e) -> panic('Parse failed: ${e.to_message}')
     }
   })
 
@@ -751,7 +756,7 @@ data
           case Error(_) -> t.true(false)
         }
       }
-      case Error(e) -> panic('Parse failed: ${e}')
+      case Error(e) -> panic('Parse failed: ${e.to_message}')
     }
   })
 
@@ -786,7 +791,7 @@ ZGF0YQ==
           case Error(_) -> t.true(false)
         }
       }
-      case Error(e) -> panic('Parse failed: ${e}')
+      case Error(e) -> panic('Parse failed: ${e.to_message}')
     }
   })
 
@@ -830,7 +835,7 @@ ZGF0YQ==
           case Error(_) -> t.true(false)
         }
       }
-      case Error(e) -> panic('Parse failed: ${e}')
+      case Error(e) -> panic('Parse failed: ${e.to_message}')
     }
   })
 
@@ -864,7 +869,7 @@ ZGF0YQ==
 
         t.equal(attachments.size, 1)
       }
-      case Error(e) -> panic('Parse failed: ${e}')
+      case Error(e) -> panic('Parse failed: ${e.to_message}')
     }
   })
 
@@ -892,7 +897,7 @@ before --b after
           case None -> t.true(false)
         }
       }
-      case Error(e) -> t.true(e.contains?('error'))
+      case Error(e) -> t.true(e.to_message.contains?('error'))
     }
   })
 
@@ -929,7 +934,10 @@ Valid content
       }
       case Error(e) -> {
         # May fail on invalid content type
-        t.true(e.contains?('Content-Type') or e.contains?('content'))
+        t.true(
+          e.to_message.contains?('Content-Type')
+            or e.to_message.contains?('content'),
+        )
       }
     }
   })
@@ -1000,7 +1008,9 @@ Malformed attachment
       }
       case Error(e) -> {
         # Should propagate the error
-        t.true(e.contains?('error') or e.contains?('Error'))
+        t.true(
+          e.to_message.contains?('error') or e.to_message.contains?('Error'),
+        )
       }
     }
   })
@@ -1012,7 +1022,7 @@ Malformed attachment
 
     match parser.parse_stream(email, handler) {
       case Ok(_) -> t.false(true)
-      case Error(e) -> t.true(e.contains?('Simulated error'))
+      case Error(e) -> t.true(e.to_message.contains?('Simulated error'))
     }
   })
 
@@ -1023,7 +1033,7 @@ Malformed attachment
 
     match parser.parse_stream(email, handler) {
       case Ok(_) -> t.false(true)
-      case Error(e) -> t.true(e.contains?('Simulated error'))
+      case Error(e) -> t.true(e.to_message.contains?('Simulated error'))
     }
   })
 
@@ -1039,7 +1049,7 @@ Malformed attachment
 
     match parser.parse_stream(email, handler) {
       case Ok(_) -> t.false(true)
-      case Error(e) -> t.true(e.contains?('maximum size'))
+      case Error(e) -> t.true(e.to_message.contains?('maximum size'))
     }
   })
 
@@ -1055,7 +1065,9 @@ Malformed attachment
 
     match parser.parse_stream(email, handler) {
       case Ok(_) -> t.false(true)
-      case Error(e) -> t.true(e.contains?('Maximum number of attachments'))
+      case Error(e) -> {
+        t.true(e.to_message.contains?('Maximum number of attachments'))
+      }
     }
   })
 
@@ -1072,7 +1084,7 @@ Malformed attachment
 
     match parser.parse_stream(email, handler) {
       case Ok(_) -> t.false(true)
-      case Error(e) -> t.true(e.contains?('Simulated error'))
+      case Error(e) -> t.true(e.to_message.contains?('Simulated error'))
     }
   })
 
@@ -1095,7 +1107,9 @@ Malformed attachment
       }
       case Error(e) -> {
         # Should propagate the error
-        t.true(e.contains?('error') or e.contains?('Error'))
+        t.true(
+          e.to_message.contains?('error') or e.to_message.contains?('Error'),
+        )
       }
     }
   })
@@ -1134,7 +1148,9 @@ Malformed attachment
       }
       case Error(e) -> {
         # Should propagate the error
-        t.true(e.contains?('error') or e.contains?('Error'))
+        t.true(
+          e.to_message.contains?('error') or e.to_message.contains?('Error'),
+        )
       }
     }
   })
@@ -1161,7 +1177,9 @@ Malformed attachment
       }
       case Error(e) -> {
         # Should propagate the error
-        t.true(e.contains?('error') or e.contains?('Error'))
+        t.true(
+          e.to_message.contains?('error') or e.to_message.contains?('Error'),
+        )
       }
     }
   })
@@ -1183,7 +1201,9 @@ Malformed attachment
         t.true(handler.headers_called)
         t.true(handler.end_called)
       }
-      case Error(e) -> t.equal('should complete normally', 'got error: ' + e)
+      case Error(e) -> {
+        t.equal('should complete normally', 'got error: ' + e.to_message)
+      }
     }
   })
 
@@ -1210,7 +1230,9 @@ Malformed attachment
       }
       case Error(e) -> {
         # Error should be reported
-        t.true(e.contains?('error') or e.contains?('Error'))
+        t.true(
+          e.to_message.contains?('error') or e.to_message.contains?('Error'),
+        )
       }
     }
   })
@@ -1244,7 +1266,9 @@ Malformed attachment
       }
       case Error(e) -> {
         # Should propagate at least one error
-        t.true(e.contains?('error') or e.contains?('Error'))
+        t.true(
+          e.to_message.contains?('error') or e.to_message.contains?('Error'),
+        )
       }
     }
   })
@@ -1280,7 +1304,7 @@ InvalidContent
       }
       case Error(e) -> {
         # Should have called on_error
-        t.true(handler.errors.size > 0 or e.contains?('error'))
+        t.true(handler.errors.size > 0 or e.to_message.contains?('error'))
       }
     }
   })

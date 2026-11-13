@@ -306,7 +306,7 @@ fn pub tests(t: mut Tests) {
 
     match result {
       case Ok(_) -> t.equal('should error', 'got ok')
-      case Error(e) -> t.true(e.contains?('Malformed header'))
+      case Error(e) -> t.true(e.to_message.contains?('Malformed header'))
     }
   })
 
@@ -318,7 +318,7 @@ fn pub tests(t: mut Tests) {
 
     match result {
       case Ok(_) -> t.equal('should error', 'got ok')
-      case Error(e) -> t.true(e.contains?('Duplicate header'))
+      case Error(e) -> t.true(e.to_message.contains?('Duplicate header'))
     }
   })
 
@@ -330,7 +330,7 @@ fn pub tests(t: mut Tests) {
 
     match result {
       case Ok(_) -> t.equal('should error', 'got ok')
-      case Error(e) -> t.true(e.contains?('no colon found'))
+      case Error(e) -> t.true(e.to_message.contains?('no colon found'))
     }
   })
 
@@ -390,7 +390,7 @@ John'
           case None -> {}
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -433,7 +433,7 @@ Content-Type: text/html; charset=UTF-8
           case None -> t.equal('should have html body', 'got none')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -478,7 +478,7 @@ Content-Type: text/html; charset=UTF-8
           case None -> t.equal('should have html body', 'got none')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -521,7 +521,7 @@ CmVuZG9iago=
           case Error(_) -> t.equal('should have attachment', 'got error')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -569,7 +569,7 @@ iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAA
           case None -> t.equal('should have html body', 'got none')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -627,7 +627,7 @@ SGVsbG8gV29ybGQ=
           case Error(_) -> {}
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -669,7 +669,7 @@ José'
           case None -> t.equal('should have text body', 'got none')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -710,7 +710,7 @@ End of message.'
           case None -> t.equal('should have text body', 'got none')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -741,7 +741,7 @@ ZSB3aXRoIG1vcmUgdGV4dC4KCkJlc3QgcmVnYXJkcywKClNlbmRlcgo=
           case None -> t.equal('should have text body', 'got none')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -800,7 +800,7 @@ This email has multiple recipients including CC and BCC.'
           case Error(_) -> {}
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -842,7 +842,7 @@ This is a reply in a thread.'
         # Check thread_id (should be first reference)
         t.equal(msg.threading.thread_id, 'original123@example.com')
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -870,7 +870,7 @@ Please reply to support@company.com for assistance.'
 
         t.true(has_reply_to)
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -899,7 +899,7 @@ Second line.\r'
           case None -> t.equal('should have text body', 'got none')
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -922,7 +922,7 @@ Body content here.'
         t.true(msg.subject.contains?('continues on'))
         t.true(msg.subject.contains?('next line'))
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -953,7 +953,7 @@ Body content here.'
 
     match result {
       case Ok(msg) -> t.true(msg.subject.size <= 8192)
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -985,7 +985,9 @@ Body content here.'
     match result {
       case Ok(_) -> t.equal('should error in strict mode', 'got Ok result')
       case Error(e) -> {
-        t.true(e.contains?('Header value exceeds maximum allowed size'))
+        t.true(
+          e.to_message.contains?('Header value exceeds maximum allowed size'),
+        )
       }
     }
   })
@@ -1057,7 +1059,7 @@ aW1hZ2U=
           case Error(_) -> {}
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -1094,7 +1096,7 @@ Urgent content.'
         t.true(has_x_priority)
         t.true(has_importance)
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -1119,7 +1121,7 @@ Message-ID: <empty414@example.com>
           case None -> {}
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -1157,7 +1159,7 @@ Email with comments in addresses.'
           case Error(_) -> {}
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -1178,7 +1180,7 @@ Email sent to a group.'
         # Should extract addresses from group
         t.equal(msg.addresses.to.size, 3)
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -1215,7 +1217,7 @@ SGVsbG8=
           case Error(_) -> {}
         }
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -1229,7 +1231,10 @@ SGVsbG8=
     match strict_parser.parse(email) {
       case Ok(_) -> t.equal('should error', 'got ok')
       case Error(e) -> {
-        t.true(e.contains?('Missing required header') and e.contains?('From'))
+        t.true(
+          e.to_message.contains?('Missing required header')
+            and e.to_message.contains?('From'),
+        )
       }
     }
   })
@@ -1243,7 +1248,10 @@ SGVsbG8=
     match strict_parser.parse(email) {
       case Ok(_) -> t.equal('should error', 'got ok')
       case Error(e) -> {
-        t.true(e.contains?('Required header is empty') and e.contains?('From'))
+        t.true(
+          e.to_message.contains?('Required header is empty')
+            and e.to_message.contains?('From'),
+        )
       }
     }
   })
@@ -1258,8 +1266,8 @@ SGVsbG8=
       case Ok(_) -> t.equal('should error', 'got ok')
       case Error(e) -> {
         t.true(
-          e.contains?('Missing required header')
-            and e.contains?('To, Cc, or Bcc'),
+          e.to_message.contains?('Missing required header')
+            and e.to_message.contains?('To, Cc, or Bcc'),
         )
       }
     }
@@ -1274,7 +1282,7 @@ SGVsbG8=
     # Should pass because Cc is present and non-empty
     match strict_parser.parse(email) {
       case Ok(msg) -> t.equal(msg.addresses.from.address, 'sender@example.com')
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -1289,7 +1297,7 @@ SGVsbG8=
         t.equal(msg.addresses.from.address, 'sender@example.com')
         t.equal(msg.addresses.to.size, 1)
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -1304,7 +1312,7 @@ SGVsbG8=
         t.equal(msg.addresses.from.address, 'sender@example.com')
         t.equal(msg.addresses.cc.size, 1)
       }
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -1316,7 +1324,7 @@ SGVsbG8=
 
     match lax_parser.parse(email) {
       case Ok(msg) -> t.equal(msg.subject, 'Test')
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -1328,7 +1336,7 @@ SGVsbG8=
 
     match lax_parser.parse(email) {
       case Ok(msg) -> t.equal(msg.addresses.from.address, 'sender@example.com')
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -1342,7 +1350,10 @@ SGVsbG8=
     match parser.parse(email) {
       case Ok(_) -> t.equal('should error', 'got ok')
       case Error(e) -> {
-        t.true(e.contains?('Email size') and e.contains?('exceeds maximum'))
+        t.true(
+          e.to_message.contains?('Email size')
+            and e.to_message.contains?('exceeds maximum'),
+        )
       }
     }
   })
@@ -1355,7 +1366,7 @@ SGVsbG8=
 
     match parser.parse(email) {
       case Ok(msg) -> t.equal(msg.subject, 'Test')
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -1377,7 +1388,7 @@ Body
 
     match parser.parse(email) {
       case Ok(msg) -> t.equal(msg.subject, 'Multipart')
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 
@@ -1396,7 +1407,7 @@ Body'
 
     match parser.parse(email) {
       case Ok(_) -> t.equal('should error', 'got ok')
-      case Error(e) -> t.true(e.contains?('boundary'))
+      case Error(e) -> t.true(e.to_message.contains?('boundary'))
     }
   })
 
@@ -1418,7 +1429,45 @@ Body
 
     match parser.parse(email) {
       case Ok(msg) -> t.equal(msg.subject, 'Valid Boundary')
-      case Error(e) -> t.equal('should parse', 'got error: ' + e)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
+  t.test('parse_returns_typed_error', fn (t) {
+    let parser = EmailParser.new.with_max_email_size(10)
+
+    match parser.parse('From: a@b.com\nSubject: x\n\nBody') {
+      case Ok(_) -> t.true(false)
+      case Error(e) -> {
+        t.equal(e.variant, 'EmailSizeExceeded')
+        t.equal(e.severity.to_string, 'ERROR')
+        t.true(e.to_message.contains?('Email size'))
+
+        match e {
+          case EmailSizeExceeded(severity, max_size, actual_size, _, _) -> {
+            t.equal(severity.to_string, 'ERROR')
+            t.equal(max_size, 10)
+            t.true(actual_size > 10)
+          }
+          case _ -> t.true(false)
+        }
+      }
+    }
+  })
+
+  t.test('parse_headers_returns_typed_error', fn (t) {
+    let parser = EmailParser.new
+
+    match parser.parse_headers('This line has no colon\n\n') {
+      case Ok(_) -> t.true(false)
+      case Error(e) -> {
+        match e {
+          case HeaderWithoutColon(severity, _, _, _) -> {
+            t.equal(severity.to_string, 'ERROR')
+          }
+          case _ -> t.true(false)
+        }
+      }
     }
   })
 }

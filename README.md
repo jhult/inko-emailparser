@@ -100,7 +100,7 @@ src/emailparser.inko (main entry point)
 - `limits.inko` - Size and count limits for DoS protection
 
 **Supporting Modules:**
-- `error.inko` - Typed error handling with 21 error variants
+- `error.inko` - Typed error handling with 21 error variants and an `ErrorContext` record
 - `attachment.inko` - Attachment representation with query methods
 - `date.inko` - RFC 5322 date formatting
 - `message_id.inko` - Message-ID generation and validation
@@ -453,10 +453,14 @@ type pub ParserConfig {
 
 ## Error Handling
 
+Parser methods return a typed `emailparser.error.Error` value, so callers can
+match on the specific failure instead of inspecting a message string.
+
 ### Parse Errors
 
 ```inko
 import emailparser (EmailParser)
+import emailparser.error (Error)
 
 let parser = EmailParser.new
 
@@ -464,17 +468,30 @@ match parser.parse(raw_email_string) {
   case Ok(message) -> {
     # Success
   }
-  case Error(e) -> {
-    # Error message as String
-    # Common errors:
-    # - "Email size exceeds maximum allowed size"
-    # - "Maximum number of headers exceeded"
-    # - "Maximum multipart nesting depth exceeded"
-    # - "Boundary marker not found in message body"
-    # - "Invalid email format: no body found"
+  case Error(e) -> match e {
+    case EmailSizeExceeded(_, max_size, actual_size, _, _) -> {
+      # Too large: max_size vs actual_size
+    }
+    case TooManyHeaders(_, count, max_headers, _, _, _) -> {
+      # Header limit exceeded
+    }
+    case BoundaryNotFound(_, _, _, _) -> {
+      # Multipart body has no boundary marker
+    }
+    case _ -> {
+      # Every other variant; see Error.variant for the name
+    }
   }
 }
 ```
+
+`Error` also exposes helpers that work for every variant:
+
+- `to_message` - rendered message with severity and source location
+- `severity` - `Severity.Warning`, `Severity.Error` or `Severity.Fatal`
+- `variant` - the variant name as a `String`
+- `context` - an `ErrorContext` with `message`, `severity`, `line`,
+  `position` and `fragment`
 
 ### Strict Mode Errors
 
@@ -485,15 +502,22 @@ match parser.parse(raw_email_string) {
   case Ok(message) -> {
     # Success (RFC compliant)
   }
-  case Error(e) -> {
-    # Strict mode errors:
-    # - "Invalid header field name: ..."
-    # - "Malformed header: ..."
-    # - "Duplicate header detected: ..."
-    # - "Invalid header format: no colon found"
+  case Error(e) -> match e {
+    case InvalidHeaderFieldName(_, name, _, _, _) -> {}
+    case MalformedHeader(_, reason, _, _, _) -> {}
+    case DuplicateHeader(_, name, _, _, _) -> {}
+    case HeaderWithoutColon(_, _, _, _) -> {}
+    case _ -> {}
   }
 }
 ```
+
+### Streaming Errors
+
+`StreamingParser.parse_stream`, `parse_async_raw` and `parse_async_reader`
+return `Result[StreamingResult, Error]` as well. The `StreamHandler.on_error`
+callback receives `ref Error`, so handlers can inspect it before the parser
+returns it to the caller.
 
 ## Performance Characteristics
 
@@ -562,7 +586,7 @@ Note: The benchmark suite measures relative performance. Due to Inko's type syst
 - `emailparser.message_id` - Message-ID generation (MessageIdGenerator)
 - `emailparser.address` - Email address parsing (EmailAddress)
 - `emailparser.attachment` - Attachment representation (EmailAttachment)
-- `emailparser.error` - Error types for parsing failures
+- `emailparser.error` - Error types (`Error`, `Severity`, `ErrorContext`) for parsing failures
 
 ## RFC Compliance
 

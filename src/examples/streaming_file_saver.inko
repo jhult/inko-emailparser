@@ -15,6 +15,7 @@
 # - I/O error handling
 
 import emailparser.email_generator (TestAttachment, TestDataGenerator)
+import emailparser.error (Error)
 import emailparser.streaming (
   AttachmentInfo, StreamHandler, StreamingParser, StreamingResult,
 )
@@ -112,7 +113,9 @@ impl StreamHandler for FileAttachmentSaver {
   fn pub mut on_begin -> Result[Int, String] {
     @attachment_count = 0
 
-    if @verbose { let _ = Stdout.new.print('Starting email parsing...') }
+    if @verbose {
+      let _ = Stdout.new.print('Starting email parsing...')
+    }
 
     Result.Ok(0)
   }
@@ -121,7 +124,9 @@ impl StreamHandler for FileAttachmentSaver {
   fn pub mut on_headers(
     headers: ref Array[(String, String)],
   ) -> Result[Int, String] {
-    if @verbose { let _ = Stdout.new.print('Headers parsed successfully') }
+    if @verbose {
+      let _ = Stdout.new.print('Headers parsed successfully')
+    }
 
     Result.Ok(0)
   }
@@ -222,9 +227,8 @@ impl StreamHandler for FileAttachmentSaver {
   # Called when attachment is complete
   #
   # Flushes and closes the file, logs final statistics.
-  fn pub mut on_attachment_end(
-    info: ref AttachmentInfo,
-  ) -> Result[Int, String] {
+  fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String]
+  {
     match @current_file {
       case Some(file) -> {
         if @verbose {
@@ -258,8 +262,8 @@ impl StreamHandler for FileAttachmentSaver {
   }
 
   # Called when an error occurs
-  fn pub mut on_error(error: String) -> Result[Int, String] {
-    let _ = Stderr.new.print('Error: ' + error)
+  fn pub mut on_error(error: ref Error) -> Result[Int, String] {
+    let _ = Stderr.new.print('Error: ' + error.to_message)
 
     Result.Ok(0)
   }
@@ -339,7 +343,7 @@ type async Main {
         let _ = out.print('All attachments processed successfully!')
       }
       case Error(e) -> {
-        let _ = err.print('Failed to parse email: ' + e)
+        let _ = err.print('Failed to parse email: ' + e.to_message)
 
         return
       }

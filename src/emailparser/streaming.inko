@@ -15,6 +15,8 @@ import emailparser.address (parse_address_list_impl)
 import emailparser.decoder (
   decode_body_impl, decode_rfc2047_word, find_rfc2047_word_end,
 )
+import emailparser.error (Error)
+import emailparser.error (Severity)
 import emailparser.header (
   eq_ignore_case, extract_extra_headers, extract_filename_param,
   get_header_value_impl, get_param_value_impl, parse_content_type_impl,
@@ -165,7 +167,10 @@ trait pub StreamHandler {
   fn pub mut on_end -> Result[Int, String]
 
   # Called when an error occurs (optional, errors also propagated to caller)
-  fn pub mut on_error(error: String) -> Result[Int, String]
+  #
+  # The error is passed by reference so the parser can still return it to the
+  # caller afterwards. Use `to_message` to render it for display.
+  fn pub mut on_error(error: ref Error) -> Result[Int, String]
 }
 
 # Streaming parser for large emails
@@ -193,11 +198,13 @@ impl StreamingParser {
   fn pub mut parse_stream[H: mut + StreamHandler](
     raw: String,
     handler: mut H,
-  ) -> Result[StreamingResult, String] {
+  ) -> Result[StreamingResult, Error] {
     # Notify handler that parsing is beginning
     match handler.on_begin {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error('Handler on_begin failed: ${e}')
+      case Error(e) -> {
+        return Result.Error(Error.from_string('Handler on_begin failed: ${e}'))
+      }
     }
 
     # Normalize line endings
@@ -206,14 +213,24 @@ impl StreamingParser {
 
     # Check email size limit
     if email_size > @config.max_email_size {
-      match handler.on_error('Email size exceeds maximum') {
+      let failure = Error.EmailSizeExceeded(
+        Severity.Error,
+        @config.max_email_size,
+        email_size,
+        Option.None,
+        Option.None,
+      )
+
+      match handler.on_error(failure) {
         case Ok(_) -> {}
-        case Error(e) -> return Result.Error('Handler on_error failed: ${e}')
+        case Error(e) -> {
+          return Result.Error(
+            Error.from_string('Handler on_error failed: ${e}'),
+          )
+        }
       }
 
-      return Result.Error(
-        'Email size ${email_size} exceeds maximum ${@config.max_email_size}',
-      )
+      return Result.Error(failure)
     }
 
     # Split headers and body
@@ -243,21 +260,27 @@ impl StreamingParser {
     {
       case Ok(h) -> h
       case Error(e) -> {
-        match handler.on_error(e.to_message) {
+        match handler.on_error(e) {
           case Ok(_) -> {}
           case Error(err) -> {
-            return Result.Error('Handler on_error failed: ${err}')
+            return Result.Error(
+              Error.from_string('Handler on_error failed: ${err}'),
+            )
           }
         }
 
-        return Result.Error(e.to_message)
+        return Result.Error(e)
       }
     }
 
     # Notify handler of headers
     match handler.on_headers(ref headers) {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error('Handler on_headers failed: ${e}')
+      case Error(e) -> {
+        return Result.Error(
+          Error.from_string('Handler on_headers failed: ${e}'),
+        )
+      }
     }
 
     # Extract metadata for result
@@ -308,7 +331,7 @@ impl StreamingParser {
       .or('text/plain')
     let (ct_main, ct_params) = match parse_content_type_impl(content_type_raw) {
       case Ok(result) -> result
-      case Error(e) -> return Result.Error(e.to_message)
+      case Error(e) -> return Result.Error(e)
     }
     let content_transfer_encoding = get_header_value_impl(
       ref headers,
@@ -325,12 +348,26 @@ impl StreamingParser {
       match boundary.clone {
         case Some(b) -> {
           if !is_valid_boundary(b.clone) {
-            return Result.Error('Invalid boundary string')
+            return Result.Error(
+              Error.InvalidBoundary(
+                Severity.Error,
+                'exceeds 70 characters or contains invalid characters',
+                Option.None,
+                Option.None,
+                Option.Some(b),
+              ),
+            )
           }
         }
         case None -> {
           return Result.Error(
-            'Multipart content type requires boundary parameter',
+            Error.InvalidBoundary(
+              Severity.Error,
+              'missing boundary parameter for multipart Content-Type',
+              Option.None,
+              Option.None,
+              Option.Some(ct_main.clone),
+            ),
           )
         }
       }
@@ -349,14 +386,18 @@ impl StreamingParser {
     {
       case Ok(count) -> count
       case Error(e) -> {
-        match handler.on_error(e) {
+        let failure = Error.from_string(e)
+
+        match handler.on_error(failure) {
           case Ok(_) -> {}
           case Error(err) -> {
-            return Result.Error('Handler on_error failed: ${err}')
+            return Result.Error(
+              Error.from_string('Handler on_error failed: ${err}'),
+            )
           }
         }
 
-        return Result.Error(e)
+        return Result.Error(failure)
       }
     }
 
@@ -366,7 +407,9 @@ impl StreamingParser {
     # Notify handler that parsing is complete
     match handler.on_end {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error('Handler on_end failed: ${e}')
+      case Error(e) -> {
+        return Result.Error(Error.from_string('Handler on_end failed: ${e}'))
+      }
     }
 
     # Return streaming result with metadata
@@ -398,7 +441,7 @@ impl StreamingParser {
   fn pub mut parse_async_raw[H: mut + StreamHandler](
     raw: String,
     handler: mut H,
-  ) -> Result[StreamingResult, String] {
+  ) -> Result[StreamingResult, Error] {
     # Delegate to parse_stream since the logic is identical
     # The difference is in the trait constraint which allows async handlers
     self.parse_stream(raw, handler)
@@ -412,10 +455,12 @@ impl StreamingParser {
   fn pub mut parse_async_reader[H: mut + StreamHandler, R: mut + AsyncReader](
     reader: mut R,
     handler: mut H,
-  ) -> Result[StreamingResult, String] {
+  ) -> Result[StreamingResult, Error] {
     match handler.on_begin {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error('Handler on_begin failed: ${e}')
+      case Error(e) -> {
+        return Result.Error(Error.from_string('Handler on_begin failed: ${e}'))
+      }
     }
 
     let mut buffer = ByteArray.new
@@ -434,16 +479,24 @@ impl StreamingParser {
           total_bytes = total_bytes + chunk.size
 
           if total_bytes > @config.max_email_size {
-            match handler.on_error('Email size exceeds maximum') {
+            let failure = Error.EmailSizeExceeded(
+              Severity.Error,
+              @config.max_email_size,
+              total_bytes,
+              Option.None,
+              Option.None,
+            )
+
+            match handler.on_error(failure) {
               case Ok(_) -> {}
               case Error(e) -> {
-                return Result.Error('Handler on_error failed: ${e}')
+                return Result.Error(
+                  Error.from_string('Handler on_error failed: ${e}'),
+                )
               }
             }
 
-            return Result.Error(
-              'Email size ${total_bytes} exceeds maximum ${@config.max_email_size}',
-            )
+            return Result.Error(failure)
           }
 
           let mut i = 0
@@ -474,21 +527,25 @@ impl StreamingParser {
               {
                 case Ok(h) -> h
                 case Error(e) -> {
-                  match handler.on_error(e.to_message) {
+                  match handler.on_error(e) {
                     case Ok(_) -> {}
                     case Error(err) -> {
-                      return Result.Error('Handler on_error failed: ${err}')
+                      return Result.Error(
+                        Error.from_string('Handler on_error failed: ${err}'),
+                      )
                     }
                   }
 
-                  return Result.Error(e.to_message)
+                  return Result.Error(e)
                 }
               }
 
               match handler.on_headers(ref headers) {
                 case Ok(_) -> {}
                 case Error(e) -> {
-                  return Result.Error('Handler on_headers failed: ${e}')
+                  return Result.Error(
+                    Error.from_string('Handler on_headers failed: ${e}'),
+                  )
                 }
               }
 
@@ -508,20 +565,26 @@ impl StreamingParser {
             }
             case None -> {
               if buffer.size > MAX_HEADERS_SECTION_SIZE {
-                return Result.Error('Headers too large or malformed')
+                return Result.Error(
+                  Error.from_string('Headers too large or malformed'),
+                )
               }
             }
           }
         }
         case Error(e) -> {
-          match handler.on_error(e) {
+          let failure = Error.from_string(e)
+
+          match handler.on_error(failure) {
             case Ok(_) -> {}
             case Error(err) -> {
-              return Result.Error('Handler on_error failed: ${err}')
+              return Result.Error(
+                Error.from_string('Handler on_error failed: ${err}'),
+              )
             }
           }
 
-          return Result.Error(e)
+          return Result.Error(failure)
         }
       }
     }
@@ -569,7 +632,7 @@ impl StreamingParser {
       .or('text/plain')
     let (ct_main, ct_params) = match parse_content_type_impl(content_type_raw) {
       case Ok(result) -> result
-      case Error(e) -> return Result.Error(e.to_message)
+      case Error(e) -> return Result.Error(e)
     }
     let content_transfer_encoding = get_header_value_impl(
       ref headers,
@@ -584,12 +647,26 @@ impl StreamingParser {
       match boundary.clone {
         case Some(b) -> {
           if !is_valid_boundary(b.clone) {
-            return Result.Error('Invalid boundary string')
+            return Result.Error(
+              Error.InvalidBoundary(
+                Severity.Error,
+                'exceeds 70 characters or contains invalid characters',
+                Option.None,
+                Option.None,
+                Option.Some(b),
+              ),
+            )
           }
         }
         case None -> {
           return Result.Error(
-            'Multipart content type requires boundary parameter',
+            Error.InvalidBoundary(
+              Severity.Error,
+              'missing boundary parameter for multipart Content-Type',
+              Option.None,
+              Option.None,
+              Option.Some(ct_main.clone),
+            ),
           )
         }
       }
@@ -618,14 +695,18 @@ impl StreamingParser {
           {
             case Ok(count) -> count
             case Error(e) -> {
-              match handler.on_error(e) {
+              let failure = Error.from_string(e)
+
+              match handler.on_error(failure) {
                 case Ok(_) -> {}
                 case Error(err) -> {
-                  return Result.Error('Handler on_error failed: ${err}')
+                  return Result.Error(
+                    Error.from_string('Handler on_error failed: ${err}'),
+                  )
                 }
               }
 
-              return Result.Error(e)
+              return Result.Error(failure)
             }
           }
         }
@@ -648,14 +729,18 @@ impl StreamingParser {
       {
         case Ok(_) -> 0
         case Error(e) -> {
-          match handler.on_error(e) {
+          let failure = Error.from_string(e)
+
+          match handler.on_error(failure) {
             case Ok(_) -> {}
             case Error(err) -> {
-              return Result.Error('Handler on_error failed: ${err}')
+              return Result.Error(
+                Error.from_string('Handler on_error failed: ${err}'),
+              )
             }
           }
 
-          return Result.Error(e)
+          return Result.Error(failure)
         }
       }
     } else {
@@ -666,7 +751,9 @@ impl StreamingParser {
 
     match handler.on_end {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error('Handler on_end failed: ${e}')
+      case Error(e) -> {
+        return Result.Error(Error.from_string('Handler on_end failed: ${e}'))
+      }
     }
 
     Result.Ok(
