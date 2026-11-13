@@ -22,8 +22,8 @@ import emailparser.header (
 )
 import emailparser.header_extraction (parse_threading_headers)
 import emailparser.limits (
-  MAX_ATTACHMENT_SIZE, MAX_EMAIL_SIZE, MAX_HEADERS, MAX_HEADERS_SECTION_SIZE,
-  MAX_MULTIPART_DEPTH,
+  MAX_ATTACHMENTS, MAX_ATTACHMENT_SIZE, MAX_EMAIL_SIZE, MAX_HEADERS,
+  MAX_HEADERS_SECTION_SIZE, MAX_MULTIPART_DEPTH,
 )
 import emailparser.streaming_decoder (
   Base64StreamingDecoder, QuotedPrintableStreamingDecoder,
@@ -77,6 +77,7 @@ type pub StreamingConfig {
   let pub mut @max_attachment_size: Int
   let pub mut @max_multipart_depth: Int
   let pub mut @max_headers: Int
+  let pub mut @max_attachments: Int
   let pub mut @stream_chunk_size: Int # Bytes to process per callback
 }
 
@@ -89,6 +90,7 @@ impl StreamingConfig {
       max_attachment_size: MAX_ATTACHMENT_SIZE,
       max_multipart_depth: MAX_MULTIPART_DEPTH,
       max_headers: MAX_HEADERS,
+      max_attachments: MAX_ATTACHMENTS,
       stream_chunk_size: 65536,
     )
   }
@@ -120,6 +122,11 @@ impl StreamingConfig {
 
   fn pub mut with_max_headers(count: Int) -> mut Self {
     @max_headers = count
+    self
+  }
+
+  fn pub mut with_max_attachments(count: Int) -> mut Self {
+    @max_attachments = count
     self
   }
 
@@ -608,6 +615,8 @@ impl StreamingParser {
               @config.max_multipart_depth,
               @config.max_attachment_size,
               @config.max_headers,
+              @config.strict_mode,
+              @config.max_attachments,
               chunk_size,
               @config.max_email_size,
               total_bytes,
@@ -638,6 +647,7 @@ impl StreamingParser {
           is_text_html(ct_main),
           chunk_size,
           @config.max_attachment_size,
+          @config.strict_mode,
           @config.max_email_size,
           total_bytes,
           handler,
@@ -820,6 +830,8 @@ fn parse_body_stream[H: mut + StreamHandler](
           config.max_multipart_depth,
           config.max_attachment_size,
           config.max_headers,
+          config.strict_mode,
+          config.max_attachments,
           config.stream_chunk_size,
           handler,
         )
@@ -832,6 +844,7 @@ fn parse_body_stream[H: mut + StreamHandler](
       content_transfer_encoding,
       config.stream_chunk_size,
       config.max_attachment_size,
+      config.strict_mode,
       handler,
     )
   } else if is_text_html(ct_main) {
@@ -840,6 +853,7 @@ fn parse_body_stream[H: mut + StreamHandler](
       content_transfer_encoding,
       config.stream_chunk_size,
       config.max_attachment_size,
+      config.strict_mode,
       handler,
     )
   } else {
@@ -854,12 +868,13 @@ fn stream_body_impl[H: mut + StreamHandler](
   chunk_size: Int,
   max_size: Int,
   is_html: Bool,
+  strict_mode: Bool,
   handler: mut H,
 ) -> Result[Int, String] {
   let encoding_lower = encoding.to_lower
 
   if encoding_lower == 'base64' {
-    let mut d = Base64StreamingDecoder.new(max_size, false)
+    let mut d = Base64StreamingDecoder.new(max_size, strict_mode)
 
     match d.feed(body_raw) {
       case Ok(decoded) -> {
@@ -894,7 +909,11 @@ fn stream_body_impl[H: mut + StreamHandler](
       case Error(_) -> {}
     }
   } else if encoding_lower == 'quoted-printable' {
-    let mut d = QuotedPrintableStreamingDecoder.new(max_size, false, false)
+    let mut d = QuotedPrintableStreamingDecoder.new(
+      max_size,
+      strict_mode,
+      false,
+    )
 
     match d.feed(body_raw) {
       case Ok(decoded) -> {
@@ -949,9 +968,18 @@ fn stream_text_body[H: mut + StreamHandler](
   encoding: String,
   chunk_size: Int,
   max_size: Int,
+  strict_mode: Bool,
   handler: mut H,
 ) -> Result[Int, String] {
-  stream_body_impl(body_raw, encoding, chunk_size, max_size, false, handler)
+  stream_body_impl(
+    body_raw,
+    encoding,
+    chunk_size,
+    max_size,
+    false,
+    strict_mode,
+    handler,
+  )
 }
 
 # Stream HTML body in chunks
@@ -960,9 +988,18 @@ fn stream_html_body[H: mut + StreamHandler](
   encoding: String,
   chunk_size: Int,
   max_size: Int,
+  strict_mode: Bool,
   handler: mut H,
 ) -> Result[Int, String] {
-  stream_body_impl(body_raw, encoding, chunk_size, max_size, true, handler)
+  stream_body_impl(
+    body_raw,
+    encoding,
+    chunk_size,
+    max_size,
+    true,
+    strict_mode,
+    handler,
+  )
 }
 
 # Process text/html body incrementally from an async reader
@@ -976,6 +1013,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
   is_html: Bool,
   chunk_size: Int,
   max_size: Int,
+  strict_mode: Bool,
   max_email_size: Int,
   start_total_bytes: Int,
   handler: mut H,
@@ -984,7 +1022,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
   let encoding_lower = encoding.to_lower
 
   if encoding_lower == 'base64' {
-    let mut decoder = Base64StreamingDecoder.new(max_size, false)
+    let mut decoder = Base64StreamingDecoder.new(max_size, strict_mode)
 
     # Feed initial body data
     if initial_body.size > 0 {
@@ -1062,7 +1100,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
   } else if encoding_lower == 'quoted-printable' {
     let mut decoder = QuotedPrintableStreamingDecoder.new(
       max_size,
-      false,
+      strict_mode,
       false,
     )
 
@@ -1230,6 +1268,8 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
   max_depth: Int,
   max_size: Int,
   max_headers: Int,
+  strict_mode: Bool,
+  max_attachments: Int,
   chunk_size: Int,
   max_email_size: Int,
   start_total_bytes: Int,
@@ -1241,7 +1281,7 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
       boundary,
       max_depth,
       chunk_size,
-      false,
+      strict_mode,
       max_headers,
       max_size,
     )
@@ -1261,6 +1301,9 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
     max_size: max_size,
     chunk_size: chunk_size,
     max_headers: max_headers,
+    strict_mode: strict_mode,
+    max_attachments: max_attachments,
+    current_attachment_size: 0,
     depth: 0,
     max_depth: max_depth,
     nested_buffer: Option.None,
@@ -1318,6 +1361,9 @@ type MultipartHandlerWrapper[H: mut + StreamHandler] {
   let @max_size: Int
   let @chunk_size: Int
   let @max_headers: Int
+  let @strict_mode: Bool
+  let @max_attachments: Int
+  let mut @current_attachment_size: Int
   let @depth: Int
   let @max_depth: Int
   let mut @nested_buffer: Option[ByteArray]
@@ -1378,6 +1424,8 @@ if
     }
 
     if is_actual_attachment {
+      @current_attachment_size = 0
+
       let info = AttachmentInfo(
         index: @attachment_count,
         content_type: content_type,
@@ -1436,6 +1484,13 @@ if
               match d.feed(data_str.into_string) {
                 case Ok(decoded) -> {
                   if decoded.size > 0 {
+                    @current_attachment_size = @current_attachment_size
+                      + decoded.size
+
+                    if @current_attachment_size > @max_size {
+                      return Result.Error('Attachment exceeds maximum size')
+                    }
+
                     match @handler.on_attachment_chunk(decoded, info) {
                       case Ok(_) -> {}
                       case Error(e) -> {
@@ -1466,6 +1521,13 @@ if
               match d.feed(data_str.into_string) {
                 case Ok(decoded) -> {
                   if decoded.size > 0 {
+                    @current_attachment_size = @current_attachment_size
+                      + decoded.size
+
+                    if @current_attachment_size > @max_size {
+                      return Result.Error('Attachment exceeds maximum size')
+                    }
+
                     match @handler.on_attachment_chunk(decoded, info) {
                       case Ok(_) -> {}
                       case Error(e) -> {
@@ -1482,6 +1544,12 @@ if
             case None -> {}
           }
         } else {
+          @current_attachment_size = @current_attachment_size + data_str.size
+
+          if @current_attachment_size > @max_size {
+            return Result.Error('Attachment exceeds maximum size')
+          }
+
           match @handler.on_attachment_chunk(data_str, info) {
             case Ok(_) -> {}
             case Error(e) -> {
@@ -1636,6 +1704,9 @@ if
         max_size: @max_size,
         chunk_size: @chunk_size,
         max_headers: @max_headers,
+        strict_mode: @strict_mode,
+        max_attachments: @max_attachments,
+        current_attachment_size: 0,
         depth: @depth + 1,
         max_depth: @max_depth,
         nested_buffer: Option.None,
@@ -1696,6 +1767,12 @@ if
       case Some(info) -> {
         match base64_decoded {
           case Some(data) -> {
+            @current_attachment_size = @current_attachment_size + data.size
+
+            if @current_attachment_size > @max_size {
+              return Result.Error('Attachment exceeds maximum size')
+            }
+
             match @handler.on_attachment_chunk(data, info) {
               case Ok(_) -> {}
               case Error(e) -> {
@@ -1708,6 +1785,12 @@ if
 
         match qp_decoded {
           case Some(data) -> {
+            @current_attachment_size = @current_attachment_size + data.size
+
+            if @current_attachment_size > @max_size {
+              return Result.Error('Attachment exceeds maximum size')
+            }
+
             match @handler.on_attachment_chunk(data, info) {
               case Ok(_) -> {}
               case Error(e) -> {
@@ -1723,6 +1806,10 @@ if
           case Error(e) -> {
             return Result.Error('Handler on_attachment_end failed: ${e}')
           }
+        }
+
+        if @attachment_count >= @max_attachments {
+          return Result.Error('Maximum number of attachments exceeded')
         }
 
         @attachment_count = @attachment_count + 1
@@ -1785,6 +1872,8 @@ fn parse_multipart_stream[H: mut + StreamHandler](
   max_depth: Int,
   max_size: Int,
   max_headers: Int,
+  strict_mode: Bool,
+  max_attachments: Int,
   chunk_size: Int,
   handler: mut H,
 ) -> Result[Int, String] {
@@ -1804,7 +1893,7 @@ fn parse_multipart_stream[H: mut + StreamHandler](
       boundary,
       max_depth,
       chunk_size,
-      false,
+      strict_mode,
       max_headers,
       max_size,
     )
@@ -1824,6 +1913,9 @@ fn parse_multipart_stream[H: mut + StreamHandler](
     max_size: max_size,
     chunk_size: chunk_size,
     max_headers: max_headers,
+    strict_mode: strict_mode,
+    max_attachments: max_attachments,
+    current_attachment_size: 0,
     depth: 0,
     max_depth: max_depth,
     nested_buffer: Option.None,

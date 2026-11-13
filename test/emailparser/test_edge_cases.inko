@@ -13,7 +13,9 @@
 
 import emailparser (EmailParser, ParserConfig)
 import emailparser.email_generator (TestAttachment, TestDataGenerator)
-import emailparser.streaming (AttachmentInfo, StreamHandler, StreamingParser)
+import emailparser.streaming (
+  AttachmentInfo, StreamHandler, StreamingConfig, StreamingParser,
+)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
@@ -1022,6 +1024,38 @@ Malformed attachment
     match parser.parse_stream(email, handler) {
       case Ok(_) -> t.false(true)
       case Error(e) -> t.true(e.contains?('Simulated error'))
+    }
+  })
+
+  t.test('streaming_enforces_max_attachment_size', fn (t) {
+    let mut config = StreamingConfig.new
+
+    config.max_attachment_size = 4
+
+    let parser = StreamingParser.with_config(config)
+    let mut handler = ErrorTestingHandler.new(0, false)
+
+    let email = 'From: a@example.com\nTo: b@example.com\nSubject: Limit\nContent-Type: multipart/mixed; boundary=b\n\n--b\nContent-Type: application/octet-stream\nContent-Disposition: attachment; filename="f.bin"\n\nABCDEFGHIJ\n--b--\n'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.true(e.contains?('maximum size'))
+    }
+  })
+
+  t.test('streaming_enforces_max_attachments', fn (t) {
+    let mut config = StreamingConfig.new
+
+    config.max_attachments = 1
+
+    let parser = StreamingParser.with_config(config)
+    let mut handler = ErrorTestingHandler.new(0, false)
+
+    let email = 'From: a@example.com\nTo: b@example.com\nSubject: Limit\nContent-Type: multipart/mixed; boundary=b\n\n--b\nContent-Type: application/octet-stream\nContent-Disposition: attachment; filename="a.bin"\nContent-Transfer-Encoding: base64\n\nQQ==\n--b\nContent-Type: application/octet-stream\nContent-Disposition: attachment; filename="b.bin"\nContent-Transfer-Encoding: base64\n\nQQ==\n--b--\n'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.true(e.contains?('Maximum number of attachments'))
     }
   })
 

@@ -428,7 +428,11 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
       # Parse headers
       let headers_string = header_bytes.into_string
       let headers = match
-        parse_part_headers(headers_string, parser.max_headers)
+        parse_part_headers(
+          headers_string,
+          parser.max_headers,
+          parser.strict_mode,
+        )
       {
         case Ok(h) -> h
         case Error(e) -> return Result.Error(e)
@@ -930,11 +934,12 @@ fn find_double_newline(buffer: ref ByteArray) -> Option[Int] {
 fn parse_part_headers(
   headers_raw: String,
   max_headers: Int,
+  strict_mode: Bool,
 ) -> Result[Array[(String, String)], String] {
   match
     parse_headers_impl(
       headers_raw,
-      false,
+      strict_mode,
       MAX_HEADERS_SECTION_SIZE,
       max_headers,
     )

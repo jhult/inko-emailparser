@@ -31,13 +31,14 @@ fn pub tests(t: mut Tests) {
   t.test('base64_split_across_chunks', fn (t) {
     let mut decoder = Base64StreamingDecoder.new(1000000, false)
 
+    # Complete 4-character groups are decoded as soon as they arrive.
     match decoder.feed('SGVs') {
-      case Ok(decoded) -> t.equal(decoded.size, 0)
+      case Ok(decoded) -> t.equal(decoded.into_string, 'Hel')
       case Error(e) -> panic('Failed: ${e}')
     }
 
     match decoder.feed('bG8=') {
-      case Ok(decoded) -> t.equal(decoded.into_string, 'Hello')
+      case Ok(decoded) -> t.equal(decoded.into_string, 'lo')
       case Error(e) -> panic('Failed: ${e}')
     }
 
@@ -141,12 +142,12 @@ fn pub tests(t: mut Tests) {
     let mut decoder = Base64StreamingDecoder.new(1000000, false)
 
     match decoder.feed('SGVs') {
-      case Ok(decoded) -> t.equal(decoded.size, 0)
+      case Ok(decoded) -> t.equal(decoded.into_string, 'Hel')
       case Error(e) -> panic('Failed: ${e}')
     }
 
     match decoder.finish {
-      case Ok(final) -> t.equal(final.into_string, 'Hel')
+      case Ok(final) -> t.equal(final.size, 0)
       case Error(e) -> panic('Failed: ${e}')
     }
   })

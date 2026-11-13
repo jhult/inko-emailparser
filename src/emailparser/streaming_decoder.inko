@@ -17,10 +17,8 @@ type pub Base64StreamingDecoder {
 }
 
 impl Base64StreamingDecoder {
-  fn pub static new(
-    max_size: Int,
-    strict_mode: Bool,
-  ) -> Base64StreamingDecoder {
+  fn pub static new(max_size: Int, strict_mode: Bool) -> Base64StreamingDecoder
+  {
     Base64StreamingDecoder(
       buffer: recover ByteArray.new,
       size_tracker: SizeTracker.new(max_size, strict_mode),
@@ -78,11 +76,37 @@ impl Base64StreamingDecoder {
 
     let output = ByteArray.new
 
-    # Only decode if we see padding (indicating end of data in this stream)
-    if has_padding {
+    # Decode incrementally: complete 4-character groups can be decoded as soon
+    # as they arrive. With padding, consume the whole (final) buffer.
+    let decode_len = if has_padding {
+      @buffer.size
+    } else {
+      (@buffer.size / 4) * 4
+    }
+
+    if decode_len > 0 {
+      let to_decode = ByteArray.new
+      let rest = ByteArray.new
+      let mut idx = 0
+
+      while idx < @buffer.size {
+        match @buffer.get(idx) {
+          case Ok(byte) -> {
+            if idx < decode_len {
+              to_decode.push(byte)
+            } else {
+              rest.push(byte)
+            }
+          }
+          case Error(_) -> {}
+        }
+
+        idx = idx + 1
+      }
+
       let decoder = Decoder.new
 
-      match decoder.decode(@buffer, output) {
+      match decoder.decode(to_decode, output) {
         case Ok(_) -> {
           # Check size limit and truncate if necessary
           let available_space = @size_tracker.remaining_space
@@ -108,7 +132,7 @@ impl Base64StreamingDecoder {
           } else {
             let _ = @size_tracker.add(output.size)
 
-            @buffer = ByteArray.new
+            @buffer = rest
           }
         }
         case Error(_) -> return Result.Error('Base64 decoding failed')
