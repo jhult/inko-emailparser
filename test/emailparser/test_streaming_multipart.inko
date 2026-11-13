@@ -451,6 +451,9 @@ Content-Type: text/html
 
     t.equal(handler.parts_begun, 1)
     t.equal(handler.parts_ended, 1)
+    t.equal(handler.content_types.get(0).or(''), 'text/plain')
+    t.equal(handler.headers_seen.get(0).or([]).size, 1)
+    t.equal(handler.data_chunks.get(0).or(''), 'Test')
   })
 
   t.test('multipart_preamble_handling', fn (t) {
