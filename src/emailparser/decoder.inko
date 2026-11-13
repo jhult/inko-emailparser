@@ -494,33 +494,3 @@ fn cp1252_codepoint(byte: Int) -> Int {
     case _ -> byte
   }
 }
-
-# Trait for content decoder implementations
-#
-# Allows swapping decoder implementations for testing and extensibility
-trait pub ContentDecoder {
-  fn decode(
-    input: String,
-    encoding: String,
-    max_size: Int,
-  ) -> Result[String, Error]
-}
-
-# Default content decoder implementation
-type pub DefaultContentDecoder {}
-
-impl ContentDecoder for DefaultContentDecoder {
-  fn decode(
-    input: String,
-    encoding: String,
-    max_size: Int,
-  ) -> Result[String, Error] {
-    decode_body_impl(input, encoding, max_size)
-  }
-}
-
-impl DefaultContentDecoder {
-  fn pub static new -> DefaultContentDecoder {
-    DefaultContentDecoder()
-  }
-}

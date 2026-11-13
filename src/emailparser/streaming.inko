@@ -72,7 +72,6 @@ type pub StreamingResult {
 # Streaming configuration
 type pub StreamingConfig {
   let pub mut @strict_mode: Bool
-  let pub mut @fail_fast: Bool
   let pub mut @max_email_size: Int
   let pub mut @max_attachment_size: Int
   let pub mut @max_multipart_depth: Int
@@ -85,7 +84,6 @@ impl StreamingConfig {
   fn pub static new -> StreamingConfig {
     StreamingConfig(
       strict_mode: false,
-      fail_fast: false,
       max_email_size: MAX_EMAIL_SIZE,
       max_attachment_size: MAX_ATTACHMENT_SIZE,
       max_multipart_depth: MAX_MULTIPART_DEPTH,
@@ -97,11 +95,6 @@ impl StreamingConfig {
 
   fn pub mut with_strict_mode(strict: Bool) -> mut Self {
     @strict_mode = strict
-    self
-  }
-
-  fn pub mut with_fail_fast(fail: Bool) -> mut Self {
-    @fail_fast = fail
     self
   }
 

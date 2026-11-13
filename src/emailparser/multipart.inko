@@ -167,7 +167,6 @@ fn pub merge_multipart_part(
   (final_text, final_html, new_attachment)
 }
 
-# Handle nested multipart messages
 import emailparser.validation (is_valid_boundary)
 
 # Handle nested multipart messages

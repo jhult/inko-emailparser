@@ -100,13 +100,10 @@ type pub MultipartStreamParser {
   let @boundary: String
   let mut @buffer: ByteArray
   let @max_depth: Int
-  let @chunk_size: Int
   let @strict_mode: Bool
   let @max_headers: Int
-  let @max_attachment_size: Int
   let mut @current_context: Option[CurrentPartContext]
   let mut @context_stack: Array[ContextStackEntry]
-  let mut @bytes_processed: Int
   let mut @attachment_count: Int
 }
 
@@ -140,13 +137,10 @@ impl MultipartStreamParser {
         boundary: boundary,
         buffer: ByteArray.new,
         max_depth: max_depth,
-        chunk_size: chunk_size,
         strict_mode: strict_mode,
         max_headers: max_headers,
-        max_attachment_size: max_attachment_size,
         current_context: Option.None,
         context_stack: [],
-        bytes_processed: 0,
         attachment_count: 0,
       ),
     )
