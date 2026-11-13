@@ -11,21 +11,23 @@
 # See docs/streaming-api.md for complete design documentation.
 
 import emailparser.address (EmailAddress)
-import emailparser.address (parse_address_list_impl)
-import emailparser.decoder (
-  decode_body_impl, decode_rfc2047_word, find_rfc2047_word_end,
-)
+import emailparser.decoder (decode_body_impl)
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.header (
-  eq_ignore_case, extract_extra_headers, extract_filename_param,
-  get_header_value_impl, get_param_value_impl, parse_content_type_impl,
-  parse_headers_impl,
+  extract_extra_headers, extract_filename_param, get_header_value_impl,
+  get_param_value_impl, parse_content_type_impl, parse_headers_impl,
 )
-import emailparser.header_extraction (parse_threading_headers)
+import emailparser.header_extraction (
+  parse_address_headers, parse_basic_headers, parse_mime_metadata,
+  parse_threading_headers, validate_multipart_boundary,
+)
 import emailparser.limits (
   MAX_ATTACHMENTS, MAX_ATTACHMENT_SIZE, MAX_EMAIL_SIZE, MAX_HEADERS,
   MAX_HEADERS_SECTION_SIZE, MAX_MULTIPART_DEPTH,
+)
+import emailparser.mime (
+  extract_boundary, is_multipart, is_text_html, is_text_plain,
 )
 import emailparser.streaming_decoder (
   Base64StreamingDecoder, QuotedPrintableStreamingDecoder,
@@ -34,7 +36,6 @@ import emailparser.streaming_multipart (
   MultipartStreamHandler, MultipartStreamParser,
 )
 import emailparser.streaming_reader (AsyncReader)
-import emailparser.validation (is_valid_boundary)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
@@ -93,41 +94,6 @@ impl StreamingConfig {
       max_attachments: MAX_ATTACHMENTS,
       stream_chunk_size: 65536,
     )
-  }
-
-  fn pub mut with_strict_mode(strict: Bool) -> mut Self {
-    @strict_mode = strict
-    self
-  }
-
-  fn pub mut with_max_email_size(size: Int) -> mut Self {
-    @max_email_size = size
-    self
-  }
-
-  fn pub mut with_max_attachment_size(size: Int) -> mut Self {
-    @max_attachment_size = size
-    self
-  }
-
-  fn pub mut with_max_multipart_depth(depth: Int) -> mut Self {
-    @max_multipart_depth = depth
-    self
-  }
-
-  fn pub mut with_max_headers(count: Int) -> mut Self {
-    @max_headers = count
-    self
-  }
-
-  fn pub mut with_max_attachments(count: Int) -> mut Self {
-    @max_attachments = count
-    self
-  }
-
-  fn pub mut with_stream_chunk_size(size: Int) -> mut Self {
-    @stream_chunk_size = size
-    self
   }
 }
 
@@ -284,93 +250,26 @@ impl StreamingParser {
     }
 
     # Extract metadata for result
-
-    # Parse addresses
-    let from_raw = get_header_value_impl(ref headers, 'From')
-    let from_decoded = decode_header_value_stream(from_raw.clone.or(''))
-    let from_list = parse_address_list_impl(ref from_raw, from_decoded)
-    let from = if from_list.empty? {
-      EmailAddress(name: Option.None, address: '', raw: '')
-    } else {
-      match from_list.into_iter.next {
-        case Some(addr) -> addr
-        case None -> EmailAddress(name: Option.None, address: '', raw: '')
-      }
-    }
-
-    let to_raw = get_header_value_impl(ref headers, 'To')
-    let to = parse_address_list_impl(
-      ref to_raw,
-      decode_header_value_stream(to_raw.clone.or('')),
-    )
-    let cc_raw = get_header_value_impl(ref headers, 'Cc')
-    let cc = parse_address_list_impl(
-      ref cc_raw,
-      decode_header_value_stream(cc_raw.clone.or('')),
-    )
-    let bcc_raw = get_header_value_impl(ref headers, 'Bcc')
-    let bcc = parse_address_list_impl(
-      ref bcc_raw,
-      decode_header_value_stream(bcc_raw.clone.or('')),
-    )
-
-    # Extract basic headers
-    let subject = decode_header_value_stream(
-      get_header_value_impl(ref headers, 'Subject').or(''),
-    )
-    let date = get_header_value_impl(ref headers, 'Date').or('')
-    let message_id = get_header_value_impl(ref headers, 'Message-ID').or('')
-
-    # Extract threading headers
+    let (from, to, cc, bcc) = parse_address_headers(ref headers)
+    let (subject, date, message_id) = parse_basic_headers(ref headers)
     let (in_reply_to, references, thread_id) = parse_threading_headers(
       ref headers,
     )
 
-    # Extract MIME headers
-    let content_type_raw = get_header_value_impl(ref headers, 'Content-Type')
-      .or('text/plain')
-    let (ct_main, ct_params) = match parse_content_type_impl(content_type_raw) {
+    let (ct_main, ct_params, content_transfer_encoding, charset) = match
+      parse_mime_metadata(ref headers)
+    {
       case Ok(result) -> result
       case Error(e) -> return Result.Error(e)
     }
-    let content_transfer_encoding = get_header_value_impl(
-      ref headers,
-      'Content-Transfer-Encoding',
-    )
-      .or('7bit')
-    let charset = get_param_value_impl(ref ct_params, 'charset')
 
     # Parse body based on content type
-    let boundary = extract_boundary_from_params(ref ct_params)
+    let boundary = extract_boundary(ref ct_params)
 
     # Validate boundary if multipart
-    if is_multipart(ct_main) {
-      match boundary.clone {
-        case Some(b) -> {
-          if !is_valid_boundary(b.clone) {
-            return Result.Error(
-              Error.InvalidBoundary(
-                Severity.Error,
-                'exceeds 70 characters or contains invalid characters',
-                Option.None,
-                Option.None,
-                Option.Some(b),
-              ),
-            )
-          }
-        }
-        case None -> {
-          return Result.Error(
-            Error.InvalidBoundary(
-              Severity.Error,
-              'missing boundary parameter for multipart Content-Type',
-              Option.None,
-              Option.None,
-              Option.Some(ct_main.clone),
-            ),
-          )
-        }
-      }
+    match validate_multipart_boundary(ct_main.clone, ref boundary) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e)
     }
 
     # Parse body with streaming
@@ -590,86 +489,22 @@ impl StreamingParser {
     }
 
     # Extract metadata from headers
-    let from_raw = get_header_value_impl(ref headers, 'From')
-    let from_decoded = decode_header_value_stream(from_raw.clone.or(''))
-    let from_list = parse_address_list_impl(ref from_raw, from_decoded)
-    let from = if from_list.empty? {
-      EmailAddress(name: Option.None, address: '', raw: '')
-    } else {
-      match from_list.into_iter.next {
-        case Some(addr) -> addr
-        case None -> EmailAddress(name: Option.None, address: '', raw: '')
-      }
-    }
-
-    let to_raw = get_header_value_impl(ref headers, 'To')
-    let to = parse_address_list_impl(
-      ref to_raw,
-      decode_header_value_stream(to_raw.clone.or('')),
-    )
-    let cc_raw = get_header_value_impl(ref headers, 'Cc')
-    let cc = parse_address_list_impl(
-      ref cc_raw,
-      decode_header_value_stream(cc_raw.clone.or('')),
-    )
-    let bcc_raw = get_header_value_impl(ref headers, 'Bcc')
-    let bcc = parse_address_list_impl(
-      ref bcc_raw,
-      decode_header_value_stream(bcc_raw.clone.or('')),
-    )
-
-    let subject = decode_header_value_stream(
-      get_header_value_impl(ref headers, 'Subject').or(''),
-    )
-    let date = get_header_value_impl(ref headers, 'Date').or('')
-    let message_id = get_header_value_impl(ref headers, 'Message-ID').or('')
-
+    let (from, to, cc, bcc) = parse_address_headers(ref headers)
+    let (subject, date, message_id) = parse_basic_headers(ref headers)
     let (in_reply_to, references, thread_id) = parse_threading_headers(
       ref headers,
     )
-
-    let content_type_raw = get_header_value_impl(ref headers, 'Content-Type')
-      .or('text/plain')
-    let (ct_main, ct_params) = match parse_content_type_impl(content_type_raw) {
+    let (ct_main, ct_params, content_transfer_encoding, charset) = match
+      parse_mime_metadata(ref headers)
+    {
       case Ok(result) -> result
       case Error(e) -> return Result.Error(e)
     }
-    let content_transfer_encoding = get_header_value_impl(
-      ref headers,
-      'Content-Transfer-Encoding',
-    )
-      .or('7bit')
-    let charset = get_param_value_impl(ref ct_params, 'charset')
+    let boundary = extract_boundary(ref ct_params)
 
-    let boundary = extract_boundary_from_params(ref ct_params)
-
-    if is_multipart(ct_main) {
-      match boundary.clone {
-        case Some(b) -> {
-          if !is_valid_boundary(b.clone) {
-            return Result.Error(
-              Error.InvalidBoundary(
-                Severity.Error,
-                'exceeds 70 characters or contains invalid characters',
-                Option.None,
-                Option.None,
-                Option.Some(b),
-              ),
-            )
-          }
-        }
-        case None -> {
-          return Result.Error(
-            Error.InvalidBoundary(
-              Severity.Error,
-              'missing boundary parameter for multipart Content-Type',
-              Option.None,
-              Option.None,
-              Option.Some(ct_main.clone),
-            ),
-          )
-        }
-      }
+    match validate_multipart_boundary(ct_main.clone, ref boundary) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e)
     }
 
     # Phase 2: Process body incrementally
@@ -813,81 +648,6 @@ fn find_header_separator(text: String) -> Option[(Int, Int)] {
       }
     }
   }
-}
-
-# Decode header value for streaming (simplified version)
-fn decode_header_value_stream(raw: String) -> String {
-  let mut result = ByteArray.new
-  let mut pos = 0
-  let mut previous_encoded = false
-
-  while pos < raw.size {
-    match raw.index_of('=?', pos) {
-      case Some(begin) -> {
-        match find_rfc2047_word_end(raw, begin) {
-          case Some(end) -> {
-            # Push text before the encoded word
-            if begin > pos {
-              let before = raw.substring(pos, begin)
-
-              # RFC 2047 section 6.2: ignore whitespace between adjacent
-              # encoded words.
-              if !(previous_encoded and before.trim.empty?) {
-                result.append(before.to_byte_array)
-              }
-            }
-
-            # Decode and push the encoded word
-            let encoded_word = raw.substring(begin, end)
-            let decoded = decode_rfc2047_word(encoded_word)
-
-            result.append(decoded.to_byte_array)
-
-            # Move position past the encoded word
-            pos = end
-            previous_encoded = true
-          }
-          case None -> break
-        }
-      }
-      case None -> break
-    }
-  }
-
-  # Push any remaining text
-  if pos < raw.size {
-    let remaining = raw.substring(pos, raw.size)
-
-    result.append(remaining.to_byte_array)
-  }
-
-  result.into_string
-}
-
-# Extract boundary from content type params
-fn extract_boundary_from_params(
-  params: ref Array[(String, String)],
-) -> Option[String] {
-  for (key, value) in params.iter {
-    if eq_ignore_case(key.clone, 'boundary') { return Option.Some(value.clone) }
-  }
-
-  Option.None
-}
-
-# Check if content type is multipart
-fn is_multipart(content_type: String) -> Bool {
-  content_type.to_lower.starts_with?('multipart/')
-}
-
-# Check if content type is text/plain
-fn is_text_plain(content_type: String) -> Bool {
-  content_type.to_lower == 'text/plain'
-}
-
-# Check if content type is text/html
-fn is_text_html(content_type: String) -> Bool {
-  content_type.to_lower == 'text/html'
 }
 
 # Parse body with streaming callbacks

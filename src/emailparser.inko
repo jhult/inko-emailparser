@@ -17,24 +17,28 @@ import emailparser.address (EmailAddress, parse_address_list_impl)
 import emailparser.address (is_valid_email_format)
 import emailparser.attachment (EmailAttachment)
 import emailparser.decoder (
-  decode_body_bytes_impl, decode_body_impl, decode_rfc2047_word,
-  find_rfc2047_word_end,
+  decode_body_bytes_impl, decode_body_impl, decode_header_value_impl,
 )
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.header (
-  eq_ignore_case, extract_extra_headers, get_header_value_impl,
-  get_param_value_impl, is_standard_header_impl, parse_content_disposition_impl,
+  extract_extra_headers, get_header_value_impl, get_param_value_impl,
+  is_standard_header_impl, parse_content_disposition_impl,
   parse_content_type_impl, parse_headers_impl, sanitize_filename,
 )
-import emailparser.header_extraction (parse_threading_headers)
+import emailparser.header_extraction (
+  parse_address_headers, parse_basic_headers, parse_mime_metadata,
+  parse_threading_headers, validate_multipart_boundary,
+)
 import emailparser.limits (
   MAX_ATTACHMENTS, MAX_ATTACHMENT_SIZE, MAX_EMAIL_SIZE, MAX_HEADERS,
-  MAX_HEADER_ITERATIONS, MAX_MESSAGE_IDS, MAX_MULTIPART_DEPTH,
+  MAX_MULTIPART_DEPTH,
+)
+import emailparser.message_id (parse_message_ids_impl)
+import emailparser.mime (
+  extract_boundary, is_multipart, is_text_html, is_text_plain,
 )
 import emailparser.multipart (parse_multipart_impl)
-import emailparser.validation (is_valid_boundary)
-import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
 
@@ -96,6 +100,9 @@ type pub ParsedEmailMessage {
 }
 
 # Configuration for email parser
+#
+# `ParserConfig` is a plain data holder; use `EmailParser`'s `with_*` builders
+# to create a configured parser.
 type pub ParserConfig {
   # Strict mode enables additional validation
   let pub mut @strict_mode: Bool
@@ -128,58 +135,6 @@ impl ParserConfig {
       max_headers: MAX_HEADERS,
     )
   }
-
-  # Set strict mode
-  fn pub mut with_strict_mode(strict: Bool) -> mut Self {
-    @strict_mode = strict
-    self
-  }
-
-  # Set maximum email size
-  fn pub mut with_max_email_size(size: Int) -> mut Self {
-    @max_email_size = size
-    self
-  }
-
-  # Set maximum attachment size
-  fn pub mut with_max_attachment_size(size: Int) -> mut Self {
-    @max_attachment_size = size
-    self
-  }
-
-  # Set maximum multipart depth
-  fn pub mut with_max_multipart_depth(depth: Int) -> mut Self {
-    @max_multipart_depth = depth
-    self
-  }
-
-  # Set maximum attachments
-  fn pub mut with_max_attachments(count: Int) -> mut Self {
-    @max_attachments = count
-    self
-  }
-
-  # Set maximum headers
-  fn pub mut with_max_headers(count: Int) -> mut Self {
-    @max_headers = count
-    self
-  }
-
-  # Set all limit values at once
-  fn pub mut with_limits(
-    max_email_size: Int,
-    max_attachment_size: Int,
-    max_multipart_depth: Int,
-    max_attachments: Int,
-    max_headers: Int,
-  ) -> mut Self {
-    @max_email_size = max_email_size
-    @max_attachment_size = max_attachment_size
-    @max_multipart_depth = max_multipart_depth
-    @max_attachments = max_attachments
-    @max_headers = max_headers
-    self
-  }
 }
 
 # Normalize line endings to LF for consistent parsing
@@ -192,20 +147,6 @@ fn normalize_line_endings(text: String) -> String {
 # Email parser
 type pub EmailParser {
   let pub @config: ParserConfig
-}
-
-# Parse a single address header (From, To, Cc, Bcc)
-fn parse_address_header(
-  headers: ref Array[(String, String)],
-  name: String,
-) -> Array[EmailAddress] {
-  let raw = get_header_value_impl(headers, name)
-  let decoded = match raw.clone {
-    case Some(v) -> decode_header_value_impl(v)
-    case None -> ''
-  }
-
-  parse_address_list_impl(ref raw, decoded)
 }
 
 # Validate a single email address field
@@ -274,59 +215,6 @@ fn validate_addresses(
   }
 
   Result.Ok(true)
-}
-
-# Extract email address headers (From, To, Cc, Bcc)
-fn parse_email_addresses(
-  headers: ref Array[(String, String)],
-) -> (
-  EmailAddress,
-  Array[EmailAddress],
-  Array[EmailAddress],
-  Array[EmailAddress],
-) {
-  let from_list = parse_address_header(headers, 'From')
-
-  let from = if from_list.empty? {
-    EmailAddress(name: Option.None, address: '', raw: '')
-  } else {
-    match from_list.into_iter.next {
-      case Some(addr) -> addr
-      case None -> EmailAddress(name: Option.None, address: '', raw: '')
-    }
-  }
-
-  let to = parse_address_header(headers, 'To')
-
-  let cc = parse_address_header(headers, 'Cc')
-
-  let bcc = parse_address_header(headers, 'Bcc')
-
-  (from, to, cc, bcc)
-}
-
-# Extract MIME headers (Content-Type, Content-Transfer-Encoding, charset, boundary)
-fn parse_mime_headers(
-  headers: ref Array[(String, String)],
-) -> Result[(String, Array[(String, String)], String, Option[String]), Error] {
-  let content_type = get_header_value_impl(headers, 'Content-Type').or(
-    'text/plain',
-  )
-
-  match parse_content_type_impl(content_type) {
-    case Ok((ct_main, ct_params)) -> {
-      let content_transfer_encoding = get_header_value_impl(
-        headers,
-        'Content-Transfer-Encoding',
-      )
-        .or('7bit')
-
-      let charset = get_param_value_impl(ct_params, 'charset')
-
-      Result.Ok((ct_main, ct_params, content_transfer_encoding, charset))
-    }
-    case Error(e) -> Result.Error(e)
-  }
 }
 
 # Validate required headers per RFC 5322
@@ -467,183 +355,6 @@ fn decode_text_body(
   (text_body, html_body)
 }
 
-# Parse Message-ID references from header value
-#
-# RFC 5322 section 3.6.4: Message-ID Header Field
-#
-# Format: <msg-id> <msg-id> ...
-# Where msg-id: local-part@domain
-#
-# Examples:
-# - Single: <12345@example.com>
-# - Multiple: <12345@example.com> <67890@example.com>
-#
-# Algorithm:
-# 1. Scan input for '<' character
-# 2. Find matching '>' character
-# 3. Extract content between brackets
-# 4. Add to result if non-empty
-# 5. Continue from after '>'
-# 6. Repeat until no more message IDs found
-#
-# Edge cases handled:
-# - Empty string -> return empty array
-# - No angle brackets -> return empty array
-# - Unmatched brackets -> skip malformed ID
-# - Empty message ID (<>) -> skipped
-# - Maximum iterations limit to prevent DoS
-#
-# Note: This is a simple parser that doesn't validate the
-# format of the message ID content (e.g., it doesn't check
-# for '@' presence or valid characters).
-fn parse_message_ids_impl(raw: String) -> Array[String] {
-  if raw.empty? { return [] }
-
-  let mut result = []
-
-  # Split by angle brackets
-  let mut start = 0
-  let mut iterations = 0
-  let max_iterations = MAX_MESSAGE_IDS
-
-  while start < raw.size {
-    iterations = iterations + 1
-
-    if iterations > max_iterations { break }
-
-    let lt_pos = raw.index_of('<', start).or(raw.size)
-    let gt_pos = raw.index_of('>', lt_pos + 1).or(raw.size)
-
-    # Only extract if we found both brackets and they're in the right order
-    if lt_pos < raw.size and gt_pos < raw.size and lt_pos < gt_pos {
-      # Extract from angle brackets
-      let msg_id = raw.substring(lt_pos + 1, gt_pos).trim
-
-      # Only add non-empty message IDs
-      if msg_id.empty? == false { result.push(msg_id) }
-
-      start = gt_pos + 1
-    } else {
-      break
-    }
-  }
-
-  result
-}
-
-# Decode header value by processing RFC 2047 encoded words
-#
-# RFC 2047 section 6: Encoded-Word Syntax
-#
-# Headers can contain encoded words for non-ASCII text:
-# =?charset?encoding?encoded-text?=
-#
-# Multiple encoded words can appear in a single header value:
-# "=?utf-8?B?SGVsbG8=?= =?utf-8?B?V29ybGQ=?="
-#
-# Algorithm:
-# 1. Scan input for "=?" sequence (encoded word start)
-# 2. Find matching "?=" sequence (encoded word end)
-# 3. Decode the encoded word using decode_rfc2047_word
-# 4. Replace encoded word with decoded text
-# 5. Continue from after the decoded text
-# 6. Repeat until no more encoded words found
-#
-# Edge cases handled:
-# - No encoded words -> return original string
-# - Malformed encoded words -> left as-is (not decoded)
-# - Multiple encodings in same header -> handled by sequential processing
-# - Partial encoded words -> left as-is
-# - Maximum iterations limit to prevent infinite loops
-#
-# Performance considerations:
-# - Uses ByteArray for O(n) performance instead of O(n^2) string concatenation
-# - Iteration limit prevents DoS from pathological inputs
-fn decode_header_value_impl(raw: String) -> String {
-  # RFC 2047 encoded-word decoding: =?charset?encoding?encoded-text?=
-  let mut result = ByteArray.new
-  let mut pos = 0
-  let mut iterations = 0
-  let max_iterations = MAX_HEADER_ITERATIONS
-  let mut previous_encoded = false
-
-  # Find all encoded words
-  while pos < raw.size {
-    iterations = iterations + 1
-
-    if iterations > max_iterations { break }
-
-    match raw.index_of('=?', pos) {
-      case Some(begin) -> {
-        match find_rfc2047_word_end(raw, begin) {
-          case Some(end) -> {
-            # Push text before the encoded word
-            if begin > pos {
-              let before = raw.substring(pos, begin)
-
-              # RFC 2047 section 6.2: whitespace between two adjacent
-              # encoded words is ignored.
-              if !(previous_encoded and before.trim.empty?) {
-                result.append(before.to_byte_array)
-              }
-            }
-
-            # Decode and push the encoded word
-            let encoded_word = raw.substring(begin, end)
-            let decoded = decode_rfc2047_word(encoded_word)
-            let decoded_bytes = decoded.to_byte_array
-
-            result.append(decoded_bytes)
-
-            # Move position past the encoded word
-            pos = end
-            previous_encoded = true
-          }
-          case None -> break
-        }
-      }
-      case None -> break
-    }
-  }
-
-  # Push any remaining text after the last encoded word
-  if pos < raw.size {
-    let remaining = raw.substring(pos, raw.size)
-    let remaining_bytes = remaining.to_byte_array
-
-    result.append(remaining_bytes)
-  }
-
-  result.into_string
-}
-
-# Check if content is text/plain
-fn is_text_plain(content_type: String) -> Bool {
-  content_type.to_lower == 'text/plain'
-}
-
-# Check if content is text/html
-fn is_text_html(content_type: String) -> Bool {
-  content_type.to_lower == 'text/html'
-}
-
-# Check if content is multipart
-fn is_multipart(content_type: String) -> Bool {
-  content_type.to_lower.starts_with?('multipart/')
-}
-
-# Extract boundary from Content-Type params
-fn get_boundary_from_params(
-  params: ref Array[(String, String)],
-) -> Option[String] {
-  for (key, value) in params.iter {
-    # Use case-insensitive comparison for 'boundary'
-    if eq_ignore_case(key, 'boundary') { return Option.Some(value.clone) }
-  }
-
-  Option.None
-}
-
 impl EmailParser {
   fn pub static new -> EmailParser {
     EmailParser(config: ParserConfig.new)
@@ -760,9 +471,9 @@ impl EmailParser {
     }
 
     # Extract email addresses (From, To, Cc, Bcc)
-    let (from, to, cc, bcc) = parse_email_addresses(headers)
+    let (from, to, cc, bcc) = parse_address_headers(ref headers)
 
-    # Validate addresses in strict mode  
+    # Validate addresses in strict mode
     match
       validate_addresses(ref from, ref to, ref cc, ref bcc, @config.strict_mode)
     {
@@ -770,58 +481,28 @@ impl EmailParser {
       case Error(e) -> return Result.Error(e)
     }
 
-    # Extract basic headers
-    let subject = decode_header_value_impl(
-      get_header_value_impl(headers, 'Subject').or(''),
-    )
-    let date = get_header_value_impl(headers, 'Date').or('')
+    # Extract basic headers (Subject, Date, Message-ID)
+    let (subject, date, message_id) = parse_basic_headers(ref headers)
 
     # Extract threading headers (In-Reply-To, References, thread_id)
-    let (in_reply_to, references, thread_id) = parse_threading_headers(headers)
-    let message_id = get_header_value_impl(headers, 'Message-ID').or('')
+    let (in_reply_to, references, thread_id) = parse_threading_headers(
+      ref headers,
+    )
 
-    # Extract MIME headers (Content-Type, Content-Transfer-Encoding, charset, boundary)
+    # Extract MIME headers (Content-Type, Content-Transfer-Encoding, charset)
     let (ct_main, ct_params, content_transfer_encoding, charset) = match
-      parse_mime_headers(headers)
+      parse_mime_metadata(ref headers)
     {
       case Ok(result) -> result
       case Error(e) -> return Result.Error(e)
     }
 
-    let boundary = get_boundary_from_params(ct_params)
+    let boundary = extract_boundary(ref ct_params)
 
-    # Validate boundary string format and check existence in one pass
-    let boundary_valid = match boundary.clone {
-      case Some(b) -> {
-        # RFC 2046 requires boundary to be 1-70 chars with valid characters
-        if !is_valid_boundary(b) {
-          return Result.Error(
-            Error.InvalidBoundary(
-              Severity.Error,
-              'boundary string exceeds 70 characters or contains invalid characters',
-              Option.None,
-              Option.None,
-              Option.Some(b),
-            ),
-          )
-        }
-
-        true
-      }
-      case None -> false
-    }
-
-    # Validate that multipart Content-Type has boundary parameter
-    if is_multipart(ct_main) and !boundary_valid {
-      return Result.Error(
-        Error.InvalidBoundary(
-          Severity.Error,
-          'missing boundary parameter for multipart Content-Type',
-          Option.None,
-          Option.None,
-          Option.Some(ct_main),
-        ),
-      )
+    # Validate boundary string format and existence in one pass
+    match validate_multipart_boundary(ct_main.clone, ref boundary) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e)
     }
 
     # Parse body based on content type

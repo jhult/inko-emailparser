@@ -1,0 +1,51 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# ==============================================================================
+# MIME Content Type Helpers
+# ==============================================================================
+#
+# Shared helpers for classifying MIME content types and extracting parameters
+# from them. Both the regular parser and the streaming parser use these
+# functions so their behavior cannot drift apart.
+#
+# ## Public API
+#
+# - `is_multipart`: Check for a `multipart/*` Content-Type
+# - `is_text_plain`: Check for a `text/plain` Content-Type
+# - `is_text_html`: Check for a `text/html` Content-Type
+# - `extract_boundary`: Get the `boundary` parameter from Content-Type params
+#
+# ## RFC Compliance
+#
+# - RFC 2045 section 5: Content-Type Header Field
+# # - RFC 2046 section 5.1: Multipart Media Type
+
+import emailparser.header (eq_ignore_case)
+import std.option (Option)
+
+# Check if content is multipart
+fn pub is_multipart(content_type: String) -> Bool {
+  content_type.to_lower.starts_with?('multipart/')
+}
+
+# Check if content is text/plain
+fn pub is_text_plain(content_type: String) -> Bool {
+  content_type.to_lower == 'text/plain'
+}
+
+# Check if content is text/html
+fn pub is_text_html(content_type: String) -> Bool {
+  content_type.to_lower == 'text/html'
+}
+
+# Extract the boundary parameter from Content-Type params
+fn pub extract_boundary(params: ref Array[(String, String)]) -> Option[String] {
+  for (key, value) in params.iter {
+    # Boundary parameter names are case-insensitive
+    if eq_ignore_case(key, 'boundary') { return Option.Some(value.clone) }
+  }
+
+  Option.None
+}

@@ -157,9 +157,73 @@ import emailparser.ascii (
   ASCII_DOT, ASCII_GREATER_THAN, ASCII_HYPHEN, ASCII_LESS_THAN, is_alnum,
   is_domain_char, is_email_local_special,
 )
-import emailparser.limits (MAX_DOMAIN_SIZE)
+import emailparser.limits (MAX_DOMAIN_SIZE, MAX_MESSAGE_IDS)
 import std.rand (Random)
 import std.time (DateTime)
+
+# Parse Message-ID references from a header value
+#
+# RFC 5322 section 3.6.4: Message-ID Header Field
+#
+# Format: <msg-id> <msg-id> ...
+# Where msg-id: local-part@domain
+#
+# Examples:
+# - Single: <12345@example.com>
+# - Multiple: <12345@example.com> <67890@example.com>
+#
+# Algorithm:
+# 1. Scan input for '<' character
+# 2. Find matching '>' character
+# 3. Extract content between brackets
+# 4. Add to result if non-empty
+# 5. Continue from after '>'
+# 6. Repeat until no more message IDs found
+#
+# Edge cases handled:
+# - Empty string -> return empty array
+# - No angle brackets -> return empty array
+# - Unmatched brackets -> skip malformed ID
+# - Empty message ID (<>) -> skipped
+# - Maximum iterations limit to prevent DoS
+#
+# Note: This is a simple parser that doesn't validate the
+# format of the message ID content (e.g., it doesn't check
+# for '@' presence or valid characters).
+fn pub parse_message_ids_impl(raw: String) -> Array[String] {
+  if raw.empty? { return [] }
+
+  let mut result = []
+
+  # Split by angle brackets
+  let mut start = 0
+  let mut iterations = 0
+  let max_iterations = MAX_MESSAGE_IDS
+
+  while start < raw.size {
+    iterations = iterations + 1
+
+    if iterations > max_iterations { break }
+
+    let lt_pos = raw.index_of('<', start).or(raw.size)
+    let gt_pos = raw.index_of('>', lt_pos + 1).or(raw.size)
+
+    # Only extract if we found both brackets and they're in the right order
+    if lt_pos < raw.size and gt_pos < raw.size and lt_pos < gt_pos {
+      # Extract from angle brackets
+      let msg_id = raw.substring(lt_pos + 1, gt_pos).trim
+
+      # Only add non-empty message IDs
+      if msg_id.empty? == false { result.push(msg_id) }
+
+      start = gt_pos + 1
+    } else {
+      break
+    }
+  }
+
+  result
+}
 
 # Message-ID generator
 type pub MessageIdGenerator {

@@ -30,16 +30,109 @@
 # ## Public API
 #
 # - `parse_threading_headers`: Extract threading headers (In-Reply-To, References, thread_id)
+# - `parse_address_headers`: Extract From, To, Cc and Bcc
+# - `parse_basic_headers`: Extract Subject, Date and Message-ID
+# - `parse_mime_metadata`: Extract Content-Type, encoding and charset
+# - `validate_multipart_boundary`: Validate the boundary of a multipart message
 #
 # ## RFC Compliance
 #
 # - RFC 5322 section 3.6.4: Identification Fields (Message-ID, In-Reply-To, References)
 # - RFC 5322 section 3.6.2: Originator Fields (From, Sender, Reply-To)
 # - RFC 5322 section 3.6.3: Destination Address Fields (To, Cc, Bcc)
+# - RFC 2045 section 5: Content-Type Header Field
 
-import emailparser (parse_message_ids_impl)
-import emailparser.header (get_header_value_impl)
+import emailparser.address (EmailAddress, parse_address_list_impl)
+import emailparser.decoder (decode_header_value_impl)
+import emailparser.error (Error)
+import emailparser.error (Severity)
+import emailparser.header (
+  get_header_value_impl, get_param_value_impl, parse_content_type_impl,
+)
+import emailparser.message_id (parse_message_ids_impl)
+import emailparser.mime (is_multipart)
+import emailparser.validation (is_valid_boundary)
 import std.option (Option)
+
+# Parse a single address header (From, To, Cc, Bcc)
+fn parse_address_header(
+  headers: ref Array[(String, String)],
+  name: String,
+) -> Array[EmailAddress] {
+  let raw = get_header_value_impl(headers, name)
+  let decoded = match raw.clone {
+    case Some(v) -> decode_header_value_impl(v)
+    case None -> ''
+  }
+
+  parse_address_list_impl(ref raw, decoded)
+}
+
+# Return the first address of a list, or an empty address when the list is empty
+fn first_address(addresses: Array[EmailAddress]) -> EmailAddress {
+  if addresses.empty? {
+    return EmailAddress(name: Option.None, address: '', raw: '')
+  }
+
+  match addresses.into_iter.next {
+    case Some(addr) -> addr
+    case None -> EmailAddress(name: Option.None, address: '', raw: '')
+  }
+}
+
+# Extract address headers (From, To, Cc, Bcc)
+fn pub parse_address_headers(
+  headers: ref Array[(String, String)],
+) -> (
+  EmailAddress,
+  Array[EmailAddress],
+  Array[EmailAddress],
+  Array[EmailAddress],
+) {
+  let from = first_address(parse_address_header(headers, 'From'))
+  let to = parse_address_header(headers, 'To')
+  let cc = parse_address_header(headers, 'Cc')
+  let bcc = parse_address_header(headers, 'Bcc')
+
+  (from, to, cc, bcc)
+}
+
+# Extract basic message headers (Subject, Date, Message-ID)
+fn pub parse_basic_headers(
+  headers: ref Array[(String, String)],
+) -> (String, String, String) {
+  let subject = decode_header_value_impl(
+    get_header_value_impl(headers, 'Subject').or(''),
+  )
+  let date = get_header_value_impl(headers, 'Date').or('')
+  let message_id = get_header_value_impl(headers, 'Message-ID').or('')
+
+  (subject, date, message_id)
+}
+
+# Extract MIME metadata (Content-Type, Content-Transfer-Encoding, charset)
+fn pub parse_mime_metadata(
+  headers: ref Array[(String, String)],
+) -> Result[(String, Array[(String, String)], String, Option[String]), Error] {
+  let content_type = get_header_value_impl(headers, 'Content-Type').or(
+    'text/plain',
+  )
+
+  match parse_content_type_impl(content_type) {
+    case Ok((ct_main, ct_params)) -> {
+      let content_transfer_encoding = get_header_value_impl(
+        headers,
+        'Content-Transfer-Encoding',
+      )
+        .or('7bit')
+
+      let charset = get_param_value_impl(ref ct_params, 'charset')
+
+      Result.Ok((ct_main, ct_params, content_transfer_encoding, charset))
+    }
+    case Error(e) -> Result.Error(e)
+  }
+}
 
 # Extract threading headers (In-Reply-To, References, thread_id)
 #
@@ -73,4 +166,44 @@ fn pub parse_threading_headers(
   }
 
   (in_reply_to, references, thread_id)
+}
+
+# Validate the boundary of a multipart message
+#
+# RFC 2046 requires a boundary of 1-70 characters using only valid characters.
+# Non-multipart messages do not require a boundary, so they always pass.
+fn pub validate_multipart_boundary(
+  content_type: String,
+  boundary: ref Option[String],
+) -> Result[Bool, Error] {
+  if !is_multipart(content_type) { return Result.Ok(true) }
+
+  match boundary.clone {
+    case Some(b) -> {
+      if !is_valid_boundary(b.clone) {
+        return Result.Error(
+          Error.InvalidBoundary(
+            Severity.Error,
+            'boundary string exceeds 70 characters or contains invalid characters',
+            Option.None,
+            Option.None,
+            Option.Some(b),
+          ),
+        )
+      }
+    }
+    case None -> {
+      return Result.Error(
+        Error.InvalidBoundary(
+          Severity.Error,
+          'missing boundary parameter for multipart Content-Type',
+          Option.None,
+          Option.None,
+          Option.Some(content_type),
+        ),
+      )
+    }
+  }
+
+  Result.Ok(true)
 }
