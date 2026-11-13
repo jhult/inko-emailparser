@@ -9,7 +9,8 @@
 
 import emailparser (EmailParser)
 import emailparser.header (
-  extract_extra_headers, is_valid_field_name, sanitize_filename,
+  extract_extra_headers, get_header_value_impl, is_valid_field_name,
+  sanitize_filename,
 )
 import std.test (Tests)
 
@@ -300,6 +301,29 @@ fn pub tests(t: mut Tests) {
     match result {
       case Ok(headers) -> t.equal(headers.size, 1)
       case Error(_) -> t.true(false)
+    }
+  })
+
+  t.test('duplicate_header_permissive_first_wins', fn (t) {
+    let parser = EmailParser.new
+    let raw = 'Subject: First\nSubject: Second\n\nBody'
+
+    match parser.parse_headers(raw) {
+      case Ok(headers) -> {
+        t.equal(headers.size, 2)
+        t.equal(get_header_value_impl(ref headers, 'Subject').or(''), 'First')
+      }
+      case Error(e) -> panic('parse_headers failed: ${e}')
+    }
+  })
+
+  t.test('duplicate_header_strict_errors', fn (t) {
+    let parser = EmailParser.new.with_strict_mode(true)
+    let raw = 'Subject: First\nSubject: Second\n\nBody'
+
+    match parser.parse_headers(raw) {
+      case Ok(_) -> t.true(false)
+      case Error(e) -> t.true(e.contains?('Duplicate'))
     }
   })
 

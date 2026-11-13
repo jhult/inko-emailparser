@@ -97,7 +97,9 @@ fn pub is_valid_field_name(name: String) -> Bool {
 # - Folded headers (continuation lines starting with whitespace)
 # - Missing colon -> strict mode: error, permissive: skip line
 # - Empty headers (field-name is empty) -> strict mode: error
-# - Duplicate headers -> strict mode: error, permissive: last wins
+# - Duplicate headers -> strict mode: error, permissive: first value wins
+#   (all occurrences are retained in the parsed array; get_header_value_impl
+#   returns the first match consistently)
 # - Malformed headers (multiple colons) -> strict mode: detect possible missing newline
 # - Size limits enforced at each step
 #
@@ -327,7 +329,7 @@ fn parse_headers_impl(
               if k == lower_key {
                 return Result.Error(
                   Error.DuplicateHeader(
-                    Severity.Warning,
+                    Severity.Error,
                     current_key,
                     Option.Some(line_number),
                     Option.None,
