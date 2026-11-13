@@ -610,6 +610,48 @@ Content-Type: text/html
     }
   })
 
+  t.test('binary_attachment_round_trip', fn (t) {
+    let parser = EmailParser.new
+
+    # base64 of bytes [0xFF, 0xFE, 0x00, 0x01, 0x80, 0x41]
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Binary
+Message-ID: <binary@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="data.bin"
+Content-Transfer-Encoding: base64
+
+//4AAYBB
+--b--
+'
+
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        t.equal(msg.attachments.size, 1)
+
+        match msg.attachments.get(0) {
+          case Ok(att) -> {
+            t.equal(att.size, 6)
+            t.equal(att.content.size, 6)
+            t.equal(att.content.get(0).or(-1), 255)
+            t.equal(att.content.get(1).or(-1), 254)
+            t.equal(att.content.get(2).or(-1), 0)
+            t.equal(att.content.get(3).or(-1), 1)
+            t.equal(att.content.get(4).or(-1), 128)
+            t.equal(att.content.get(5).or(-1), 65)
+          }
+          case Error(_) -> t.true(false)
+        }
+      }
+      case Error(e) -> panic('Parse failed: ${e}')
+    }
+  })
+
   t.test('boundary_text_inside_body_is_not_split', fn (t) {
     let parser = EmailParser.new
 

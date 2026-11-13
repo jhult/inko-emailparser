@@ -131,15 +131,15 @@ impl EmailAttachment {
     filename: Option[String],
     content_disposition: String,
     content_id: Option[String],
-    decoded_body: String,
+    decoded_bytes: ByteArray,
   ) -> EmailAttachment {
     EmailAttachment.new(
       content_type: content_type,
       filename: filename,
       content_disposition: content_disposition,
       content_id: content_id,
-      size: decoded_body.size,
-      content: decoded_body.to_byte_array,
+      size: decoded_bytes.size,
+      content: decoded_bytes,
     )
   }
 

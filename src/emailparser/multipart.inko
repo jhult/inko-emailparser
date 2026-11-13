@@ -64,13 +64,14 @@
 # regardless of content type. Parts without disposition are inferred from type.
 
 import emailparser.attachment (EmailAttachment)
-import emailparser.decoder (decode_body_impl)
+import emailparser.decoder (decode_body_bytes_impl)
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.header (
   get_header_value_impl, parse_content_disposition_impl,
   parse_content_type_impl, parse_headers_impl, sanitize_filename,
 )
+import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
 
@@ -82,7 +83,7 @@ fn pub merge_multipart_part(
   disp_main: String,
   filename: Option[String],
   content_id: Option[String],
-  decoded_body: String,
+  decoded_bytes: ByteArray,
 ) -> (Option[String], Option[String], Option[EmailAttachment]) {
   # Track if we need to clone (lazy initialization)
   let mut text_modified = false
@@ -98,14 +99,14 @@ fn pub merge_multipart_part(
         filename: filename,
         content_disposition: disp_main,
         content_id: content_id,
-        decoded_body: decoded_body,
+        decoded_bytes: decoded_bytes,
       ),
     )
   } else if ct_main == 'text/plain' and text_body.none? {
-    new_text_body = Option.Some(decoded_body)
+    new_text_body = Option.Some(decoded_bytes.into_string)
     text_modified = true
   } else if ct_main == 'text/html' and html_body.none? {
-    new_html_body = Option.Some(decoded_body)
+    new_html_body = Option.Some(decoded_bytes.into_string)
     html_modified = true
   } else if ct_main.starts_with?('image/') and disp_main == 'inline' {
     new_attachment = Option.Some(
@@ -114,7 +115,7 @@ fn pub merge_multipart_part(
         filename: filename,
         content_disposition: disp_main,
         content_id: content_id,
-        decoded_body: decoded_body,
+        decoded_bytes: decoded_bytes,
       ),
     )
   }
@@ -146,7 +147,7 @@ import emailparser.validation (is_valid_boundary)
 
 # Handle nested multipart messages
 fn pub handle_nested_multipart(
-  decoded_body: String,
+  decoded_bytes: ByteArray,
   ct_params: Array[(String, String)],
   transfer_encoding: String,
   depth: Int,
@@ -164,7 +165,7 @@ fn pub handle_nested_multipart(
     case Some(nested_boundary) -> {
       match
         parse_multipart_impl(
-          decoded_body,
+          decoded_bytes.into_string,
           nested_boundary,
           transfer_encoding,
           depth + 1,
@@ -190,7 +191,7 @@ fn pub handle_nested_multipart(
               filename: filename,
               content_disposition: disp_main,
               content_id: content_id,
-              decoded_body: decoded_body,
+              decoded_bytes: decoded_bytes,
             ),
           ],
         ),
@@ -312,13 +313,13 @@ fn parse_multipart_impl(
                 disp_main,
                 filename,
                 content_id,
-                decoded_body,
+                decoded_bytes,
               ),
             ) -> {
             if ct_main.starts_with?('multipart/') {
               match
                 handle_nested_multipart(
-                  decoded_body,
+                  decoded_bytes,
                   ct_params,
                   default_encoding,
                   depth,
@@ -364,7 +365,7 @@ fn parse_multipart_impl(
                 disp_main,
                 filename,
                 content_id,
-                decoded_body,
+                decoded_bytes,
               )
 
               text_body = new_text
@@ -605,11 +606,15 @@ fn pub process_multipart_part_body(
   part_body_raw: String,
   transfer_encoding: String,
   max_attachment_size: Int,
-) -> Result[String, Error] {
+) -> Result[ByteArray, Error] {
   match
-    decode_body_impl(part_body_raw, transfer_encoding, max_attachment_size)
+    decode_body_bytes_impl(
+      part_body_raw,
+      transfer_encoding,
+      max_attachment_size,
+    )
   {
-    case Ok(decoded_body) -> Result.Ok(decoded_body)
+    case Ok(decoded_bytes) -> Result.Ok(decoded_bytes)
     case Error(e) -> Result.Error(e)
   }
 }
@@ -646,7 +651,7 @@ fn pub parse_single_multipart_part(
     String,
     Option[String],
     Option[String],
-    String,
+    ByteArray,
   ),
   Error,
 ] {
