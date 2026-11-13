@@ -49,11 +49,16 @@ let parser = EmailParser.new.with_limits(
 
 The `sanitize_filename` function protects against path traversal attacks by:
 
-- Rejecting filenames containing `..` (parent directory traversal)
-- Rejecting path separators (`/` and `\`)
-- Rejecting null bytes and control characters (ASCII 0-31)
+- Taking only the final path component, so `../../.ssh/authorized_keys`
+  becomes `authorized_keys`
+- Removing C0/C1 control characters and DEL
+- Replacing characters invalid on Windows (`< > : " | ? *`) with `_`
+- Rejecting `.`/`..`, leading/trailing dots, and reserved device names
 - Limiting filename length to 255 characters
 - Requiring at least one printable character
+
+RFC 2231 extended filenames (`filename*=` and `filename*0*=` continuations)
+are decoded before sanitization.
 
 Sanitization is applied to attachments produced by both the regular parser
 (`EmailParser.parse`) and the streaming parser (`StreamingParser`), including

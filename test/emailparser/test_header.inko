@@ -9,8 +9,8 @@
 
 import emailparser (EmailParser)
 import emailparser.header (
-  extract_extra_headers, get_header_value_impl, is_valid_field_name,
-  sanitize_filename,
+  extract_extra_headers, extract_filename_param, get_header_value_impl,
+  is_valid_field_name, sanitize_filename,
 )
 import std.test (Tests)
 
@@ -69,15 +69,55 @@ fn pub tests(t: mut Tests) {
   })
 
   t.test('sanitize_filename_path_traversal', fn (t) {
-    t.equal(sanitize_filename('../etc/passwd'), Option.None)
+    t.equal(sanitize_filename('../etc/passwd'), Option.Some('passwd'))
     t.equal(sanitize_filename('..'), Option.None)
-    t.equal(sanitize_filename('foo/../bar'), Option.None)
+    t.equal(sanitize_filename('foo/../bar'), Option.Some('bar'))
+    t.equal(
+      sanitize_filename('../../.ssh/authorized_keys'),
+      Option.Some('authorized_keys'),
+    )
   })
 
   t.test('sanitize_filename_path_separators', fn (t) {
-    t.equal(sanitize_filename('/etc/passwd'), Option.None)
-    t.equal(sanitize_filename('C:\\Windows\\system32'), Option.None)
-    t.equal(sanitize_filename('dir/file'), Option.None)
+    t.equal(sanitize_filename('/etc/passwd'), Option.Some('passwd'))
+    t.equal(sanitize_filename('C:\\Windows\\system32'), Option.Some('system32'))
+    t.equal(sanitize_filename('dir/file'), Option.Some('file'))
+  })
+
+  t.test('sanitize_filename_dots_inside_name', fn (t) {
+    t.equal(sanitize_filename('report..pdf'), Option.Some('report..pdf'))
+  })
+
+  t.test('extract_filename_param_plain', fn (t) {
+    t.equal(
+      extract_filename_param('attachment; filename="report.pdf"'),
+      Option.Some('report.pdf'),
+    )
+  })
+
+  t.test('extract_filename_param_rfc2231_utf8', fn (t) {
+    t.equal(
+      extract_filename_param(
+        "attachment; filename*=UTF-8''%E2%82%AC%20rates.pdf",
+      ),
+      Option.Some('€ rates.pdf'),
+    )
+  })
+
+  t.test('extract_filename_param_rfc2231_latin1', fn (t) {
+    t.equal(
+      extract_filename_param("attachment; filename*=ISO-8859-1''Caf%E9.txt"),
+      Option.Some('Café.txt'),
+    )
+  })
+
+  t.test('extract_filename_param_rfc2231_continuation', fn (t) {
+    t.equal(
+      extract_filename_param(
+        "attachment; filename*0*=UTF-8''Hello%20; filename*1*=World.txt",
+      ),
+      Option.Some('Hello World.txt'),
+    )
   })
 
   t.test('sanitize_filename_windows_reserved', fn (t) {
@@ -95,13 +135,18 @@ fn pub tests(t: mut Tests) {
   })
 
   t.test('sanitize_filename_windows_special_chars', fn (t) {
-    t.equal(sanitize_filename('file<name'), Option.None)
-    t.equal(sanitize_filename('file>name'), Option.None)
-    t.equal(sanitize_filename('file:name'), Option.None)
-    t.equal(sanitize_filename('file"name'), Option.None)
-    t.equal(sanitize_filename('file|name'), Option.None)
-    t.equal(sanitize_filename('file?name'), Option.None)
-    t.equal(sanitize_filename('file*name'), Option.None)
+    t.equal(sanitize_filename('file<name'), Option.Some('file_name'))
+    t.equal(sanitize_filename('file>name'), Option.Some('file_name'))
+    t.equal(sanitize_filename('file:name'), Option.Some('file_name'))
+    t.equal(sanitize_filename('file"name'), Option.Some('file_name'))
+    t.equal(sanitize_filename('file|name'), Option.Some('file_name'))
+    t.equal(sanitize_filename('file?name'), Option.Some('file_name'))
+    t.equal(sanitize_filename('file*name'), Option.Some('file_name'))
+  })
+
+  t.test('sanitize_filename_control_chars', fn (t) {
+    t.equal(sanitize_filename('file\u{1}name'), Option.Some('filename'))
+    t.equal(sanitize_filename('file\u{7F}name'), Option.Some('filename'))
   })
 
   t.test('sanitize_filename_leading_trailing_dots', fn (t) {

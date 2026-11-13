@@ -15,11 +15,14 @@
 import emailparser.ascii (
   ASCII_COLON, ASCII_EXCLAMATION, ASCII_TILDE, is_uppercase,
 )
+import emailparser.decoder (decode_charset)
 import emailparser.error (Error)
 import emailparser.error (Severity)
+import emailparser.hex (parse_hex_byte, two_bytes_to_hex_string)
 import emailparser.limits (MAX_FILENAME_SIZE, MAX_HEADER_VALUE_LENGTH)
 import emailparser.size_tracker (SizeTracker)
 import emailparser.validation (is_quoted_string, is_valid_mime_type)
+import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
 
@@ -680,39 +683,84 @@ fn get_param_value_impl(
   Option.None
 }
 
-# Sanitize filename to prevent path traversal attacks
-# Removes path separators and potentially dangerous characters
+# Sanitize a filename to a safe basename
+#
+# Path components are stripped, control characters removed, and characters
+# that are invalid on Windows are replaced with '_'. This neutralizes path
+# traversal while still producing a usable name for inputs such as
+# "C:\docs\file.pdf" or "report?.pdf".
 fn pub sanitize_filename(filename: String) -> Option[String] {
   if filename.empty? { return Option.None }
 
-  # Check for path traversal attempts
-  if
-    filename.contains?('..')
-      or filename.contains?('/')
-      or filename.contains?('\\')
-  {
-    return Option.None
+  # Take the last path component (handles both / and \ separators).
+  let mut start = 0
+  let mut i = 0
+
+  while i < filename.size {
+    match filename.get(i) {
+      case Ok(byte) -> {
+        if byte == 47 or byte == 92 { start = i + 1 }
+
+        i = i + 1
+      }
+      case Error(_) -> i = i + 1
+    }
   }
 
-  # Check for Windows reserved characters
-  if
-    filename.contains?('<')
-      or filename.contains?('>')
-      or filename.contains?(':')
-      or filename.contains?('"')
-      or filename.contains?('|')
-      or filename.contains?('?')
-      or filename.contains?('*')
-  {
-    return Option.None
+  let mut base_bytes = ByteArray.new
+  let mut k = start
+
+  while k < filename.size {
+    match filename.get(k) {
+      case Ok(byte) -> base_bytes.push(byte)
+      case Error(_) -> {}
+    }
+
+    k = k + 1
   }
 
-  # Check for leading/trailing dots (security issue on Windows/macOS)
-  if filename.starts_with?('.') or filename.ends_with?('.') {
-    return Option.None
+  let base = base_bytes.into_string.trim
+
+  if base.empty? { return Option.None }
+
+  if base == '.' or base == '..' { return Option.None }
+
+  if base.starts_with?('.') or base.ends_with?('.') { return Option.None }
+
+  let mut clean = ByteArray.new
+  let mut j = 0
+
+  while j < base.size {
+    match base.get(j) {
+      case Ok(byte) -> {
+        if byte < 32 or byte == 127 {
+          # Drop C0 controls and DEL.
+        } else if byte == 194 and is_c1_continuation(base, j + 1) {
+          # Drop the two-byte UTF-8 encoding of a C1 control.
+          j = j + 1
+        } else if is_reserved_filename_char(byte) {
+          clean.push(95) # '_'
+        } else {
+          clean.push(byte)
+        }
+
+        j = j + 1
+      }
+      case Error(_) -> j = j + 1
+    }
   }
 
-  # Check for Windows reserved filenames (case-insensitive)
+  let name = clean.into_string.trim
+
+  if name.empty? { return Option.None }
+
+  if name == '.' or name == '..' { return Option.None }
+
+  if name.starts_with?('.') or name.ends_with?('.') { return Option.None }
+
+  if name.size > MAX_FILENAME_SIZE { return Option.None }
+
+  # Windows reserved device names are not safe to create.
   let reserved_names = [
     'CON',
     'PRN',
@@ -738,44 +786,167 @@ fn pub sanitize_filename(filename: String) -> Option[String] {
     'LPT9',
   ]
 
-  # Extract the base name (before extension) for reserved name checking
-  let base_name = match filename.index_of('.', 0) {
-    case Some(dot_pos) -> filename.substring(0, dot_pos)
-    case None -> filename.clone
+  let base_name = match name.index_of('.', 0) {
+    case Some(dot_pos) -> name.substring(0, dot_pos)
+    case None -> name.clone
   }
 
-  # Check if base name matches any reserved name (case-insensitive)
   for reserved_name in reserved_names.iter {
     if eq_ignore_case(base_name.clone, reserved_name.clone) {
       return Option.None
     }
   }
 
-  # Check for null bytes or control characters
-  let mut i = 0
-  let mut has_valid_chars = false
+  Option.Some(name)
+}
 
-  while i < filename.size {
-    match filename.get(i) {
-      case Ok(byte) -> {
-        # Reject control characters (0-31) and null (0)
-        if byte < 32 or byte == 0 { return Option.None }
+# Characters that are invalid in Windows filenames
+fn is_reserved_filename_char(byte: Int) -> Bool {
+  byte == 60
+    or byte == 62
+    or byte == 58
+    or byte == 34
+    or byte == 124
+    or byte == 63
+    or byte == 42
+}
 
-        # Check for at least one printable character
-        if byte >= 32 and byte <= 126 { has_valid_chars = true }
+# Whether `index` is the continuation byte of a UTF-8 C1 control (U+0080-U+009F)
+fn is_c1_continuation(text: String, index: Int) -> Bool {
+  if index >= text.size { return false }
 
-        i = i + 1
+  match text.get(index) {
+    case Ok(byte) -> byte >= 128 and byte <= 159
+    case Error(_) -> false
+  }
+}
+
+# Extract a filename from a Content-Disposition value
+#
+# Supports RFC 2183 filename parameters and RFC 2231 extended parameters
+# (filename*=UTF-8''... and the filename*0*/filename*1* continuation form).
+fn pub extract_filename_param(disposition: String) -> Option[String] {
+  match parse_content_disposition_impl(disposition) {
+    case Error(_) -> Option.None
+    case Ok((_, params)) -> {
+      match get_param_value_impl(ref params, 'filename*') {
+        case Some(value) -> {
+          return sanitize_filename(decode_rfc2231_value(value, true))
+        }
+        case None -> {}
       }
-      case Error(_) -> return Option.None
+
+      let mut assembled = ''
+      let mut index = 0
+      let mut found = false
+      let mut stop = false
+
+      while index < 20 and !stop {
+        let star_key = 'filename*${index}*'
+        let plain_key = 'filename*${index}'
+        let has_continuation = match
+          get_param_value_impl(ref params, star_key)
+        {
+          case Some(value) -> {
+            found = true
+            assembled = assembled + decode_rfc2231_value(value, index == 0)
+            true
+          }
+          case None -> false
+        }
+
+        if !has_continuation {
+          match get_param_value_impl(ref params, plain_key) {
+            case Some(value) -> {
+              found = true
+              assembled = assembled + value
+            }
+            case None -> stop = true
+          }
+        }
+
+        index = index + 1
+      }
+
+      if found { return sanitize_filename(assembled) }
+
+      match get_param_value_impl(ref params, 'filename') {
+        case Some(value) -> sanitize_filename(value)
+        case None -> Option.None
+      }
+    }
+  }
+}
+
+# Decode an RFC 2231 value ("charset'language'percent-encoded" when
+# `has_charset` is true).
+fn decode_rfc2231_value(value: String, has_charset: Bool) -> String {
+  let mut charset = 'utf-8'
+  let mut encoded = value
+
+  if has_charset {
+    match value.index_of("'", 0) {
+      case Some(first) -> {
+        match value.index_of("'", first + 1) {
+          case Some(second) -> {
+            charset = value.substring(0, first)
+            encoded = value.substring(second + 1, value.size)
+          }
+          case None -> {}
+        }
+      }
+      case None -> {}
     }
   }
 
-  # Reject if no valid chars or too long (max 255 chars)
-  if has_valid_chars == false or filename.size > MAX_FILENAME_SIZE {
-    Option.None
-  } else {
-    Option.Some(filename)
+  decode_charset(percent_decode(encoded), charset)
+}
+
+# Decode RFC 2231 percent escapes to raw bytes
+fn percent_decode(value: String) -> ByteArray {
+  let mut out = ByteArray.new
+  let mut i = 0
+
+  while i < value.size {
+    match value.get(i) {
+      case Ok(byte) -> {
+        if byte == 37 and i + 2 < value.size {
+          match value.get(i + 1) {
+            case Ok(b1) -> {
+              match value.get(i + 2) {
+                case Ok(b2) -> {
+                  match parse_hex_byte(two_bytes_to_hex_string(b1, b2)) {
+                    case Some(decoded) -> {
+                      out.push(decoded)
+                      i = i + 3
+                    }
+                    case None -> {
+                      out.push(byte)
+                      i = i + 1
+                    }
+                  }
+                }
+                case Error(_) -> {
+                  out.push(byte)
+                  i = i + 1
+                }
+              }
+            }
+            case Error(_) -> {
+              out.push(byte)
+              i = i + 1
+            }
+          }
+        } else {
+          out.push(byte)
+          i = i + 1
+        }
+      }
+      case Error(_) -> i = i + 1
+    }
   }
+
+  out
 }
 
 # Check if header is standard RFC 5322 header

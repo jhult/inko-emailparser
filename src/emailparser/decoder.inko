@@ -418,7 +418,7 @@ fn decode_rfc2047_quoted_printable_bytes(text: String) -> ByteArray {
 #
 # Supports US-ASCII, UTF-8, ISO-8859-1 (Latin-1), and Windows-1252.
 # Unknown charsets fall back to UTF-8 replacement behavior.
-fn decode_charset(bytes: ByteArray, charset: String) -> String {
+fn pub decode_charset(bytes: ByteArray, charset: String) -> String {
   let lower = charset.to_lower
   let is_cp1252 = lower == 'windows-1252' or lower == 'cp1252'
   let is_latin1 = lower == 'iso-8859-1'

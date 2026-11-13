@@ -745,7 +745,7 @@ data
         t.equal(msg.attachments.size, 1)
 
         match msg.attachments.get(0) {
-          case Ok(att) -> t.true(att.filename.none?)
+          case Ok(att) -> t.equal(att.filename, Option.Some('authorized_keys'))
           case Error(_) -> t.true(false)
         }
       }
@@ -778,7 +778,9 @@ ZGF0YQ==
         t.equal(attachments.size, 1)
 
         match attachments.get(0) {
-          case Ok((info, _)) -> t.true(info.filename.none?)
+          case Ok((info, _)) -> {
+            t.equal(info.filename, Option.Some('authorized_keys'))
+          }
           case Error(_) -> t.true(false)
         }
       }
