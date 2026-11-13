@@ -16,7 +16,9 @@
 import emailparser.address (EmailAddress, parse_address_list_impl)
 import emailparser.address (is_valid_email_format)
 import emailparser.attachment (EmailAttachment)
-import emailparser.decoder (decode_body_impl, decode_rfc2047_word)
+import emailparser.decoder (
+  decode_body_impl, decode_rfc2047_word, find_rfc2047_word_end,
+)
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.header (
@@ -557,6 +559,7 @@ fn decode_header_value_impl(raw: String) -> String {
   let mut pos = 0
   let mut iterations = 0
   let max_iterations = MAX_HEADER_ITERATIONS
+  let mut previous_encoded = false
 
   # Find all encoded words
   while pos < raw.size {
@@ -566,25 +569,29 @@ fn decode_header_value_impl(raw: String) -> String {
 
     match raw.index_of('=?', pos) {
       case Some(begin) -> {
-        match raw.index_of('?=', begin + 2) {
+        match find_rfc2047_word_end(raw, begin) {
           case Some(end) -> {
             # Push text before the encoded word
             if begin > pos {
               let before = raw.substring(pos, begin)
-              let before_bytes = before.to_byte_array
 
-              result.append(before_bytes)
+              # RFC 2047 section 6.2: whitespace between two adjacent
+              # encoded words is ignored.
+              if !(previous_encoded and before.trim.empty?) {
+                result.append(before.to_byte_array)
+              }
             }
 
             # Decode and push the encoded word
-            let encoded_word = raw.substring(begin, end + 2)
+            let encoded_word = raw.substring(begin, end)
             let decoded = decode_rfc2047_word(encoded_word)
             let decoded_bytes = decoded.to_byte_array
 
             result.append(decoded_bytes)
 
             # Move position past the encoded word
-            pos = end + 2
+            pos = end
+            previous_encoded = true
           }
           case None -> break
         }
@@ -946,7 +953,8 @@ impl EmailParser {
     raw: String,
     boundary: String,
     default_encoding: String,
-  ) -> Result[(Option[String], Option[String], Array[EmailAttachment]), String] {
+  ) -> Result[(Option[String], Option[String], Array[EmailAttachment]), String]
+  {
     match
       parse_multipart_impl(
         raw,

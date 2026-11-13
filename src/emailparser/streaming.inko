@@ -12,7 +12,9 @@
 
 import emailparser.address (EmailAddress)
 import emailparser.address (parse_address_list_impl)
-import emailparser.decoder (decode_body_impl, decode_rfc2047_word)
+import emailparser.decoder (
+  decode_body_impl, decode_rfc2047_word, find_rfc2047_word_end,
+)
 import emailparser.header (
   eq_ignore_case, extract_extra_headers, get_header_value_impl,
   get_param_value_impl, parse_content_type_impl, parse_headers_impl,
@@ -724,27 +726,33 @@ fn find_header_separator(text: String) -> Option[(Int, Int)] {
 fn decode_header_value_stream(raw: String) -> String {
   let mut result = ByteArray.new
   let mut pos = 0
+  let mut previous_encoded = false
 
   while pos < raw.size {
     match raw.index_of('=?', pos) {
       case Some(begin) -> {
-        match raw.index_of('?=', begin + 2) {
+        match find_rfc2047_word_end(raw, begin) {
           case Some(end) -> {
             # Push text before the encoded word
             if begin > pos {
               let before = raw.substring(pos, begin)
 
-              result.append(before.to_byte_array)
+              # RFC 2047 section 6.2: ignore whitespace between adjacent
+              # encoded words.
+              if !(previous_encoded and before.trim.empty?) {
+                result.append(before.to_byte_array)
+              }
             }
 
             # Decode and push the encoded word
-            let encoded_word = raw.substring(begin, end + 2)
+            let encoded_word = raw.substring(begin, end)
             let decoded = decode_rfc2047_word(encoded_word)
 
             result.append(decoded.to_byte_array)
 
             # Move position past the encoded word
-            pos = end + 2
+            pos = end
+            previous_encoded = true
           }
           case None -> break
         }

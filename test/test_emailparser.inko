@@ -67,12 +67,27 @@ fn pub tests(t: mut Tests) {
     t.equal(decoded, 'Café')
   })
 
+  t.test('rfc2047_decode_iso_8859_1', fn (t) {
+    let parser = EmailParser.new
+    let decoded = parser.decode_header_value('=?ISO-8859-1?Q?Caf=E9?=')
+
+    t.equal(decoded, 'Café')
+  })
+
+  t.test('rfc2047_decode_windows_1252', fn (t) {
+    let parser = EmailParser.new
+    let decoded = parser.decode_header_value('=?windows-1252?Q?=93Hi=94?=')
+
+    t.equal(decoded, '\u{201C}Hi\u{201D}')
+  })
+
   t.test('rfc2047_decode_multiple_words', fn (t) {
     let parser = EmailParser.new
     let encoded = 'Subject: =?UTF-8?B?SGVsbG8=?= =?UTF-8?B?V29ybGQ=?='
     let decoded = parser.decode_header_value(encoded)
 
-    t.equal(decoded, 'Subject: Hello World')
+    # RFC 2047 section 6.2: spaces between adjacent encoded words are ignored
+    t.equal(decoded, 'Subject: HelloWorld')
   })
 
   t.test('rfc2047_decode_mixed_text', fn (t) {
@@ -104,7 +119,7 @@ fn pub tests(t: mut Tests) {
     }
 
     let decoded = parser.decode_header_value(encoded)
-    let expected = 'Subject: Word Word Word Word Word Word Word Word Word Word '
+    let expected = 'Subject: WordWordWordWordWordWordWordWordWordWord '
 
     t.equal(decoded, expected)
   })
