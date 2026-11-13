@@ -777,7 +777,7 @@ Content-Disposition: attachment; filename="test.bin"
 
   t.test('multipart_depth_exceeds_limit', fn (t) {
     let config = ParserConfig(
-      strict_mode: false,
+      strict_mode: true,
       max_email_size: 50_000_000,
       max_attachment_size: 25_000_000,
       max_multipart_depth: 3,

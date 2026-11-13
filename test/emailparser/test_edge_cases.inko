@@ -652,6 +652,76 @@ Content-Transfer-Encoding: base64
     }
   })
 
+  t.test('top_level_binary_body_is_attachment', fn (t) {
+    let parser = EmailParser.new
+
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Top-level binary
+Message-ID: <topbinary@example.com>
+MIME-Version: 1.0
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+
+JVBERi0=
+'
+
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        match msg.text_body {
+          case Some(_) -> t.true(false)
+          case None -> t.true(true)
+        }
+
+        t.equal(msg.attachments.size, 1)
+
+        match msg.attachments.get(0) {
+          case Ok(att) -> t.equal(att.content_type, 'application/pdf')
+          case Error(_) -> t.true(false)
+        }
+      }
+      case Error(e) -> panic('Parse failed: ${e}')
+    }
+  })
+
+  t.test('no_disposition_binary_part_is_attachment', fn (t) {
+    let parser = EmailParser.new
+
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: No disposition
+Message-ID: <nodisp@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+Body text
+--b
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+
+JVBERi0=
+--b--
+'
+
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        t.equal(msg.attachments.size, 1)
+
+        match msg.attachments.get(0) {
+          case Ok(att) -> {
+            t.equal(att.content_type, 'application/pdf')
+            t.true(att.is_attachment?)
+          }
+          case Error(_) -> t.true(false)
+        }
+      }
+      case Error(e) -> panic('Parse failed: ${e}')
+    }
+  })
+
   t.test('filename_traversal_rejected_non_streaming', fn (t) {
     let parser = EmailParser.new
 

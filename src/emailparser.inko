@@ -17,14 +17,15 @@ import emailparser.address (EmailAddress, parse_address_list_impl)
 import emailparser.address (is_valid_email_format)
 import emailparser.attachment (EmailAttachment)
 import emailparser.decoder (
-  decode_body_impl, decode_rfc2047_word, find_rfc2047_word_end,
+  decode_body_bytes_impl, decode_body_impl, decode_rfc2047_word,
+  find_rfc2047_word_end,
 )
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.header (
   eq_ignore_case, extract_extra_headers, get_header_value_impl,
-  get_param_value_impl, is_standard_header_impl, parse_content_type_impl,
-  parse_headers_impl,
+  get_param_value_impl, is_standard_header_impl, parse_content_disposition_impl,
+  parse_content_type_impl, parse_headers_impl, sanitize_filename,
 )
 import emailparser.header_extraction (parse_threading_headers)
 import emailparser.limits (
@@ -844,7 +845,7 @@ impl EmailParser {
           max_hdrs,
           @config.strict_mode,
         )
-      } else {
+      } else if is_text_plain(ct_main) or is_text_html(ct_main) {
         let (text, html) = decode_text_body(
           body_raw,
           ct_main,
@@ -853,6 +854,54 @@ impl EmailParser {
         )
 
         Result.Ok((text, html, []))
+      } else {
+        # A top-level non-text body is binary data, not a text body.
+        match
+          decode_body_bytes_impl(
+            body_raw,
+            content_transfer_encoding,
+            @config.max_attachment_size,
+          )
+        {
+          case Ok(bytes) -> {
+            let mut disposition = 'attachment'
+            let mut filename = Option.None
+            let mut content_id = Option.None
+
+            match get_header_value_impl(headers, 'Content-Disposition') {
+              case Some(raw_disp) -> {
+                match parse_content_disposition_impl(raw_disp) {
+                  case Ok((disp, params)) -> {
+                    if !disp.empty? { disposition = disp }
+
+                    match get_param_value_impl(ref params, 'filename') {
+                      case Some(f) -> filename = sanitize_filename(f)
+                      case None -> {}
+                    }
+                  }
+                  case Error(_) -> {}
+                }
+              }
+              case None -> {}
+            }
+
+            match get_header_value_impl(headers, 'Content-ID') {
+              case Some(id) -> content_id = Option.Some(id.trim)
+              case None -> {}
+            }
+
+            let attachment = EmailAttachment.from_decoded_part(
+              content_type: ct_main,
+              filename: filename,
+              content_disposition: disposition,
+              content_id: content_id,
+              decoded_bytes: bytes,
+            )
+
+            Result.Ok((Option.None, Option.None, [attachment]))
+          }
+          case Error(e) -> Result.Error(e)
+        }
       }
     {
       case Ok(result) -> result

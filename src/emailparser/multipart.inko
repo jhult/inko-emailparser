@@ -102,18 +102,43 @@ fn pub merge_multipart_part(
         decoded_bytes: decoded_bytes,
       ),
     )
-  } else if ct_main == 'text/plain' and text_body.none? {
-    new_text_body = Option.Some(decoded_bytes.into_string)
-    text_modified = true
-  } else if ct_main == 'text/html' and html_body.none? {
-    new_html_body = Option.Some(decoded_bytes.into_string)
-    html_modified = true
+  } else if ct_main == 'text/plain' {
+    if text_body.none? {
+      new_text_body = Option.Some(decoded_bytes.into_string)
+      text_modified = true
+    }
+  } else if ct_main == 'text/html' {
+    if html_body.none? {
+      new_html_body = Option.Some(decoded_bytes.into_string)
+      html_modified = true
+    }
   } else if ct_main.starts_with?('image/') and disp_main == 'inline' {
     new_attachment = Option.Some(
       EmailAttachment.from_decoded_part(
         content_type: ct_main,
         filename: filename,
         content_disposition: disp_main,
+        content_id: content_id,
+        decoded_bytes: decoded_bytes,
+      ),
+    )
+  } else {
+    # Any other non-text part with no real disposition is still an
+    # attachment (e.g. application/pdf sent without Content-Disposition).
+    # A missing disposition is represented as "inline" with no filename.
+    let disposition = if
+      disp_main.empty? or (disp_main == 'inline' and filename.none?)
+    {
+      'attachment'
+    } else {
+      disp_main
+    }
+
+    new_attachment = Option.Some(
+      EmailAttachment.from_decoded_part(
+        content_type: ct_main,
+        filename: filename,
+        content_disposition: disposition,
         content_id: content_id,
         decoded_bytes: decoded_bytes,
       ),
@@ -355,7 +380,7 @@ fn parse_multipart_impl(
                     }
                   }
                 }
-                case Error(e) -> return Result.Error(e)
+                case Error(e) -> if strict_mode { return Result.Error(e) }
               }
             } else {
               let (new_text, new_html, new_att) = merge_multipart_part(

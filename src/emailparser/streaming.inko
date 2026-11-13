@@ -1345,9 +1345,8 @@ if
 
     let content_id = get_header_value_impl(ref headers, 'Content-ID')
 
-    let disposition_lower = content_disposition.to_lower
-    let is_actual_attachment = disposition_lower.starts_with?('attachment')
-      or disposition_lower.starts_with?('file')
+    # MultipartStreamParser already applies the shared classification.
+    let is_actual_attachment = is_attachment
 
     let filename = if is_actual_attachment {
       extract_filename(content_disposition)

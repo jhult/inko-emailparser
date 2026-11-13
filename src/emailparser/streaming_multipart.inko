@@ -453,9 +453,25 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
       let content_id = get_header_value(ref headers, 'Content-ID')
 
       # Determine if attachment (RFC 2183 values are case-insensitive)
-      let is_attachment = content_disposition.to_lower.starts_with?(
-        'attachment',
-      )
+      #
+      # Classification mirrors the regular parser: explicit attachment
+      # dispositions, inline parts with a filename or image type, and any
+      # non-text/non-multipart part (which has no text body to live in).
+      let disp_lower = content_disposition.to_lower
+      let ct_lower = content_type.to_lower
+      let is_text_part = ct_lower.starts_with?('text/plain')
+        or ct_lower.starts_with?('text/html')
+      let is_multipart_part = ct_lower.starts_with?('multipart/')
+      let is_attachment = disp_lower.starts_with?('attachment')
+        or disp_lower.starts_with?('file')
+        or (
+          disp_lower.starts_with?('inline')
+            and disp_lower.contains?('filename=')
+        )
+        or (
+          disp_lower.starts_with?('inline') and ct_lower.starts_with?('image/')
+        )
+        or (!is_text_part and !is_multipart_part)
 
       # Extract filename if present
       let filename = if is_attachment {
