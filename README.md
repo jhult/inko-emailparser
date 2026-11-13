@@ -140,8 +140,8 @@ let parser = EmailParser.new
 
 match parser.parse(raw_email_string) {
   case Ok(message) -> {
-    message.from.address
-    message.to.get(0).or_panic.address
+    message.addresses.from.address
+    message.addresses.to.get(0).or_panic.address
     message.subject
     message.text_body
   }
@@ -162,16 +162,18 @@ let parser = EmailParser.new
 
 match parser.parse(raw_email_string) {
   case Ok(message) -> {
-    message.from          # EmailAddress
-    message.to            # Array[EmailAddress]
-    message.cc            # Array[EmailAddress]
-    message.bcc           # Array[EmailAddress]
-    message.subject       # String
-    message.date          # String (RFC 5322 format)
-    message.message_id    # String
-    message.text_body     # Option[String]
-    message.html_body     # Option[String]
-    message.attachments   # Array[EmailAttachment]
+    message.addresses.from  # EmailAddress
+    message.addresses.to    # Array[EmailAddress]
+    message.addresses.cc    # Array[EmailAddress]
+    message.addresses.bcc   # Array[EmailAddress]
+    message.subject         # String
+    message.date            # String (RFC 5322 format)
+    message.message_id      # String
+    message.threading       # ThreadingInfo
+    message.mime            # MIMEInfo
+    message.text_body       # Option[String]
+    message.html_body       # Option[String]
+    message.attachments     # Array[EmailAttachment]
   }
   case Error(e) -> {
     # Handle parsing error
@@ -257,14 +259,12 @@ import emailparser (EmailParser)
 
 let parser = EmailParser.new
 
-match parser.parse_address_list(Option.Some('Alice <alice@example.com>, Bob <bob@example.com>')) {
-  case Ok(addrs) -> {
-    for addr in addrs.iter {
-      addr.name     # Option[String] (display name)
-      addr.address  # String (email address)
-      addr.raw      # String (original raw string)
-    }
-  }
+let addrs = parser.parse_address_list(Option.Some('Alice <alice@example.com>, Bob <bob@example.com>'))
+
+for addr in addrs.iter {
+  addr.name     # Option[String] (display name)
+  addr.address  # String (email address)
+  addr.raw      # String (original raw string)
 }
 ```
 
@@ -288,10 +288,10 @@ import std.time (DateTime)
 let formatter = EmailDateFormatter.new
 
 let now = formatter.format_now
-# Result: "Wed, 15 Jan 2026 14:23:45 +0000"
+# Result: local time with the system's UTC offset, e.g. "Wed, 15 Jan 2026 14:23:45 -0600"
 
 let custom = formatter.format_datetime(DateTime.local)
-# Result: "Wed, 15 Jan 2026 14:23:45 +0000"
+# Result: uses the DateTime's own utc_offset
 
 let with_tz = EmailDateFormatter.with_timezone("-0500").format_now
 # Result: "Wed, 15 Jan 2026 09:23:45 -0500"
@@ -343,9 +343,9 @@ let parser = EmailParser.new
 
 match parser.parse(raw_email_string) {
   case Ok(message) -> {
-    message.in_reply_to   # Option[String] (Message-ID being replied to)
-    message.references    # Array[String] (Message-ID thread chain)
-    message.thread_id     # String (computed thread root ID)
+    message.threading.in_reply_to   # Option[String] (Message-ID being replied to)
+    message.threading.references    # Array[String] (Message-ID thread chain)
+    message.threading.thread_id     # String (computed thread root ID)
   }
   case Error(e) -> {
     # Handle error
@@ -359,21 +359,12 @@ match parser.parse(raw_email_string) {
 
 ```inko
 type pub ParsedEmailMessage {
-  let pub @from: EmailAddress
-  let pub @to: Array[EmailAddress]
-  let pub @cc: Array[EmailAddress]
-  let pub @bcc: Array[EmailAddress]
+  let pub @addresses: AddressInfo
   let pub @subject: String
   let pub @date: String
   let pub @message_id: String
-  let pub @in_reply_to: Option[String]
-  let pub @references: Array[String]
-  let pub @thread_id: String
-  let pub @content_type: String
-  let pub @content_type_params: Array[(String, String)]
-  let pub @content_transfer_encoding: String
-  let pub @charset: Option[String]
-  let pub @boundary: Option[String]
+  let pub @threading: ThreadingInfo
+  let pub @mime: MIMEInfo
   let pub @text_body: Option[String]
   let pub @html_body: Option[String]
   let pub @attachments: Array[EmailAttachment]

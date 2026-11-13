@@ -17,7 +17,7 @@ The email parser implements RFC 5322 (Internet Message Format) and RFC 2045 (MIM
 
 ### Maximum Email Size: 50 MB
 
-**Function**: `default_max_email_size`
+**Function**: `MAX_EMAIL_SIZE`
 
 **Rationale**:
 - **Gmail limits**: 25 MB for attachments, ~50 MB total message size
@@ -34,7 +34,7 @@ The email parser implements RFC 5322 (Internet Message Format) and RFC 2045 (MIM
 
 ### Maximum Attachment Size: 25 MB
 
-**Function**: `default_max_attachment_size`
+**Function**: `MAX_ATTACHMENT_SIZE`
 
 **Rationale**:
 - **Gmail attachment limit**: 25 MB
@@ -53,7 +53,7 @@ The email parser implements RFC 5322 (Internet Message Format) and RFC 2045 (MIM
 
 ### Maximum Multipart Depth: 10 levels
 
-**Function**: `default_max_multipart_depth`
+**Function**: `MAX_MULTIPART_DEPTH`
 
 **Rationale**:
 - **Stack overflow prevention**: Limits recursive parsing depth
@@ -85,7 +85,7 @@ multipart/mixed (Level 1: message root)
 
 ### Maximum Header Decoding Iterations: 1000
 
-**Function**: `default_max_header_iterations`
+**Function**: `MAX_HEADER_ITERATIONS`
 
 **Rationale**:
 - **RFC 2047 encoded-word parsing**: Limits number of encoded words processed
@@ -106,7 +106,7 @@ multipart/mixed (Level 1: message root)
 
 ### Maximum Message IDs: 100
 
-**Function**: `default_max_message_ids`
+**Function**: `MAX_MESSAGE_IDS`
 
 **Rationale**:
 - **Threading limits**: Prevents excessive thread ancestry processing
@@ -127,7 +127,7 @@ multipart/mixed (Level 1: message root)
 
 ### Maximum Attachments: 100
 
-**Function**: `default_max_attachments`
+**Function**: `MAX_ATTACHMENTS`
 
 **Rationale**:
 - **Storage limits**: Prevents excessive memory/disk usage

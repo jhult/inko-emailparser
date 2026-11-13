@@ -102,7 +102,7 @@ Email size < 10MB?
 **Trade-off summary**:
 | Aspect | EmailParser | StreamingParser |
 |---------|-------------|-----------------|
-| Memory | O(n) | O(1) |
+| Memory | O(n) | O(largest part) |
 | Time | Fastest | +25-50% slower |
 | Random access | Yes | No |
 | Early abort | No | Yes |
@@ -1106,7 +1106,7 @@ Before deploying streaming to production:
 
 ## Resources
 
-- [Streaming API Design](./streaming-api.md)
-- [Streaming Implementation](./streaming-implementation.md)
+- [Streaming Migration Guide](./streaming-migration.md)
+- [Security Notes](./security.md)
 - [Source Code](../src/emailparser/streaming.inko)
 - [Example Handlers](../test/emailparser/test_streaming_integration.inko)

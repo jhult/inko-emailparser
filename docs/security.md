@@ -42,8 +42,8 @@ let parser = EmailParser.new.with_limits(
 #### Depth and Iteration Limits
 
 - **`max_multipart_depth`**: Default 10 levels - Prevents stack overflow from deeply nested multipart messages
-- **`max_header_iterations`**: Default 1000 iterations - Limits RFC 2047 header decoding iterations
-- **`max_message_ids`**: Default 100 message IDs - Limits parsing of References/In-Reply-To headers
+- **`MAX_HEADER_ITERATIONS`** (limits.inko): 1000 iterations - Limits RFC 2047 header decoding iterations
+- **`MAX_MESSAGE_IDS`** (limits.inko): 100 message IDs - Limits parsing of References/In-Reply-To headers
 
 #### Filename Sanitization
 
