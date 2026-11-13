@@ -213,28 +213,27 @@ fn pub tests(t: mut Tests) {
     }
   })
 
-  t.test('parse_headers_suspicious_folding_single_param', fn (t) {
-    # Folding within a parameter value (no semicolon after =) is suspicious
+  t.test('parse_headers_folding_inside_single_param', fn (t) {
+    # RFC 5322 FWS is valid inside a parameter value; unfolding keeps a space
     let parser = EmailParser.new
     let raw = 'Content-Type: multipart/mixed; boundary=abc\n 123\n\n'
     let result = parser.parse_headers(raw)
 
     match result {
-      case Ok(_) -> t.true(false)
-      case Error(e) -> t.true(e.contains?('suspicious folding'))
+      case Ok(headers) -> t.equal(headers.size, 1)
+      case Error(e) -> panic('parse_headers failed: ${e}')
     }
   })
 
-  t.test('parse_headers_suspicious_folding_multi_param', fn (t) {
-    # Folding in the LAST parameter value should be caught
-    # even when earlier parameters have semicolons after their '='
+  t.test('parse_headers_folding_inside_last_param', fn (t) {
+    # Folding in the last parameter value is valid too
     let parser = EmailParser.new
     let raw = 'Content-Type: multipart/mixed; charset=utf-8; boundary=abc\n 123\n\n'
     let result = parser.parse_headers(raw)
 
     match result {
-      case Ok(_) -> t.true(false)
-      case Error(e) -> t.true(e.contains?('suspicious folding'))
+      case Ok(headers) -> t.equal(headers.size, 1)
+      case Error(e) -> panic('parse_headers failed: ${e}')
     }
   })
 
@@ -301,6 +300,17 @@ fn pub tests(t: mut Tests) {
     match result {
       case Ok(headers) -> t.equal(headers.size, 1)
       case Error(_) -> t.true(false)
+    }
+  })
+
+  t.test('folded_content_type_parameter_is_accepted', fn (t) {
+    let parser = EmailParser.new
+
+    let raw = 'From: sender@example.com\nTo: recipient@example.com\nSubject: Folded\nContent-Type: text/plain; charset=\n utf-8\n\nBody'
+
+    match parser.parse(raw) {
+      case Ok(_) -> t.true(true)
+      case Error(e) -> panic('Parse failed: ${e}')
     }
   })
 

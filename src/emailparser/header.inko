@@ -174,54 +174,6 @@ fn parse_headers_impl(
     # Check for folded header (continuation line starting with whitespace)
     if line_str.starts_with?(' ') or line_str.starts_with?('\t') {
       if in_header {
-        # Security check: Detect suspicious folding in Content-Type headers
-        # Folding within parameter values (e.g., boundary=) can be used for header injection
-        if
-          current_key.to_lower == 'content-type'
-            and current_value.contains?('=')
-        {
-          # Find the LAST '=' in the value to check if we're folding
-          # within the final parameter value. Using the first '=' would
-          # miss cases like "charset=utf-8; boundary=abc" where folding
-          # happens in the boundary value after the last '='.
-          let mut last_eq_pos = -1
-          let mut search_i = 0
-
-          while search_i < current_value.size {
-            match current_value.get(search_i) {
-              case Ok(byte) -> {
-                if byte == 61 { last_eq_pos = search_i }
-
-                search_i = search_i + 1
-              }
-              case Error(_) -> search_i = search_i + 1
-            }
-          }
-
-          if last_eq_pos >= 0 {
-            # Check if there's a semicolon after the last = (meaning we're between params)
-            let has_semicolon_after = match
-              current_value.index_of(';', last_eq_pos)
-            {
-              case Some(semi_pos) -> semi_pos > last_eq_pos
-              case None -> false
-            }
-
-            # If no semicolon after last =, we're folding within a parameter value
-            if !has_semicolon_after {
-              return Result.Error(
-                Error.MalformedHeader(
-                  Severity.Error,
-                  'suspicious folding in boundary parameter value',
-                  Option.Some(line_number),
-                  Option.None,
-                  Option.Some(current_value.clone),
-                ),
-              )
-            }
-          }
-        }
-
         let new_size = current_value.size + 1 + line_str.trim.size
         let mut append = true
 
