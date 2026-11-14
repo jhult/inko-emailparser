@@ -197,6 +197,74 @@ impl StreamHandler for ErrorTestingHandler {
   }
 }
 
+# Handler that counts attachment callbacks
+type pub OverLimitAttachmentHandler {
+  let mut @begun_count: Int
+  let mut @chunk_count: Int
+}
+
+impl OverLimitAttachmentHandler {
+  fn pub static new -> OverLimitAttachmentHandler {
+    OverLimitAttachmentHandler(begun_count: 0, chunk_count: 0)
+  }
+
+  fn pub get_begun_count -> Int {
+    @begun_count
+  }
+
+  fn pub get_chunk_count -> Int {
+    @chunk_count
+  }
+}
+
+impl StreamHandler for OverLimitAttachmentHandler {
+  fn pub mut on_begin -> Result[Int, String] {
+    Result.Ok(0)
+  }
+
+  fn pub mut on_headers(
+    headers: ref Array[(String, String)],
+  ) -> Result[Int, String] {
+    Result.Ok(0)
+  }
+
+  fn pub mut on_text_chunk(chunk: String) -> Result[Int, String] {
+    Result.Ok(0)
+  }
+
+  fn pub mut on_html_chunk(chunk: String) -> Result[Int, String] {
+    Result.Ok(0)
+  }
+
+  fn pub mut on_attachment_begin(
+    info: ref AttachmentInfo,
+  ) -> Result[Int, String] {
+    @begun_count = @begun_count + 1
+    Result.Ok(0)
+  }
+
+  fn pub mut on_attachment_chunk(
+    chunk: ByteArray,
+    info: ref AttachmentInfo,
+  ) -> Result[Int, String] {
+    @chunk_count = @chunk_count + 1
+    Result.Ok(0)
+  }
+
+  fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String]
+  {
+    Result.Ok(0)
+  }
+
+  fn pub mut on_end -> Result[Int, String] {
+    Result.Ok(0)
+  }
+
+  fn pub mut on_error(error: ref Error) -> Result[Int, String] {
+    Result.Ok(0)
+  }
+}
+
 # Tests for edge cases and error recovery
 import std.test (Tests)
 
@@ -1064,6 +1132,69 @@ Malformed attachment
     let email = 'From: a@example.com\nTo: b@example.com\nSubject: Limit\nContent-Type: multipart/mixed; boundary=b\n\n--b\nContent-Type: application/octet-stream\nContent-Disposition: attachment; filename="a.bin"\nContent-Transfer-Encoding: base64\n\nQQ==\n--b\nContent-Type: application/octet-stream\nContent-Disposition: attachment; filename="b.bin"\nContent-Transfer-Encoding: base64\n\nQQ==\n--b--\n'
 
     match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.equal(e.variant, 'TooManyAttachments')
+    }
+  })
+
+  t.test('streaming_rejects_over_limit_attachment_before_delivery', fn (t) {
+    let mut config = StreamingConfig.new
+
+    config.max_attachments = 1
+
+    let parser = StreamingParser.with_config(config)
+    let mut handler = OverLimitAttachmentHandler.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Limit
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="a.bin"
+Content-Transfer-Encoding: base64
+
+QQ==
+--b
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="b.bin"
+Content-Transfer-Encoding: base64
+
+QQ==
+--b--'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> {
+        t.equal(e.variant, 'TooManyAttachments')
+        t.equal(handler.get_begun_count, 1)
+        t.equal(handler.get_chunk_count, 1)
+      }
+    }
+  })
+
+  t.test('buffered_enforces_max_attachments', fn (t) {
+    let parser = EmailParser.new.with_max_attachments(1)
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Limit
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="a.bin"
+Content-Transfer-Encoding: base64
+
+QQ==
+--b
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="b.bin"
+Content-Transfer-Encoding: base64
+
+QQ==
+--b--'
+
+    match parser.parse(email) {
       case Ok(_) -> t.false(true)
       case Error(e) -> t.equal(e.variant, 'TooManyAttachments')
     }

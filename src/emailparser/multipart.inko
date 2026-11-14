@@ -374,9 +374,20 @@ fn parse_multipart_impl(
                   }
 
                   for att in nested_atts.into_iter {
-                    if attachments.size < max_attachments {
-                      attachments.push(att)
+                    if attachments.size >= max_attachments {
+                      return Result.Error(
+                        Error.TooManyAttachments(
+                          Severity.Error,
+                          attachments.size + 1,
+                          max_attachments,
+                          Option.None,
+                          Option.None,
+                          Option.None,
+                        ),
+                      )
                     }
+
+                    attachments.push(att)
                   }
                 }
                 case Error(e) -> if strict_mode { return Result.Error(e) }
@@ -397,9 +408,20 @@ fn parse_multipart_impl(
 
               match new_att {
                 case Some(att) -> {
-                  if attachments.size < max_attachments {
-                    attachments.push(att)
+                  if attachments.size >= max_attachments {
+                    return Result.Error(
+                      Error.TooManyAttachments(
+                        Severity.Error,
+                        attachments.size + 1,
+                        max_attachments,
+                        Option.None,
+                        Option.None,
+                        Option.None,
+                      ),
+                    )
                   }
+
+                  attachments.push(att)
                 }
                 case None -> {}
               }

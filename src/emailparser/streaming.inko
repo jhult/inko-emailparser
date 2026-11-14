@@ -1388,6 +1388,19 @@ if
     }
 
     if is_actual_attachment {
+      if @attachment_count >= @max_attachments {
+        return Result.Error(
+          Error.TooManyAttachments(
+            Severity.Error,
+            @attachment_count + 1,
+            @max_attachments,
+            Option.None,
+            Option.None,
+            Option.None,
+          ),
+        )
+      }
+
       @current_attachment_size = 0
 
       let info = AttachmentInfo(
@@ -1846,19 +1859,6 @@ if
               Error.from_string('Handler on_attachment_end failed: ${e}'),
             )
           }
-        }
-
-        if @attachment_count >= @max_attachments {
-          return Result.Error(
-            Error.TooManyAttachments(
-              Severity.Error,
-              @attachment_count,
-              @max_attachments,
-              Option.None,
-              Option.None,
-              Option.None,
-            ),
-          )
         }
 
         @attachment_count = @attachment_count + 1
