@@ -84,67 +84,7 @@ fn decode_body_bytes_impl(
   let enc_lower = encoding.to_lower
 
   if enc_lower == 'base64' {
-    # Estimate decoded size after whitespace removal
-    # Base64: 4 chars -> 3 bytes ratio, accounting for padding
-    let result_bytes = ByteArray.new
-    let mut i = 0
-
-    while i < raw.size {
-      match raw.get(i) {
-        case Ok(byte) -> {
-          if
-            byte != ASCII_LF
-              and byte != ASCII_CR
-              and byte != ASCII_SPACE
-              and byte != ASCII_HT
-          {
-            result_bytes.push(byte)
-          }
-
-          i = i + 1
-        }
-        case Error(_) -> i = i + 1
-      }
-    }
-
-    let cleaned = result_bytes.into_string
-
-    let cleaned_size = cleaned.size
-
-    let padding = if cleaned_size >= 2 and cleaned.ends_with?('==') {
-      2
-    } else if cleaned_size >= 1 and cleaned.ends_with?('=') {
-      1
-    } else {
-      0
-    }
-
-    let estimated_size = ((cleaned_size - padding) * BASE64_DECODED_SIZE)
-      / BASE64_CHUNK_SIZE
-
-    match SizeTracker.check_allocation(0, estimated_size, max_size) {
-      case Ok(_) -> {}
-      case Error(e) -> return Result.Error(e)
-    }
-
-    let decoder = Decoder.new
-    let output = ByteArray.new
-
-    match decoder.decode(cleaned.to_byte_array, output) {
-      case Ok(_) -> Result.Ok(output)
-      case Error(_) -> {
-        Result.Error(
-          Error.DecodingFailed(
-            Severity.Error,
-            encoding,
-            'base64 decoding failed',
-            Option.None,
-            Option.None,
-            Option.None,
-          ),
-        )
-      }
-    }
+    decode_base64_body(raw, encoding, max_size)
   } else if enc_lower == 'quoted-printable' {
     # Early size check for quoted-printable
     # QP encoding uses =XX (3 chars) per encoded byte
@@ -170,6 +110,128 @@ fn decode_body_bytes_impl(
       case Error(e) -> Result.Error(e)
     }
   }
+}
+
+# Decode a base64 body, accepting both padded and unpadded input.
+#
+# Whitespace is ignored. Padding may only appear at the end of the input and
+# must be consistent with the number of encoded characters. Unpadded input with
+# a three- or two-character tail is decoded normally.
+fn decode_base64_body(
+  raw: String,
+  encoding: String,
+  max_size: Int,
+) -> Result[ByteArray, Error] {
+  let cleaned = ByteArray.new
+  let mut i = 0
+
+  while i < raw.size {
+    match raw.get(i) {
+      case Ok(byte) -> {
+        if
+          byte != ASCII_LF
+            and byte != ASCII_CR
+            and byte != ASCII_SPACE
+            and byte != ASCII_HT
+        {
+          cleaned.push(byte)
+        }
+      }
+      case Error(_) -> {}
+    }
+
+    i = i + 1
+  }
+
+  let mut data_size = cleaned.size
+  let mut padding = 0
+
+  while data_size > 0 {
+    match cleaned.get(data_size - 1) {
+      case Ok(byte) -> {
+        if byte == ASCII_EQUALS {
+          padding = padding + 1
+          data_size = data_size - 1
+        } else {
+          break
+        }
+      }
+      case Error(_) -> break
+    }
+  }
+
+  let data = ByteArray.new
+  let mut valid = padding <= 2
+  let mut j = 0
+
+  while j < data_size {
+    match cleaned.get(j) {
+      case Ok(byte) -> {
+        if is_base64_data_char(byte) { data.push(byte) } else { valid = false }
+      }
+      case Error(_) -> valid = false
+    }
+
+    j = j + 1
+  }
+
+  let remainder = data.size % 4
+
+  if remainder == 1 { valid = false }
+
+  if padding == 1 and remainder != 3 { valid = false }
+
+  if padding == 2 and remainder != 2 { valid = false }
+
+  if !valid {
+    return Result.Error(
+      Error.DecodingFailed(
+        Severity.Error,
+        encoding,
+        'base64 decoding failed',
+        Option.None,
+        Option.None,
+        Option.None,
+      ),
+    )
+  }
+
+  let estimated_size = (data.size * BASE64_DECODED_SIZE) / BASE64_CHUNK_SIZE
+
+  match SizeTracker.check_allocation(0, estimated_size, max_size) {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
+  }
+
+  let mut decoder = Decoder.new
+
+  decoder.padding = false
+
+  let output = ByteArray.new
+
+  match decoder.decode(data, output) {
+    case Ok(_) -> Result.Ok(output)
+    case Error(_) -> {
+      Result.Error(
+        Error.DecodingFailed(
+          Severity.Error,
+          encoding,
+          'base64 decoding failed',
+          Option.None,
+          Option.None,
+          Option.None,
+        ),
+      )
+    }
+  }
+}
+
+fn is_base64_data_char(byte: Int) -> Bool {
+  (byte >= 65 and byte <= 90)
+    or (byte >= 97 and byte <= 122)
+    or (byte >= 48 and byte <= 57)
+    or byte == 43
+    or byte == 47
 }
 
 fn decode_hex_sequence(

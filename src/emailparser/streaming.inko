@@ -743,10 +743,14 @@ fn stream_body_impl[H: mut + StreamHandler](
               }
             }
           }
-          case Error(_) -> {}
+          case Error(e) -> {
+            if strict_mode { return Result.Error(Error.from_string(e)) }
+          }
         }
       }
-      case Error(_) -> {}
+      case Error(e) -> {
+        if strict_mode { return Result.Error(Error.from_string(e)) }
+      }
     }
   } else if encoding_lower == 'quoted-printable' {
     let mut d = QuotedPrintableStreamingDecoder.new(
@@ -882,7 +886,9 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
             }
           }
         }
-        case Error(_) -> {}
+        case Error(e) -> {
+          if strict_mode { return Result.Error(Error.from_string(e)) }
+        }
       }
     }
 
@@ -922,7 +928,9 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
                 }
               }
             }
-            case Error(_) -> {}
+            case Error(e) -> {
+              if strict_mode { return Result.Error(Error.from_string(e)) }
+            }
           }
         }
         case Error(e) -> return Result.Error(Error.from_string(e))
@@ -941,7 +949,9 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
           }
         }
       }
-      case Error(_) -> {}
+      case Error(e) -> {
+        if strict_mode { return Result.Error(Error.from_string(e)) }
+      }
     }
   } else if encoding_lower == 'quoted-printable' {
     let mut decoder = QuotedPrintableStreamingDecoder.new(

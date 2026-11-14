@@ -330,29 +330,27 @@ fn decode_text_body(
   ct_main: String,
   content_transfer_encoding: String,
   max_size: Int,
-) -> (Option[String], Option[String]) {
+) -> Result[(Option[String], Option[String]), Error] {
   let mut text_body = Option.None
   let mut html_body = Option.None
 
-  if is_text_plain(ct_main) {
-    match decode_body_impl(body_raw, content_transfer_encoding, max_size) {
-      case Ok(decoded) -> text_body = Option.Some(decoded)
-      case Error(_) -> {}
-    }
-  } else if is_text_html(ct_main) {
-    match decode_body_impl(body_raw, content_transfer_encoding, max_size) {
-      case Ok(decoded) -> html_body = Option.Some(decoded)
-      case Error(_) -> {}
-    }
-  } else {
-    # For non-text, non-multipart content types, store in text_body as fallback
-    match decode_body_impl(body_raw, content_transfer_encoding, max_size) {
-      case Ok(decoded) -> text_body = Option.Some(decoded)
-      case Error(_) -> {}
-    }
+  let decoded = match
+    decode_body_impl(body_raw, content_transfer_encoding, max_size)
+  {
+    case Ok(decoded) -> decoded
+    case Error(e) -> return Result.Error(e)
   }
 
-  (text_body, html_body)
+  if is_text_plain(ct_main) {
+    text_body = Option.Some(decoded)
+  } else if is_text_html(ct_main) {
+    html_body = Option.Some(decoded)
+  } else {
+    # For non-text, non-multipart content types, store in text_body as fallback
+    text_body = Option.Some(decoded)
+  }
+
+  Result.Ok((text_body, html_body))
 }
 
 impl EmailParser {
@@ -525,14 +523,17 @@ impl EmailParser {
           @config.strict_mode,
         )
       } else if is_text_plain(ct_main) or is_text_html(ct_main) {
-        let (text, html) = decode_text_body(
-          body_raw,
-          ct_main,
-          content_transfer_encoding,
-          @config.max_attachment_size,
-        )
-
-        Result.Ok((text, html, []))
+        match
+          decode_text_body(
+            body_raw,
+            ct_main,
+            content_transfer_encoding,
+            @config.max_attachment_size,
+          )
+        {
+          case Ok((text, html)) -> Result.Ok((text, html, []))
+          case Error(e) -> Result.Error(e)
+        }
       } else {
         # A top-level non-text body is binary data, not a text body.
         match

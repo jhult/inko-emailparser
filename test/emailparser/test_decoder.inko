@@ -70,6 +70,36 @@ fn pub tests(t: mut Tests) {
     }
   })
 
+  t.test('base64_unpadded_content', fn (t) {
+    match decode_body_impl('aGVsbG8gd29ybGQ', 'base64', 1024) {
+      case Ok(decoded) -> t.equal(decoded, 'hello world')
+      case Error(_) -> t.false(true)
+    }
+  })
+
+  t.test('base64_single_pad_content', fn (t) {
+    match decode_body_impl('aGVsbG8gd29ybGQ=', 'base64', 1024) {
+      case Ok(decoded) -> t.equal(decoded, 'hello world')
+      case Error(_) -> t.false(true)
+    }
+  })
+
+  t.test('base64_invalid_length', fn (t) {
+    # A single trailing character can never be decoded
+    match decode_body_impl('A', 'base64', 1024) {
+      case Ok(_) -> t.false(true)
+      case Error(_) -> t.true(true)
+    }
+  })
+
+  t.test('base64_invalid_padding', fn (t) {
+    # Padding implies a 2 or 3 character remainder
+    match decode_body_impl('aGVsbG8gd29ybGQ==', 'base64', 1024) {
+      case Ok(_) -> t.false(true)
+      case Error(_) -> t.true(true)
+    }
+  })
+
   # Test that valid quoted-printable content within limits is accepted
   t.test('qp_valid_content', fn (t) {
     # QP encoded "Hello, World!"

@@ -234,4 +234,41 @@ fn pub tests(t: mut Tests) {
 
     t.equal(ids.size, 2)
   })
+
+  t.test('base64_unpadded_body', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Unpadded
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+
+aGVsbG8gd29ybGQ'
+
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        match msg.text_body {
+          case Some(body) -> t.equal(body, 'hello world')
+          case None -> t.false(true)
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
+  t.test('base64_invalid_body_returns_error', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Invalid
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+
+A'
+
+    match parser.parse(raw_email) {
+      case Ok(_) -> t.false(true)
+      case Error(_) -> t.true(true)
+    }
+  })
 }

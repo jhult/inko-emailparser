@@ -14,6 +14,7 @@ type pub Base64StreamingDecoder {
   let mut @buffer: ByteArray
   let mut @size_tracker: SizeTracker
   let @strict_mode: Bool
+  let mut @padding_seen: Bool
 }
 
 impl Base64StreamingDecoder {
@@ -23,13 +24,13 @@ impl Base64StreamingDecoder {
       buffer: recover ByteArray.new,
       size_tracker: SizeTracker.new(max_size, strict_mode),
       strict_mode: strict_mode,
+      padding_seen: false,
     )
   }
 
   fn pub mut feed(chunk: String) -> Result[ByteArray, String] {
-    let mut has_padding = false
-
-    # Add chunk to buffer, filtering out whitespace and invalid characters
+    # Add chunk to buffer, filtering out whitespace and invalid characters.
+    # Incomplete groups are kept in the buffer until they can be decoded.
     let mut i = 0
 
     while i < chunk.size {
@@ -44,8 +45,7 @@ impl Base64StreamingDecoder {
           {
             i = i + 1
           } else if is_valid_base64_char(byte) {
-            # Check for padding in wrong position
-            if has_padding and byte != ASCII_EQUALS {
+            if @padding_seen and byte != ASCII_EQUALS {
               # Non-padding character after padding is invalid
               if @strict_mode {
                 return Result.Error('Padding appears before end of data')
@@ -54,9 +54,9 @@ impl Base64StreamingDecoder {
                 i = i + 1
               }
             } else {
-              @buffer.push(byte)
+              if byte == ASCII_EQUALS { @padding_seen = true }
 
-              if byte == ASCII_EQUALS { has_padding = true }
+              @buffer.push(byte)
 
               i = i + 1
             }
@@ -74,113 +74,113 @@ impl Base64StreamingDecoder {
       }
     }
 
-    let output = ByteArray.new
-
-    # Decode incrementally: complete 4-character groups can be decoded as soon
-    # as they arrive. With padding, consume the whole (final) buffer.
-    let decode_len = if has_padding {
-      @buffer.size
+    # Only decode complete 4-character groups. A padded group is complete once
+    # its size is a multiple of four.
+    let decode_len = if @padding_seen {
+      if @buffer.size % 4 == 0 { @buffer.size } else { 0 }
     } else {
       (@buffer.size / 4) * 4
     }
 
-    if decode_len > 0 {
-      let to_decode = ByteArray.new
-      let rest = ByteArray.new
+    if decode_len == 0 { return Result.Ok(ByteArray.new) }
+
+    let to_decode = ByteArray.new
+    let rest = ByteArray.new
+    let mut idx = 0
+
+    while idx < @buffer.size {
+      match @buffer.get(idx) {
+        case Ok(byte) -> {
+          if idx < decode_len { to_decode.push(byte) } else { rest.push(byte) }
+        }
+        case Error(_) -> {}
+      }
+
+      idx = idx + 1
+    }
+
+    @buffer = rest
+
+    let output = ByteArray.new
+
+    match decode_base64_bytes(ref to_decode, @strict_mode, output) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e)
+    }
+
+    # Check size limit and truncate if necessary
+    let available_space = @size_tracker.remaining_space
+
+    if output.size > available_space {
+      let truncated = ByteArray.new
       let mut idx = 0
 
-      while idx < @buffer.size {
-        match @buffer.get(idx) {
-          case Ok(byte) -> {
-            if idx < decode_len {
-              to_decode.push(byte)
-            } else {
-              rest.push(byte)
-            }
-          }
+      while idx < available_space {
+        match output.get(idx) {
+          case Ok(b) -> truncated.push(b)
           case Error(_) -> {}
         }
 
         idx = idx + 1
       }
 
-      let decoder = Decoder.new
+      let _ = @size_tracker.add(available_space)
 
-      match decoder.decode(to_decode, output) {
-        case Ok(_) -> {
-          # Check size limit and truncate if necessary
-          let available_space = @size_tracker.remaining_space
-
-          if output.size > available_space {
-            # Truncate output to fit within limit
-            let truncated = ByteArray.new
-            let mut idx = 0
-
-            while idx < available_space {
-              match output.get(idx) {
-                case Ok(b) -> truncated.push(b)
-                case Error(_) -> {}
-              }
-
-              idx = idx + 1
-            }
-
-            let _ = @size_tracker.add(available_space)
-
-            @buffer = ByteArray.new
-            return Result.Ok(truncated)
-          } else {
-            let _ = @size_tracker.add(output.size)
-
-            @buffer = rest
-          }
-        }
-        case Error(_) -> return Result.Error('Base64 decoding failed')
-      }
+      @buffer = ByteArray.new
+      return Result.Ok(truncated)
     }
+
+    let _ = @size_tracker.add(output.size)
 
     Result.Ok(output)
   }
 
   fn pub mut finish -> Result[ByteArray, String] {
-    # Decode any remaining data in buffer
     let output = ByteArray.new
 
-    if @buffer.size > 0 {
-      let decoder = Decoder.new
+    if @buffer.size == 0 { return Result.Ok(output) }
 
-      match decoder.decode(@buffer, output) {
-        case Ok(_) -> {
-          # Check size limit and truncate if necessary
-          let available_space = @size_tracker.remaining_space
+    let to_decode = ByteArray.new
+    let mut idx = 0
 
-          if output.size > available_space {
-            # Truncate output to fit within limit
-            let truncated = ByteArray.new
-            let mut idx = 0
-
-            while idx < available_space {
-              match output.get(idx) {
-                case Ok(b) -> truncated.push(b)
-                case Error(_) -> {}
-              }
-
-              idx = idx + 1
-            }
-
-            let _ = @size_tracker.add(available_space)
-
-            @buffer = ByteArray.new
-            return Result.Ok(truncated)
-          } else {
-            let _ = @size_tracker.add(output.size)
-
-            @buffer = ByteArray.new
-          }
-        }
-        case Error(_) -> return Result.Error('Base64 decoding failed')
+    while idx < @buffer.size {
+      match @buffer.get(idx) {
+        case Ok(byte) -> to_decode.push(byte)
+        case Error(_) -> {}
       }
+
+      idx = idx + 1
     }
+
+    @buffer = ByteArray.new
+
+    match decode_base64_bytes(ref to_decode, @strict_mode, output) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e)
+    }
+
+    # Check size limit and truncate if necessary
+    let available_space = @size_tracker.remaining_space
+
+    if output.size > available_space {
+      let truncated = ByteArray.new
+      let mut idx = 0
+
+      while idx < available_space {
+        match output.get(idx) {
+          case Ok(b) -> truncated.push(b)
+          case Error(_) -> {}
+        }
+
+        idx = idx + 1
+      }
+
+      let _ = @size_tracker.add(available_space)
+
+      return Result.Ok(truncated)
+    }
+
+    let _ = @size_tracker.add(output.size)
 
     Result.Ok(output)
   }
@@ -198,6 +198,81 @@ fn is_valid_base64_char(byte: Int) -> Bool {
     or byte == 43
     or byte == 47
     or byte == 61
+}
+
+# Decode a (possibly unpadded) group of base64 characters.
+#
+# Trailing padding is stripped before decoding so that both "QQ==" and "QQ"
+# decode to the same byte. A remainder of one character can never be decoded
+# and is rejected.
+fn decode_base64_bytes(
+  input: ref ByteArray,
+  strict_mode: Bool,
+  into: mut ByteArray,
+) -> Result[Nil, String] {
+  if input.empty? { return Result.Ok(nil) }
+
+  let mut data_size = input.size
+  let mut padding = 0
+
+  while data_size > 0 {
+    match input.get(data_size - 1) {
+      case Ok(byte) -> {
+        if byte == ASCII_EQUALS {
+          padding = padding + 1
+          data_size = data_size - 1
+        } else {
+          break
+        }
+      }
+      case Error(_) -> break
+    }
+  }
+
+  let data = ByteArray.new
+  let mut i = 0
+
+  while i < data_size {
+    match input.get(i) {
+      case Ok(byte) -> {
+        if byte == ASCII_EQUALS {
+          if strict_mode {
+            return Result.Error('Padding appears before end of data')
+          }
+        } else {
+          data.push(byte)
+        }
+      }
+      case Error(_) -> {}
+    }
+
+    i = i + 1
+  }
+
+  let remainder = data.size % 4
+
+  if remainder == 1 { return Result.Error('Invalid base64 length') }
+
+  if strict_mode {
+    if padding > 2 { return Result.Error('Invalid base64 padding') }
+
+    if padding == 1 and remainder != 3 {
+      return Result.Error('Invalid base64 padding')
+    }
+
+    if padding == 2 and remainder != 2 {
+      return Result.Error('Invalid base64 padding')
+    }
+  }
+
+  let mut decoder = Decoder.new
+
+  decoder.padding = false
+
+  match decoder.decode(data, into) {
+    case Ok(_) -> Result.Ok(nil)
+    case Error(_) -> Result.Error('Base64 decoding failed')
+  }
 }
 
 type pub QuotedPrintableStreamingDecoder {

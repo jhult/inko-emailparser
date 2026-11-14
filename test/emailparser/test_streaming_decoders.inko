@@ -62,6 +62,54 @@ fn pub tests(t: mut Tests) {
     }
   })
 
+  t.test('base64_padding_split_one_character', fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(1000000, false)
+
+    # An incomplete padded group must be buffered, not rejected
+    match decoder.feed('QQ=') {
+      case Ok(decoded) -> t.equal(decoded.size, 0)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    match decoder.feed('=') {
+      case Ok(decoded) -> t.equal(decoded.into_string, 'A')
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    match decoder.finish {
+      case Ok(final) -> t.equal(final.size, 0)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+  })
+
+  t.test('base64_unpadded_tail_kept_for_finish', fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(1000000, false)
+
+    match decoder.feed('aGVsbG8gd29ybGQ') {
+      case Ok(decoded) -> t.equal(decoded.into_string, 'hello wor')
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    match decoder.finish {
+      case Ok(final) -> t.equal(final.into_string, 'ld')
+      case Error(e) -> panic('Failed: ${e}')
+    }
+  })
+
+  t.test('base64_invalid_length_errors', fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(1000000, true)
+
+    match decoder.feed('A') {
+      case Ok(_) -> {}
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    match decoder.finish {
+      case Ok(_) -> t.false(true)
+      case Error(_) -> t.true(true)
+    }
+  })
+
   t.test('base64_with_whitespace', fn (t) {
     let mut decoder = Base64StreamingDecoder.new(1000000, false)
     let encoded = 'SGVs\nbG8g\r\n V29ybGQ='
