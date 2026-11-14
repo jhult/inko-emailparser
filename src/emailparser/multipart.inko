@@ -68,8 +68,9 @@ import emailparser.decoder (decode_body_bytes_impl)
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.header (
-  get_header_value_impl, parse_content_disposition_impl,
-  parse_content_type_impl, parse_headers_impl, sanitize_filename,
+  extract_filename_param, get_header_value_impl, get_param_value_impl,
+  parse_content_disposition_impl, parse_content_type_impl, parse_headers_impl,
+  sanitize_filename,
 )
 import std.bytes (ByteArray)
 import std.option (Option)
@@ -719,7 +720,7 @@ fn pub parse_single_multipart_part(
         case Error(e) -> return Result.Error(e)
       }
 
-      let (ct_main, ct_params, disp_main, disp_params, transfer_encoding) = match
+      let (ct_main, ct_params, disp_main, _, transfer_encoding) = match
         extract_part_metadata(part_headers, default_encoding)
       {
         case Ok(metadata) -> metadata
@@ -737,9 +738,19 @@ fn pub parse_single_multipart_part(
         case Error(e) -> return Result.Error(e)
       }
 
-      let filename = match get_header_value_impl(disp_params, 'filename') {
-        case Some(f) -> sanitize_filename(f)
+      let mut filename = match
+        get_header_value_impl(part_headers, 'Content-Disposition')
+      {
+        case Some(raw) -> extract_filename_param(raw)
         case None -> Option.None
+      }
+
+      # Fall back to the Content-Type name parameter
+      if filename.none? {
+        match get_param_value_impl(ref ct_params, 'name') {
+          case Some(n) -> filename = sanitize_filename(n)
+          case None -> {}
+        }
       }
 
       let content_id = extract_content_id(part_headers)

@@ -634,17 +634,24 @@ SGVsbG8gV29ybGQ=
           case Ok(att) -> {
             t.equal(att.content_type, 'application/pdf')
             t.equal(att.content_disposition, 'attachment')
+            t.equal(att.filename, Option.Some('document with spaces.pdf'))
           }
           case Error(_) -> {}
         }
 
         match msg.attachments.get(1) {
-          case Ok(att) -> t.equal(att.content_type, 'text/plain')
+          case Ok(att) -> {
+            t.equal(att.content_type, 'text/plain')
+            t.equal(att.filename, Option.Some('é document with é.txt'))
+          }
           case Error(_) -> {}
         }
 
         match msg.attachments.get(2) {
-          case Ok(att) -> t.equal(att.content_type, 'application/octet-stream')
+          case Ok(att) -> {
+            t.equal(att.content_type, 'application/octet-stream')
+            t.equal(att.filename, Option.Some('файл.bin'))
+          }
           case Error(_) -> {}
         }
       }
@@ -655,6 +662,34 @@ SGVsbG8gV29ybGQ=
   # ============================================================
   # EDGE CASE TESTS
   # ============================================================
+
+  t.test('attachment_filename_from_content_type_name', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Name only
+Content-Type: multipart/mixed; boundary=bnd
+
+--bnd
+Content-Type: application/pdf; name=report.pdf
+Content-Disposition: attachment
+Content-Transfer-Encoding: base64
+
+JVBERi0=
+--bnd--'
+
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        t.equal(msg.attachments.size, 1)
+
+        match msg.attachments.get(0) {
+          case Ok(att) -> t.equal(att.filename, Option.Some('report.pdf'))
+          case Error(_) -> t.false(true)
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
 
   t.test('email_with_many_received_headers', fn (t) {
     let parser = EmailParser.new

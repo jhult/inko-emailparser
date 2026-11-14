@@ -22,8 +22,8 @@ import emailparser.decoder (
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.header (
-  extract_extra_headers, get_header_value_impl, get_param_value_impl,
-  is_standard_header_impl, parse_content_disposition_impl,
+  extract_extra_headers, extract_filename_param, get_header_value_impl,
+  get_param_value_impl, is_standard_header_impl, parse_content_disposition_impl,
   parse_content_type_impl, parse_headers_impl, sanitize_filename,
 )
 import emailparser.header_extraction (
@@ -551,11 +551,11 @@ impl EmailParser {
             match get_header_value_impl(headers, 'Content-Disposition') {
               case Some(raw_disp) -> {
                 match parse_content_disposition_impl(raw_disp) {
-                  case Ok((disp, params)) -> {
+                  case Ok((disp, _)) -> {
                     if !disp.empty? { disposition = disp }
 
-                    match get_param_value_impl(ref params, 'filename') {
-                      case Some(f) -> filename = sanitize_filename(f)
+                    match extract_filename_param(raw_disp.clone) {
+                      case Some(f) -> filename = Option.Some(f)
                       case None -> {}
                     }
                   }
@@ -563,6 +563,14 @@ impl EmailParser {
                 }
               }
               case None -> {}
+            }
+
+            # Fall back to the Content-Type name parameter
+            if filename.none? {
+              match get_param_value_impl(ref ct_params, 'name') {
+                case Some(n) -> filename = sanitize_filename(n)
+                case None -> {}
+              }
             }
 
             match get_header_value_impl(headers, 'Content-ID') {
