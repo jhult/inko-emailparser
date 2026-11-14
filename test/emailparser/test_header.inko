@@ -376,6 +376,26 @@ fn pub tests(t: mut Tests) {
     }
   })
 
+  t.test('strict_mode_accepts_colons_in_values', fn (t) {
+    let parser = EmailParser.new.with_strict_mode(true)
+    let raw = 'Subject: Re: meeting\nDate: 2024-01-01T10:00:00Z\nX-Url: https://example.com/offer\n\nBody'
+
+    match parser.parse_headers(raw) {
+      case Ok(headers) -> t.equal(headers.size, 3)
+      case Error(_) -> t.true(false)
+    }
+  })
+
+  t.test('strict_mode_allows_repeatable_headers', fn (t) {
+    let parser = EmailParser.new.with_strict_mode(true)
+    let raw = 'Received: from a by b\nReceived: from c by d\nComments: one\nComments: two\n\nBody'
+
+    match parser.parse_headers(raw) {
+      case Ok(headers) -> t.equal(headers.size, 4)
+      case Error(_) -> t.true(false)
+    }
+  })
+
   t.test('folded_content_type_parameter_is_accepted', fn (t) {
     let parser = EmailParser.new
 

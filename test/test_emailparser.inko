@@ -300,13 +300,27 @@ fn pub tests(t: mut Tests) {
 
   t.test('strict_mode_invalid_field_name', fn (t) {
     let strict_parser = EmailParser.new.with_strict_mode(true)
-    # Field name with colon is invalid
-    let headers = 'From: test@example.com\nInvalid:Name: value\n\n'
+    # Field names cannot contain whitespace
+    let headers = 'From: test@example.com\nInvalid Name: value\n\n'
     let result = strict_parser.parse_headers(headers)
 
     match result {
       case Ok(_) -> t.equal('should error', 'got ok')
-      case Error(e) -> t.true(e.to_message.contains?('Malformed header'))
+      case Error(e) -> {
+        t.true(e.to_message.contains?('Invalid header field name'))
+      }
+    }
+  })
+
+  t.test('strict_mode_accepts_colon_in_header_value', fn (t) {
+    let strict_parser = EmailParser.new.with_strict_mode(true)
+    # A colon inside a value is legal and must not look like a missing newline
+    let headers = 'Subject: Re: meeting\nX-Url: https://example.com/offer\n\n'
+    let result = strict_parser.parse_headers(headers)
+
+    match result {
+      case Ok(h) -> t.equal(h.size, 2)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
 

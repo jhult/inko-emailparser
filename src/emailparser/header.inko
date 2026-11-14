@@ -47,6 +47,18 @@ let STANDARD = [
   'disposition-notification-to',
 ]
 
+# Whether a header field may legally appear more than once
+#
+# RFC 5322 section 3.6 allows these fields to repeat. `x-*` fields are
+# non-standard but commonly repeatable too.
+fn is_repeatable_header(lower_name: String) -> Bool {
+  lower_name == 'received'
+    or lower_name == 'comments'
+    or lower_name == 'keywords'
+    or lower_name.starts_with?('resent-')
+    or lower_name.starts_with?('x-')
+}
+
 # Validate RFC 5322 field name
 # RFC 5322 section 3.6.8: field names are 1+ printable chars (except colon)
 fn pub is_valid_field_name(name: String) -> Bool {
@@ -295,50 +307,24 @@ fn parse_headers_impl(
               )
             }
 
-            # Check if the value looks like it contains a malformed header
-            # (e.g., "Invalid:Name: value" would have value "Name: value")
-            # This happens when there's a space before the colon in the field name
-            let value_colon = current_value.index_of(':', 0)
+            # Check for duplicate headers (case-insensitive)
+            # Use cached lowercase keys to avoid repeated conversions.
+            # Fields that RFC 5322 allows to repeat are exempt.
+            let lower_key = current_key.to_lower
 
-            match value_colon {
-              case Some(vpos) -> {
-                # Check if the part before the colon looks like a valid field name
-                let potential_name = current_value.substring(0, vpos).trim
-
-                if
-                  potential_name.empty? == false
-                    and is_valid_field_name(potential_name)
-                {
-                  # This looks like "Field1: Field2: value" which is malformed
+            if !is_repeatable_header(lower_key) {
+              for k in lower_keys.iter {
+                if k == lower_key {
                   return Result.Error(
-                    Error.MalformedHeader(
+                    Error.DuplicateHeader(
                       Severity.Error,
-                      'possible missing newline',
+                      current_key,
                       Option.Some(line_number),
                       Option.None,
-                      Option.Some(line_str.clone),
+                      Option.Some(current_key.clone),
                     ),
                   )
                 }
-              }
-              case None -> {}
-            }
-
-            # Check for duplicate headers (case-insensitive)
-            # Use cached lowercase keys to avoid repeated conversions
-            let lower_key = current_key.to_lower
-
-            for k in lower_keys.iter {
-              if k == lower_key {
-                return Result.Error(
-                  Error.DuplicateHeader(
-                    Severity.Error,
-                    current_key,
-                    Option.Some(line_number),
-                    Option.None,
-                    Option.Some(current_key.clone),
-                  ),
-                )
               }
             }
           }
