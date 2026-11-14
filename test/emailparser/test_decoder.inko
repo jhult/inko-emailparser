@@ -4,7 +4,9 @@
 
 # Tests for early size checks in decode_body_impl
 
-import emailparser.decoder (decode_body_impl, decode_rfc2047_quoted_printable)
+import emailparser.decoder (
+  decode_body_impl, decode_charset, decode_rfc2047_quoted_printable,
+)
 import std.test (Tests)
 
 fn pub tests(t: mut Tests) {
@@ -215,5 +217,43 @@ fn pub tests(t: mut Tests) {
     }
 
     t.true(found_replacement)
+  })
+
+  t.test('decode_charset_strips_utf8_bom', fn (t) {
+    let bytes = ByteArray.from_array([0xEF, 0xBB, 0xBF, 104, 105])
+    let decoded = decode_charset(bytes, 'utf-8')
+
+    t.equal(decoded, 'hi')
+  })
+
+  t.test('decode_charset_utf16le_bom', fn (t) {
+    let bytes = ByteArray.from_array(
+      [0xFF, 0xFE, 104, 0, 101, 0, 108, 0, 108, 0, 111, 0],
+    )
+    let decoded = decode_charset(bytes, 'utf-16')
+
+    t.equal(decoded, 'hello')
+  })
+
+  t.test('decode_charset_utf16be', fn (t) {
+    let bytes = ByteArray.from_array([0, 104, 0, 105])
+    let decoded = decode_charset(bytes, 'utf-16be')
+
+    t.equal(decoded, 'hi')
+  })
+
+  t.test('decode_charset_utf16_surrogate_pair', fn (t) {
+    # U+1F603 (😃) as a UTF-16LE surrogate pair
+    let bytes = ByteArray.from_array([0x3D, 0xD8, 0x03, 0xDE])
+    let decoded = decode_charset(bytes, 'utf-16le')
+
+    t.equal(decoded, '\u{1F603}')
+  })
+
+  t.test('decode_charset_invalid_utf8_is_replaced', fn (t) {
+    let bytes = ByteArray.from_array([0xFF, 65])
+    let decoded = decode_charset(bytes, 'x-unknown')
+
+    t.equal(decoded, '\u{FFFD}A')
   })
 }
