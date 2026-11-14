@@ -69,9 +69,20 @@ fn pub remove_comments(input: String) -> String {
   let mut in_quote = false
 
   while i < input.size {
+    let mut step = 1
+
     match input.get(i) {
       case Ok(byte) -> {
-        if byte == 34 and depth == 0 {
+        if byte == 92 and in_quote and i + 1 < input.size {
+          result.push(byte)
+
+          match input.get(i + 1) {
+            case Ok(escaped) -> result.push(escaped)
+            case Error(_) -> {}
+          }
+
+          step = 2
+        } else if byte == 34 and depth == 0 {
           in_quote = if in_quote { false } else { true }
           result.push(byte)
         } else if byte == 40 and in_quote == false {
@@ -81,16 +92,14 @@ fn pub remove_comments(input: String) -> String {
         } else if depth == 0 {
           result.push(byte)
         }
-
-        i = i + 1
       }
       case Error(_) -> {
         # Push Unicode replacement character U+FFFD (UTF-8: 239, 191, 189)
         for byte in UNICODE_REPLACEMENT_CHAR_UTF8.iter { result.push(byte) }
-
-        i = i + 1
       }
     }
+
+    i = i + step
   }
 
   result.into_string
@@ -277,9 +286,13 @@ fn is_colon_outside_delimiters(input: String, pos: Int) -> Bool {
   let mut i = 0
 
   while i < input.size and i < pos {
+    let mut step = 1
+
     match input.get(i) {
       case Ok(byte) -> {
-        if byte == 34 {
+        if byte == 92 and in_quote and i + 1 < input.size {
+          step = 2
+        } else if byte == 34 and paren_depth == 0 {
           in_quote = if in_quote { false } else { true }
         } else if byte == 40 and in_quote == false {
           paren_depth = paren_depth + 1
@@ -294,7 +307,7 @@ fn is_colon_outside_delimiters(input: String, pos: Int) -> Bool {
       case Error(_) -> {}
     }
 
-    i = i + 1
+    i = i + step
   }
 
   in_quote == false and paren_depth == 0 and angle_depth == 0
@@ -342,9 +355,20 @@ fn pub parse_comma_separated_addresses(input: String) -> Array[EmailAddress] {
   let mut i = 0
 
   while i < input.size {
+    let mut step = 1
+
     match input.get(i) {
       case Ok(byte) -> {
-        if byte == 34 {
+        if byte == 92 and in_quote and i + 1 < input.size {
+          current.push(byte)
+
+          match input.get(i + 1) {
+            case Ok(escaped) -> current.push(escaped)
+            case Error(_) -> {}
+          }
+
+          step = 2
+        } else if byte == 34 and paren_depth == 0 {
           in_quote = if in_quote { false } else { true }
           current.push(byte)
         } else if byte == 40 and in_quote == false {
@@ -365,11 +389,11 @@ fn pub parse_comma_separated_addresses(input: String) -> Array[EmailAddress] {
         } else if in_quote == true or paren_depth == 0 {
           current.push(byte)
         }
-
-        i = i + 1
       }
-      case Error(_) -> i = i + 1
+      case Error(_) -> {}
     }
+
+    i = i + step
   }
 
   let addr_str = byte_array_to_string(current).trim
@@ -392,37 +416,75 @@ fn parse_address_list_impl(
   match raw {
     case Some(_) -> {
       let mut result = []
-      let mut colon_pos = 0
-      let mut group_colon_opt = Option.None
+      let mut rest = decoded.trim
 
-      loop {
-        match decoded.index_of(':', colon_pos) {
-          case Some(pos) -> {
-            if is_colon_outside_delimiters(decoded, pos) {
-              group_colon_opt = Option.Some(pos)
-              break
+      while !rest.empty? {
+        let mut colon_pos = 0
+        let mut group_colon = Option.None
+
+        loop {
+          match rest.index_of(':', colon_pos) {
+            case Some(pos) -> {
+              if is_colon_outside_delimiters(rest, pos) {
+                group_colon = Option.Some(pos)
+                break
+              }
+
+              colon_pos = pos + 1
+            }
+            case None -> break
+          }
+        }
+
+        match group_colon {
+          case Some(colon) -> {
+            let content_start = colon + 1
+            let mut semi_pos = 0
+            let mut semi = Option.None
+
+            loop {
+              match rest.index_of(';', semi_pos) {
+                case Some(pos) -> {
+                  if is_colon_outside_delimiters(rest, pos) {
+                    semi = Option.Some(pos)
+                    break
+                  }
+
+                  semi_pos = pos + 1
+                }
+                case None -> break
+              }
             }
 
-            colon_pos = pos + 1
+            match semi {
+              case Some(pos) -> {
+                let content = rest.slice(content_start, pos).to_string
+
+                for addr in parse_comma_separated_addresses(content).into_iter {
+                  result.push(addr)
+                }
+
+                rest = rest.slice(pos + 1, rest.size).to_string.trim
+              }
+              case None -> {
+                let content = rest.slice(content_start, rest.size).to_string
+
+                for addr in parse_comma_separated_addresses(content).into_iter {
+                  result.push(addr)
+                }
+
+                rest = ''
+              }
+            }
           }
-          case None -> break
-        }
-      }
+          case None -> {
+            for addr in parse_comma_separated_addresses(rest).into_iter {
+              result.push(addr)
+            }
 
-      match group_colon_opt {
-        case Some(colon) -> {
-          let _group_name = decoded.slice(0, colon).to_string.trim
-          let group_content = decoded.slice(colon + 1, decoded.size).to_string
-
-          let semi_pos = group_content.index_of(';', 0)
-          let content = match semi_pos {
-            case Some(pos) -> group_content.slice(0, pos).to_string
-            case None -> group_content
+            rest = ''
           }
-
-          result = parse_comma_separated_addresses(content)
         }
-        case None -> result = parse_comma_separated_addresses(decoded)
       }
 
       result

@@ -433,4 +433,14 @@ fn pub tests(t: mut Tests) {
       case Error(_) -> t.false(true)
     }
   })
+
+  t.test('parse_address_escaped_quote_in_name', fn (t) {
+    let addresses = parse_comma_separated_addresses(
+      '"Doe, \\"John" <john@example.com>, jane@example.com',
+    )
+
+    t.equal(addresses.size, 2)
+    t.equal(addresses.get(0).or_panic.address, 'john@example.com')
+    t.equal(addresses.get(1).or_panic.address, 'jane@example.com')
+  })
 }

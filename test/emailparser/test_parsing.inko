@@ -285,4 +285,25 @@ A'
       case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
+
+  t.test('parse_address_list_multiple_groups', fn (t) {
+    let parser = EmailParser.new
+    let addresses = parser.parse_address_list(
+      Option.Some('A: a@x.com;, B: b@y.com;'),
+    )
+
+    t.equal(addresses.size, 2)
+    t.equal(addresses.get(0).or_panic.address, 'a@x.com')
+    t.equal(addresses.get(1).or_panic.address, 'b@y.com')
+  })
+
+  t.test('parse_address_list_quote_in_comment', fn (t) {
+    let parser = EmailParser.new
+    let addresses = parser.parse_address_list(
+      Option.Some('a@example.com (5" ruler), b@example.com'),
+    )
+
+    t.equal(addresses.size, 2)
+    t.equal(addresses.get(1).or_panic.address, 'b@example.com')
+  })
 }
