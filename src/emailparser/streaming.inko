@@ -167,6 +167,11 @@ impl StreamingParser {
     raw: String,
     handler: mut H,
   ) -> Result[StreamingResult, Error] {
+    match validate_stream_chunk_size(@config.stream_chunk_size) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e)
+    }
+
     # Notify handler that parsing is beginning
     match handler.on_begin {
       case Ok(_) -> {}
@@ -400,6 +405,11 @@ impl StreamingParser {
     reader: mut R,
     handler: mut H,
   ) -> Result[StreamingResult, Error] {
+    match validate_stream_chunk_size(@config.stream_chunk_size) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e)
+    }
+
     match handler.on_begin {
       case Ok(_) -> {}
       case Error(e) -> {
@@ -1214,6 +1224,17 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
   Result.Ok(0)
 }
 
+# Reject a zero or negative chunk size before it can cause an infinite loop
+fn validate_stream_chunk_size(chunk_size: Int) -> Result[Nil, Error] {
+  if chunk_size <= 0 {
+    return Result.Error(
+      Error.from_string('stream_chunk_size must be greater than 0'),
+    )
+  }
+
+  Result.Ok(nil)
+}
+
 # Send decoded text/html in sized chunks to the handler
 fn send_text_chunks[H: mut + StreamHandler](
   decoded_str: String,
@@ -1221,6 +1242,10 @@ fn send_text_chunks[H: mut + StreamHandler](
   is_html: Bool,
   handler: mut H,
 ) -> Result[Int, Error] {
+  if chunk_size <= 0 {
+    return Result.Error(Error.from_string('chunk size must be greater than 0'))
+  }
+
   let mut pos = 0
 
   while pos < decoded_str.size {
@@ -1229,7 +1254,8 @@ fn send_text_chunks[H: mut + StreamHandler](
     } else {
       pos + chunk_size
     }
-    let chunk = decoded_str.substring(pos, end)
+    # `slice` takes byte offsets, matching `size`; `substring` is char based.
+    let chunk = decoded_str.slice(pos, end).to_string
 
     let result = if is_html {
       handler.on_html_chunk(chunk)

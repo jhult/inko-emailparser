@@ -651,4 +651,19 @@ JVBERi0='
       case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
+
+  t.test('zero_stream_chunk_size_is_rejected', fn (t) {
+    let mut config = StreamingConfig.new
+
+    config.stream_chunk_size = 0
+
+    let parser = StreamingParser.with_config(config)
+    let handler = MemoryBufferingHandler.new
+    let email = 'From: a@example.com\nTo: b@example.com\nSubject: x\nContent-Type: text/plain\n\nbody'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.true(e.to_message.contains?('stream_chunk_size'))
+    }
+  })
 }

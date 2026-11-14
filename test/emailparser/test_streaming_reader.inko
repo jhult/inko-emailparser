@@ -5,7 +5,9 @@
 # Tests for streaming reader (AsyncReader trait and ByteArrayReader)
 
 import emailparser.error (Error)
-import emailparser.streaming (AttachmentInfo, StreamHandler, StreamingParser)
+import emailparser.streaming (
+  AttachmentInfo, StreamHandler, StreamingConfig, StreamingParser,
+)
 import emailparser.streaming_reader (ByteArrayReader)
 import std.result (Result)
 import std.test (Tests)
@@ -303,6 +305,22 @@ JVBERi0='
         t.equal(handler.attachment_data.clone.into_string, '%PDF-')
       }
       case Error(e) -> panic('parse_async_reader failed: ${e.to_message}')
+    }
+  })
+
+  t.test('parse_async_reader_rejects_zero_chunk_size', fn (t) {
+    let mut config = StreamingConfig.new
+
+    config.stream_chunk_size = 0
+
+    let mut parser = StreamingParser.with_config(config)
+    let mut handler = CollectingHandler.new
+    let raw = 'From: a@example.com\nTo: b@example.com\nSubject: x\nContent-Type: text/plain\n\nbody'
+    let mut reader = ByteArrayReader.from_string(raw)
+
+    match parser.parse_async_reader(mut reader, mut handler) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.true(e.to_message.contains?('stream_chunk_size'))
     }
   })
 }
