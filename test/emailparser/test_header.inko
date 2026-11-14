@@ -64,6 +64,17 @@ fn pub tests(t: mut Tests) {
     t.equal(sanitize_filename('my-file_v2'), Option.Some('my-file_v2'))
   })
 
+  t.test('sanitize_filename_strips_bidi_controls', fn (t) {
+    t.equal(
+      sanitize_filename('r\u{E9}sum\u{E9}\u{202E}fdp.exe'),
+      Option.Some('r\u{E9}sum\u{E9}fdp.exe'),
+    )
+    t.equal(
+      sanitize_filename('a\u{200F}b\u{FEFF}c.txt'),
+      Option.Some('abc.txt'),
+    )
+  })
+
   t.test('sanitize_filename_empty', fn (t) {
     t.equal(sanitize_filename(''), Option.None)
   })

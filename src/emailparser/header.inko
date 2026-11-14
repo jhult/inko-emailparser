@@ -742,6 +742,9 @@ fn pub sanitize_filename(filename: String) -> Option[String] {
         } else if byte == 194 and is_c1_continuation(base, j + 1) {
           # Drop the two-byte UTF-8 encoding of a C1 control.
           j = j + 1
+        } else if bidi_control_length(base, j) > 0 {
+          # Drop bidi/format controls used for extension spoofing.
+          j = j + bidi_control_length(base, j) - 1
         } else if is_reserved_filename_char(byte) {
           clean.push(95) # '_'
         } else {
@@ -823,6 +826,41 @@ fn is_c1_continuation(text: String, index: Int) -> Bool {
     case Ok(byte) -> byte >= 128 and byte <= 159
     case Error(_) -> false
   }
+}
+
+# Length of a bidi/format control sequence at `index`, or 0 if none
+#
+# These characters can reorder how a filename is displayed, which enables
+# extension spoofing (for example "résumé<U+202E>fdp.exe" rendering as
+# "résuméexe.pdf").
+fn bidi_control_length(text: String, index: Int) -> Int {
+  if index + 2 >= text.size { return 0 }
+
+  let b0 = match text.get(index) {
+    case Ok(v) -> v
+    case Error(_) -> return 0
+  }
+  let b1 = match text.get(index + 1) {
+    case Ok(v) -> v
+    case Error(_) -> return 0
+  }
+  let b2 = match text.get(index + 2) {
+    case Ok(v) -> v
+    case Error(_) -> return 0
+  }
+
+  if b0 == 0xE2 and b1 == 0x80 {
+    # U+200E/U+200F and U+200B/U+200C/U+200D
+    if (b2 >= 0x8B and b2 <= 0x8F) or (b2 >= 0xAA and b2 <= 0xAE) { return 3 }
+  }
+
+  # U+2066..U+2069 (isolate controls)
+  if b0 == 0xE2 and b1 == 0x81 and b2 >= 0xA6 and b2 <= 0xA9 { return 3 }
+
+  # U+FEFF (BOM / zero-width no-break space)
+  if b0 == 0xEF and b1 == 0xBB and b2 == 0xBF { return 3 }
+
+  0
 }
 
 # Extract a filename from a Content-Disposition value
