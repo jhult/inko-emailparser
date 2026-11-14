@@ -104,15 +104,29 @@ fn pub merge_multipart_part(
       ),
     )
   } else if ct_main == 'text/plain' {
-    if text_body.none? {
-      new_text_body = Option.Some(decoded_bytes.into_string)
-      text_modified = true
+    let segment = decoded_bytes.into_string
+
+    if text_body.some? {
+      let existing: String = text_body.clone.get
+
+      new_text_body = Option.Some(existing + segment)
+    } else {
+      new_text_body = Option.Some(segment)
     }
+
+    text_modified = true
   } else if ct_main == 'text/html' {
-    if html_body.none? {
-      new_html_body = Option.Some(decoded_bytes.into_string)
-      html_modified = true
+    let segment = decoded_bytes.into_string
+
+    if html_body.some? {
+      let existing: String = html_body.clone.get
+
+      new_html_body = Option.Some(existing + segment)
+    } else {
+      new_html_body = Option.Some(segment)
     }
+
+    html_modified = true
   } else if ct_main.starts_with?('image/') and disp_main == 'inline' {
     new_attachment = Option.Some(
       EmailAttachment.from_decoded_part(
@@ -360,18 +374,30 @@ fn parse_multipart_impl(
                 )
               {
                 case Ok((nested_text, nested_html, nested_atts)) -> {
-                  if text_body.none? {
-                    match nested_text {
-                      case Some(txt) -> text_body = Option.Some(txt)
-                      case None -> {}
+                  match nested_text {
+                    case Some(txt) -> {
+                      if text_body.some? {
+                        let existing: String = text_body.clone.get
+
+                        text_body = Option.Some(existing + txt)
+                      } else {
+                        text_body = Option.Some(txt)
+                      }
                     }
+                    case None -> {}
                   }
 
-                  if html_body.none? {
-                    match nested_html {
-                      case Some(html) -> html_body = Option.Some(html)
-                      case None -> {}
+                  match nested_html {
+                    case Some(html) -> {
+                      if html_body.some? {
+                        let existing: String = html_body.clone.get
+
+                        html_body = Option.Some(existing + html)
+                      } else {
+                        html_body = Option.Some(html)
+                      }
                     }
+                    case None -> {}
                   }
 
                   for att in nested_atts.into_iter {

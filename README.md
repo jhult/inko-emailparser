@@ -451,6 +451,9 @@ type pub ParserConfig {
 - **multipart/related**: HTML with inline resources (images)
 - **Nested multipart**: Any combination of the above
 
+When a message contains more than one `text/plain` part (or more than one
+`text/html` part), their bodies are concatenated in the order they appear.
+
 ## Error Handling
 
 Parser methods return a typed `emailparser.error.Error` value, so callers can

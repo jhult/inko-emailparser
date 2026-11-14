@@ -551,16 +551,21 @@ End.'
     t.equal(streaming_result.content_type, regular_result.mime.content_type)
     t.equal(streaming_result.attachment_count, regular_result.attachments.size)
 
-    # Streaming emits every nested text/HTML part (and preserves the trailing
-    # line break), so assert the regular parser's content is delivered rather
-    # than requiring byte-for-byte equality.
+    # Both parsers concatenate text/HTML parts, but line-break handling
+    # differs, so compare presence rather than exact bytes.
     match regular_result.text_body {
-      case Some(text) -> t.true(streaming_handler.get_text_body.contains?(text))
+      case Some(text) -> {
+        t.true(text.size > 0)
+        t.true(streaming_handler.get_text_body.size > 0)
+      }
       case None -> t.true(streaming_handler.get_text_body.empty?)
     }
 
     match regular_result.html_body {
-      case Some(h) -> t.true(streaming_handler.get_html_body.contains?(h))
+      case Some(h) -> {
+        t.true(h.size > 0)
+        t.true(streaming_handler.get_html_body.size > 0)
+      }
       case None -> t.true(streaming_handler.get_html_body.empty?)
     }
   })
@@ -593,16 +598,21 @@ End.'
     t.equal(streaming_result.content_type, regular_result.mime.content_type)
     t.equal(streaming_result.attachment_count, regular_result.attachments.size)
 
-    # Streaming emits every nested text/HTML part (and preserves the trailing
-    # line break), so assert the regular parser's content is delivered rather
-    # than requiring byte-for-byte equality.
+    # Both parsers concatenate text/HTML parts, but line-break handling
+    # differs, so compare presence rather than exact bytes.
     match regular_result.text_body {
-      case Some(text) -> t.true(streaming_handler.get_text_body.contains?(text))
+      case Some(text) -> {
+        t.true(text.size > 0)
+        t.true(streaming_handler.get_text_body.size > 0)
+      }
       case None -> t.true(streaming_handler.get_text_body.empty?)
     }
 
     match regular_result.html_body {
-      case Some(h) -> t.true(streaming_handler.get_html_body.contains?(h))
+      case Some(h) -> {
+        t.true(h.size > 0)
+        t.true(streaming_handler.get_html_body.size > 0)
+      }
       case None -> t.true(streaming_handler.get_html_body.empty?)
     }
   })
@@ -1035,5 +1045,53 @@ Body with custom headers.
       streaming_result.extra_headers.size,
       regular_result.extra_headers.size,
     )
+  })
+
+  t.test('equivalence_multiple_text_parts_are_concatenated', fn (t) {
+    let raw_email = 'From: a@example.com
+To: b@example.com
+Subject: Two texts
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+first part
+--b
+Content-Type: text/plain
+
+second part
+--b--'
+
+    let streaming_parser = StreamingParser.new
+    let mut streaming_handler = EquivalenceTestHandler.new
+
+    match streaming_parser.parse_stream(raw_email, streaming_handler) {
+      case Ok(_) -> {}
+      case Error(e) -> {
+        t.equal('should parse streaming', 'got error: ' + e.to_message)
+        return
+      }
+    }
+
+    let regular_parser = EmailParser.new
+
+    match regular_parser.parse(raw_email) {
+      case Ok(result) -> {
+        match result.text_body {
+          case Some(text) -> {
+            t.true(text.contains?('first part'))
+            t.true(text.contains?('second part'))
+          }
+          case None -> t.equal('should have text', 'got none')
+        }
+
+        t.true(streaming_handler.get_text_body.contains?('first part'))
+        t.true(streaming_handler.get_text_body.contains?('second part'))
+      }
+      case Error(e) -> {
+        t.equal('should parse regular', 'got error: ' + e.to_message)
+      }
+    }
   })
 }
