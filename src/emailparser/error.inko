@@ -535,3 +535,22 @@ impl Severity {
     }
   }
 }
+
+# Whether a part-level parse error may be skipped in permissive mode
+#
+# The buffered and streaming multipart parsers share this classification so a
+# malformed part is skipped consistently while size and structural limits still
+# abort the parse.
+fn pub is_recoverable_part_error(error: ref Error) -> Bool {
+  let variant = error.variant
+
+  variant == 'MalformedHeader'
+    or variant == 'HeaderWithoutColon'
+    or variant == 'InvalidHeaderFieldName'
+    or variant == 'DuplicateHeader'
+    or variant == 'HeaderValueTooLarge'
+    or variant == 'DecodingFailed'
+    or variant == 'InvalidContentType'
+    or variant == 'NoBodyInPart'
+    or variant == 'MultipartWithoutParts'
+}

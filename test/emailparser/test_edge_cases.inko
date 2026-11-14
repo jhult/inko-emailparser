@@ -1437,4 +1437,63 @@ InvalidContent
       }
     }
   })
+
+  t.test('streaming_base64_attachment_size_limit_errors', fn (t) {
+    let mut config = StreamingConfig.new
+
+    config.max_attachment_size = 10
+
+    let parser = StreamingParser.with_config(config)
+    let mut handler = ErrorTestingHandler.new(0, false)
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Oversized
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+body
+--b
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="big.bin"
+Content-Transfer-Encoding: base64
+
+QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB
+--b--'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.true(e.to_message.contains?('size'))
+    }
+  })
+
+  t.test('buffered_base64_attachment_size_limit_errors', fn (t) {
+    let parser = EmailParser.new.with_max_attachment_size(10)
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Oversized
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+body
+--b
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="big.bin"
+Content-Transfer-Encoding: base64
+
+QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB
+--b--'
+
+    match parser.parse(email) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> {
+        t.true(
+          e.to_message.contains?('size') or e.variant == 'DecodedSizeTooLarge',
+        )
+      }
+    }
+  })
 }

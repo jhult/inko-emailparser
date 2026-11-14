@@ -65,8 +65,7 @@
 
 import emailparser.attachment (EmailAttachment)
 import emailparser.decoder (decode_body_bytes_impl)
-import emailparser.error (Error)
-import emailparser.error (Severity)
+import emailparser.error (Error, Severity, is_recoverable_part_error)
 import emailparser.header (
   extract_filename_param, get_header_value_impl, get_param_value_impl,
   parse_content_disposition_impl, parse_content_type_impl, parse_headers_impl,
@@ -455,9 +454,11 @@ fn parse_multipart_impl(
             }
           }
           case Error(e) -> {
-            # In strict mode, fail on any part parsing error
-            # In permissive mode, skip malformed parts for resilience
-            if strict_mode { return Result.Error(e) }
+            # Strict mode fails on any part error; permissive mode skips
+            # malformed parts but still surfaces size and structural limits.
+            if strict_mode or !is_recoverable_part_error(ref e) {
+              return Result.Error(e)
+            }
           }
         }
       }

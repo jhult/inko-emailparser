@@ -109,25 +109,8 @@ impl Base64StreamingDecoder {
     }
 
     # Check size limit and truncate if necessary
-    let available_space = @size_tracker.remaining_space
-
-    if output.size > available_space {
-      let truncated = ByteArray.new
-      let mut idx = 0
-
-      while idx < available_space {
-        match output.get(idx) {
-          case Ok(b) -> truncated.push(b)
-          case Error(_) -> {}
-        }
-
-        idx = idx + 1
-      }
-
-      let _ = @size_tracker.add(available_space)
-
-      @buffer = ByteArray.new
-      return Result.Ok(truncated)
+    if output.size > @size_tracker.remaining_space {
+      return Result.Error('Decoded size exceeds maximum')
     }
 
     let _ = @size_tracker.add(output.size)
@@ -159,25 +142,8 @@ impl Base64StreamingDecoder {
       case Error(e) -> return Result.Error(e)
     }
 
-    # Check size limit and truncate if necessary
-    let available_space = @size_tracker.remaining_space
-
-    if output.size > available_space {
-      let truncated = ByteArray.new
-      let mut idx = 0
-
-      while idx < available_space {
-        match output.get(idx) {
-          case Ok(b) -> truncated.push(b)
-          case Error(_) -> {}
-        }
-
-        idx = idx + 1
-      }
-
-      let _ = @size_tracker.add(available_space)
-
-      return Result.Ok(truncated)
+    if output.size > @size_tracker.remaining_space {
+      return Result.Error('Decoded size exceeds maximum')
     }
 
     let _ = @size_tracker.add(output.size)

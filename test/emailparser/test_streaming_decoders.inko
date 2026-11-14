@@ -123,14 +123,13 @@ fn pub tests(t: mut Tests) {
   t.test('base64_size_limit', fn (t) {
     let mut decoder = Base64StreamingDecoder.new(3, true)
 
+    # Exceeding the limit is an error, not silent truncation
     match decoder.feed('SGVsbG8=') {
-      case Ok(decoded) -> {
-        t.equal(decoded.size, 3)
-        t.equal(decoder.decoded_size, 3)
-        t.equal(decoded.into_string, 'Hel')
-      }
-      case Error(_) -> t.false(true)
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.true(e.contains?('size'))
     }
+
+    t.equal(decoder.decoded_size, 0)
   })
 
   t.test('base64_invalid_strict', fn (t) {

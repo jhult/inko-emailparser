@@ -13,8 +13,7 @@
 import emailparser (validate_addresses, validate_required_headers)
 import emailparser.address (EmailAddress)
 import emailparser.decoder (decode_body_bytes_impl, decode_body_impl)
-import emailparser.error (Error)
-import emailparser.error (Severity)
+import emailparser.error (Error, Severity, is_recoverable_part_error)
 import emailparser.header (
   extract_extra_headers, extract_filename_param, get_header_value_impl,
   get_param_value_impl, parse_content_disposition_impl, parse_content_type_impl,
@@ -877,14 +876,10 @@ fn stream_body_impl[H: mut + StreamHandler](
               }
             }
           }
-          case Error(e) -> {
-            if strict_mode { return Result.Error(Error.from_string(e)) }
-          }
+          case Error(e) -> return Result.Error(Error.from_string(e))
         }
       }
-      case Error(e) -> {
-        if strict_mode { return Result.Error(Error.from_string(e)) }
-      }
+      case Error(e) -> return Result.Error(Error.from_string(e))
     }
   } else if encoding_lower == 'quoted-printable' {
     let mut d = QuotedPrintableStreamingDecoder.new(max_size, true, false)
@@ -916,10 +911,10 @@ fn stream_body_impl[H: mut + StreamHandler](
               }
             }
           }
-          case Error(_) -> {}
+          case Error(e) -> return Result.Error(Error.from_string(e))
         }
       }
-      case Error(_) -> {}
+      case Error(e) -> return Result.Error(Error.from_string(e))
     }
   } else {
     match decode_body_impl(body_raw, encoding, max_size) {
@@ -1016,9 +1011,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
             }
           }
         }
-        case Error(e) -> {
-          if strict_mode { return Result.Error(Error.from_string(e)) }
-        }
+        case Error(e) -> return Result.Error(Error.from_string(e))
       }
     }
 
@@ -1058,9 +1051,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
                 }
               }
             }
-            case Error(e) -> {
-              if strict_mode { return Result.Error(Error.from_string(e)) }
-            }
+            case Error(e) -> return Result.Error(Error.from_string(e))
           }
         }
         case Error(e) -> return Result.Error(Error.from_string(e))
@@ -1079,9 +1070,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
           }
         }
       }
-      case Error(e) -> {
-        if strict_mode { return Result.Error(Error.from_string(e)) }
-      }
+      case Error(e) -> return Result.Error(Error.from_string(e))
     }
   } else if encoding_lower == 'quoted-printable' {
     let mut decoder = QuotedPrintableStreamingDecoder.new(max_size, true, false)
@@ -1104,7 +1093,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
             }
           }
         }
-        case Error(_) -> {}
+        case Error(e) -> return Result.Error(Error.from_string(e))
       }
     }
 
@@ -1144,7 +1133,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
                 }
               }
             }
-            case Error(_) -> {}
+            case Error(e) -> return Result.Error(Error.from_string(e))
           }
         }
         case Error(e) -> return Result.Error(Error.from_string(e))
@@ -1163,7 +1152,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
           }
         }
       }
-      case Error(_) -> {}
+      case Error(e) -> return Result.Error(Error.from_string(e))
     }
   } else {
     # Passthrough encoding (7bit, 8bit, binary)
@@ -1205,7 +1194,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
                 case Error(e) -> return Result.Error(e)
               }
             }
-            case Error(_) -> {}
+            case Error(e) -> return Result.Error(e)
           }
         }
         case Error(e) -> return Result.Error(Error.from_string(e))
@@ -1536,9 +1525,7 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
             case Error(e) -> return Result.Error(e)
           }
         }
-        case Error(e) -> {
-          if strict_mode { return Result.Error(Error.from_string(e)) }
-        }
+        case Error(e) -> return Result.Error(Error.from_string(e))
       }
     }
 
@@ -1576,9 +1563,7 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
                 case Error(e) -> return Result.Error(e)
               }
             }
-            case Error(e) -> {
-              if strict_mode { return Result.Error(Error.from_string(e)) }
-            }
+            case Error(e) -> return Result.Error(Error.from_string(e))
           }
         }
         case Error(e) -> return Result.Error(Error.from_string(e))
@@ -1594,9 +1579,7 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
           case Error(e) -> return Result.Error(e)
         }
       }
-      case Error(e) -> {
-        if strict_mode { return Result.Error(Error.from_string(e)) }
-      }
+      case Error(e) -> return Result.Error(Error.from_string(e))
     }
   } else if encoding_lower == 'quoted-printable' {
     let mut decoder = QuotedPrintableStreamingDecoder.new(max_size, true, false)
@@ -1617,9 +1600,7 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
             case Error(e) -> return Result.Error(e)
           }
         }
-        case Error(e) -> {
-          if strict_mode { return Result.Error(Error.from_string(e)) }
-        }
+        case Error(e) -> return Result.Error(Error.from_string(e))
       }
     }
 
@@ -1657,9 +1638,7 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
                 case Error(e) -> return Result.Error(e)
               }
             }
-            case Error(e) -> {
-              if strict_mode { return Result.Error(Error.from_string(e)) }
-            }
+            case Error(e) -> return Result.Error(Error.from_string(e))
           }
         }
         case Error(e) -> return Result.Error(Error.from_string(e))
@@ -1675,9 +1654,7 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
           case Error(e) -> return Result.Error(e)
         }
       }
-      case Error(e) -> {
-        if strict_mode { return Result.Error(Error.from_string(e)) }
-      }
+      case Error(e) -> return Result.Error(Error.from_string(e))
     }
   } else {
     # 7bit/8bit/binary: deliver the raw bytes
@@ -2054,7 +2031,7 @@ if
                     }
                   }
                 }
-                case Error(_) -> {}
+                case Error(e) -> return Result.Error(Error.from_string(e))
               }
             }
             case None -> {}
@@ -2102,7 +2079,7 @@ if
                     }
                   }
                 }
-                case Error(_) -> {}
+                case Error(e) -> return Result.Error(Error.from_string(e))
               }
             }
             case None -> {}
@@ -2167,7 +2144,7 @@ if
                       }
                     }
                   }
-                  case Error(_) -> {}
+                  case Error(e) -> return Result.Error(Error.from_string(e))
                 }
               }
               case None -> {}
@@ -2200,7 +2177,7 @@ if
                       }
                     }
                   }
-                  case Error(_) -> {}
+                  case Error(e) -> return Result.Error(Error.from_string(e))
                 }
               }
               case None -> {}
@@ -2279,7 +2256,7 @@ if
           case Ok(decoded) -> {
             if decoded.size > 0 { base64_decoded = Option.Some(decoded) }
           }
-          case Error(_) -> {}
+          case Error(e) -> return Result.Error(Error.from_string(e))
         }
       }
       case None -> {}
@@ -2294,7 +2271,7 @@ if
           case Ok(decoded) -> {
             if decoded.size > 0 { qp_decoded = Option.Some(decoded) }
           }
-          case Error(_) -> {}
+          case Error(e) -> return Result.Error(Error.from_string(e))
         }
       }
       case None -> {}
@@ -2597,26 +2574,6 @@ fn parse_multipart_stream[H: mut + StreamHandler](
   }
 
   Result.Ok(wrapper.attachment_count)
-}
-
-# Whether an error should be skipped as a malformed multipart part
-#
-# The buffered parser skips malformed parts in permissive mode but still fails
-# on size, attachment and structural limits. Keep the streaming paths consistent
-# with that split.
-fn is_recoverable_part_error(error: ref Error) -> Bool {
-  let variant = error.variant
-
-  variant == 'MalformedHeader'
-    or variant == 'HeaderWithoutColon'
-    or variant == 'InvalidHeaderFieldName'
-    or variant == 'DuplicateHeader'
-    or variant == 'HeaderValueTooLarge'
-    or variant == 'DecodingFailed'
-    or variant == 'DecodedSizeTooLarge'
-    or variant == 'InvalidContentType'
-    or variant == 'NoBodyInPart'
-    or variant == 'MultipartWithoutParts'
 }
 
 # Extract and sanitize the filename from a Content-Disposition value
