@@ -12,12 +12,13 @@
 
 import emailparser (validate_addresses, validate_required_headers)
 import emailparser.address (EmailAddress)
-import emailparser.decoder (decode_body_impl)
+import emailparser.decoder (decode_body_bytes_impl, decode_body_impl)
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.header (
   extract_extra_headers, extract_filename_param, get_header_value_impl,
-  get_param_value_impl, parse_content_type_impl, parse_headers_impl,
+  get_param_value_impl, parse_content_disposition_impl, parse_content_type_impl,
+  parse_headers_impl,
 )
 import emailparser.header_extraction (
   parse_address_headers, parse_basic_headers, parse_mime_metadata,
@@ -308,6 +309,13 @@ impl StreamingParser {
       case Error(e) -> return Result.Error(e)
     }
 
+    # Metadata used when the whole message is a single non-text part
+    let single_attachment_info = single_part_attachment_info(
+      ref headers,
+      ct_main,
+      content_transfer_encoding,
+    )
+
     # Parse body with streaming
     let attachment_count = match
       parse_body_stream(
@@ -315,6 +323,7 @@ impl StreamingParser {
         ct_main,
         boundary,
         content_transfer_encoding,
+        single_attachment_info,
         handler,
         @config,
       )
@@ -580,6 +589,12 @@ impl StreamingParser {
     }
 
     # Phase 2: Process body incrementally
+    let single_attachment_info = single_part_attachment_info(
+      ref headers,
+      ct_main,
+      content_transfer_encoding,
+    )
+
     let attachment_count = if is_multipart(ct_main) {
       match boundary.clone {
         case Some(b) -> {
@@ -651,7 +666,36 @@ impl StreamingParser {
         }
       }
     } else {
-      0
+      match
+        process_attachment_reader(
+          reader,
+          initial_body,
+          single_attachment_info,
+          content_transfer_encoding,
+          chunk_size,
+          @config.max_attachment_size,
+          @config.strict_mode,
+          @config.max_email_size,
+          total_bytes,
+          handler,
+        )
+      {
+        case Ok(_) -> 1
+        case Error(e) -> {
+          let failure = e
+
+          match handler.on_error(failure) {
+            case Ok(_) -> {}
+            case Error(err) -> {
+              return Result.Error(
+                Error.from_string('Handler on_error failed: ${err}'),
+              )
+            }
+          }
+
+          return Result.Error(failure)
+        }
+      }
     }
 
     let extra_headers = extract_extra_headers(headers)
@@ -728,6 +772,7 @@ fn parse_body_stream[H: mut + StreamHandler](
   ct_main: String,
   boundary: Option[String],
   content_transfer_encoding: String,
+  attachment_info: AttachmentInfo,
   handler: mut H,
   config: mut StreamingConfig,
 ) -> Result[Int, Error] {
@@ -769,7 +814,14 @@ fn parse_body_stream[H: mut + StreamHandler](
       handler,
     )
   } else {
-    Result.Ok(0)
+    stream_single_attachment(
+      body_raw,
+      attachment_info,
+      content_transfer_encoding,
+      config.stream_chunk_size,
+      config.max_attachment_size,
+      handler,
+    )
   }
 }
 
@@ -1198,6 +1250,488 @@ fn send_text_chunks[H: mut + StreamHandler](
   }
 
   Result.Ok(0)
+}
+
+# Build the attachment metadata for a message whose whole body is one part
+fn single_part_attachment_info(
+  headers: ref Array[(String, String)],
+  content_type: String,
+  encoding: String,
+) -> AttachmentInfo {
+  let mut disposition = 'attachment'
+  let mut filename = Option.None
+
+  match get_header_value_impl(headers, 'Content-Disposition') {
+    case Some(raw) -> {
+      match parse_content_disposition_impl(raw) {
+        case Ok((disp, params)) -> {
+          if !disp.empty? { disposition = disp }
+
+          match get_param_value_impl(ref params, 'filename') {
+            case Some(f) -> filename = Option.Some(f)
+            case None -> {}
+          }
+        }
+        case Error(_) -> {}
+      }
+    }
+    case None -> {}
+  }
+
+  let mut content_id = Option.None
+
+  match get_header_value_impl(headers, 'Content-ID') {
+    case Some(id) -> content_id = Option.Some(id.trim)
+    case None -> {}
+  }
+
+  AttachmentInfo(
+    index: 0,
+    content_type: content_type,
+    filename: filename,
+    content_disposition: disposition,
+    content_id: content_id,
+    size: 0,
+    transfer_encoding: encoding,
+  )
+}
+
+# Deliver an attachment body in chunks of at most `chunk_size` bytes
+fn send_attachment_chunks[H: mut + StreamHandler](
+  decoded: ref ByteArray,
+  chunk_size: Int,
+  info: ref AttachmentInfo,
+  handler: mut H,
+) -> Result[Int, Error] {
+  if chunk_size <= 0 {
+    return Result.Error(Error.from_string('chunk size must be greater than 0'))
+  }
+
+  let mut pos = 0
+
+  while pos < decoded.size {
+    let end = if pos + chunk_size > decoded.size {
+      decoded.size
+    } else {
+      pos + chunk_size
+    }
+
+    let chunk = ByteArray.new
+    let mut i = pos
+
+    while i < end {
+      match decoded.get(i) {
+        case Ok(byte) -> chunk.push(byte)
+        case Error(_) -> {}
+      }
+
+      i = i + 1
+    }
+
+    match handler.on_attachment_chunk(chunk, info) {
+      case Ok(_) -> {}
+      case Error(e) -> {
+        return Result.Error(
+          Error.from_string('Handler on_attachment_chunk failed: ${e}'),
+        )
+      }
+    }
+
+    pos = end
+  }
+
+  Result.Ok(0)
+}
+
+# Stream a non-multipart, non-text body as a single attachment
+fn stream_single_attachment[H: mut + StreamHandler](
+  body_raw: String,
+  info: AttachmentInfo,
+  encoding: String,
+  chunk_size: Int,
+  max_size: Int,
+  handler: mut H,
+) -> Result[Int, Error] {
+  match handler.on_attachment_begin(info) {
+    case Ok(_) -> {}
+    case Error(e) -> {
+      return Result.Error(
+        Error.from_string('Handler on_attachment_begin failed: ${e}'),
+      )
+    }
+  }
+
+  let decoded = match decode_body_bytes_impl(body_raw, encoding, max_size) {
+    case Ok(d) -> d
+    case Error(e) -> return Result.Error(e)
+  }
+
+  match send_attachment_chunks(ref decoded, chunk_size, info, handler) {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
+  }
+
+  match handler.on_attachment_end(info) {
+    case Ok(_) -> {}
+    case Error(e) -> {
+      return Result.Error(
+        Error.from_string('Handler on_attachment_end failed: ${e}'),
+      )
+    }
+  }
+
+  Result.Ok(1)
+}
+
+# Accumulate decoded bytes and emit full chunks to the attachment handler
+fn push_attachment_bytes[H: mut + StreamHandler](
+  pending: mut ByteArray,
+  data: ref ByteArray,
+  chunk_size: Int,
+  info: ref AttachmentInfo,
+  handler: mut H,
+) -> Result[Int, Error] {
+  if chunk_size <= 0 {
+    return Result.Error(Error.from_string('chunk size must be greater than 0'))
+  }
+
+  let mut offset = 0
+
+  # Top up a partial chunk buffered by a previous call
+  if pending.size > 0 {
+    while pending.size < chunk_size and offset < data.size {
+      match data.get(offset) {
+        case Ok(byte) -> pending.push(byte)
+        case Error(_) -> {}
+      }
+
+      offset = offset + 1
+    }
+
+    if pending.size == chunk_size {
+      let chunk = ByteArray.new
+      let mut i = 0
+
+      while i < pending.size {
+        match pending.get(i) {
+          case Ok(byte) -> chunk.push(byte)
+          case Error(_) -> {}
+        }
+
+        i = i + 1
+      }
+
+      pending.clear
+
+      match handler.on_attachment_chunk(chunk, info) {
+        case Ok(_) -> {}
+        case Error(e) -> {
+          return Result.Error(
+            Error.from_string('Handler on_attachment_chunk failed: ${e}'),
+          )
+        }
+      }
+    }
+  }
+
+  # Emit complete chunks straight from the incoming data
+  while (offset + chunk_size) <= data.size {
+    let chunk = ByteArray.new
+    let mut i = offset
+
+    while i < (offset + chunk_size) {
+      match data.get(i) {
+        case Ok(byte) -> chunk.push(byte)
+        case Error(_) -> {}
+      }
+
+      i = i + 1
+    }
+
+    match handler.on_attachment_chunk(chunk, info) {
+      case Ok(_) -> {}
+      case Error(e) -> {
+        return Result.Error(
+          Error.from_string('Handler on_attachment_chunk failed: ${e}'),
+        )
+      }
+    }
+
+    offset = offset + chunk_size
+  }
+
+  # Buffer what's left for the next call or the final flush
+  while offset < data.size {
+    match data.get(offset) {
+      case Ok(byte) -> pending.push(byte)
+      case Error(_) -> {}
+    }
+
+    offset = offset + 1
+  }
+
+  Result.Ok(0)
+}
+
+# Stream a single non-text body from an async reader as an attachment
+fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
+  reader: mut R,
+  initial_body: ByteArray,
+  info: AttachmentInfo,
+  encoding: String,
+  chunk_size: Int,
+  max_size: Int,
+  strict_mode: Bool,
+  max_email_size: Int,
+  start_total_bytes: Int,
+  handler: mut H,
+) -> Result[Int, Error] {
+  match handler.on_attachment_begin(info) {
+    case Ok(_) -> {}
+    case Error(e) -> {
+      return Result.Error(
+        Error.from_string('Handler on_attachment_begin failed: ${e}'),
+      )
+    }
+  }
+
+  let mut total_bytes = start_total_bytes
+  let mut pending = ByteArray.new
+  let encoding_lower = encoding.to_lower
+
+  if encoding_lower == 'base64' {
+    let mut decoder = Base64StreamingDecoder.new(max_size, strict_mode)
+
+    if initial_body.size > 0 {
+      match decoder.feed(initial_body.into_string) {
+        case Ok(decoded) -> {
+          match
+            push_attachment_bytes(
+              pending,
+              ref decoded,
+              chunk_size,
+              info,
+              handler,
+            )
+          {
+            case Ok(_) -> {}
+            case Error(e) -> return Result.Error(e)
+          }
+        }
+        case Error(e) -> {
+          if strict_mode { return Result.Error(Error.from_string(e)) }
+        }
+      }
+    }
+
+    loop {
+      match reader.read(chunk_size) {
+        case Ok(chunk) -> {
+          if chunk.size == 0 { break }
+
+          total_bytes = total_bytes + chunk.size
+
+          if total_bytes > max_email_size {
+            return Result.Error(
+              Error.EmailSizeExceeded(
+                Severity.Error,
+                max_email_size,
+                total_bytes,
+                Option.None,
+                Option.None,
+              ),
+            )
+          }
+
+          match decoder.feed(chunk.into_string) {
+            case Ok(decoded) -> {
+              match
+                push_attachment_bytes(
+                  pending,
+                  ref decoded,
+                  chunk_size,
+                  info,
+                  handler,
+                )
+              {
+                case Ok(_) -> {}
+                case Error(e) -> return Result.Error(e)
+              }
+            }
+            case Error(e) -> {
+              if strict_mode { return Result.Error(Error.from_string(e)) }
+            }
+          }
+        }
+        case Error(e) -> return Result.Error(Error.from_string(e))
+      }
+    }
+
+    match decoder.finish {
+      case Ok(decoded) -> {
+        match
+          push_attachment_bytes(pending, ref decoded, chunk_size, info, handler)
+        {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
+        }
+      }
+      case Error(e) -> {
+        if strict_mode { return Result.Error(Error.from_string(e)) }
+      }
+    }
+  } else if encoding_lower == 'quoted-printable' {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(
+      max_size,
+      strict_mode,
+      false,
+    )
+
+    if initial_body.size > 0 {
+      match decoder.feed(initial_body.into_string) {
+        case Ok(decoded) -> {
+          match
+            push_attachment_bytes(
+              pending,
+              ref decoded,
+              chunk_size,
+              info,
+              handler,
+            )
+          {
+            case Ok(_) -> {}
+            case Error(e) -> return Result.Error(e)
+          }
+        }
+        case Error(e) -> {
+          if strict_mode { return Result.Error(Error.from_string(e)) }
+        }
+      }
+    }
+
+    loop {
+      match reader.read(chunk_size) {
+        case Ok(chunk) -> {
+          if chunk.size == 0 { break }
+
+          total_bytes = total_bytes + chunk.size
+
+          if total_bytes > max_email_size {
+            return Result.Error(
+              Error.EmailSizeExceeded(
+                Severity.Error,
+                max_email_size,
+                total_bytes,
+                Option.None,
+                Option.None,
+              ),
+            )
+          }
+
+          match decoder.feed(chunk.into_string) {
+            case Ok(decoded) -> {
+              match
+                push_attachment_bytes(
+                  pending,
+                  ref decoded,
+                  chunk_size,
+                  info,
+                  handler,
+                )
+              {
+                case Ok(_) -> {}
+                case Error(e) -> return Result.Error(e)
+              }
+            }
+            case Error(e) -> {
+              if strict_mode { return Result.Error(Error.from_string(e)) }
+            }
+          }
+        }
+        case Error(e) -> return Result.Error(Error.from_string(e))
+      }
+    }
+
+    match decoder.finish {
+      case Ok(decoded) -> {
+        match
+          push_attachment_bytes(pending, ref decoded, chunk_size, info, handler)
+        {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
+        }
+      }
+      case Error(e) -> {
+        if strict_mode { return Result.Error(Error.from_string(e)) }
+      }
+    }
+  } else {
+    # 7bit/8bit/binary: deliver the raw bytes
+    match
+      push_attachment_bytes(
+        pending,
+        ref initial_body,
+        chunk_size,
+        info,
+        handler,
+      )
+    {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e)
+    }
+
+    loop {
+      match reader.read(chunk_size) {
+        case Ok(chunk) -> {
+          if chunk.size == 0 { break }
+
+          total_bytes = total_bytes + chunk.size
+
+          if total_bytes > max_email_size {
+            return Result.Error(
+              Error.EmailSizeExceeded(
+                Severity.Error,
+                max_email_size,
+                total_bytes,
+                Option.None,
+                Option.None,
+              ),
+            )
+          }
+
+          match
+            push_attachment_bytes(pending, ref chunk, chunk_size, info, handler)
+          {
+            case Ok(_) -> {}
+            case Error(e) -> return Result.Error(e)
+          }
+        }
+        case Error(e) -> return Result.Error(Error.from_string(e))
+      }
+    }
+  }
+
+  if pending.size > 0 {
+    match handler.on_attachment_chunk(pending, info) {
+      case Ok(_) -> {}
+      case Error(e) -> {
+        return Result.Error(
+          Error.from_string('Handler on_attachment_chunk failed: ${e}'),
+        )
+      }
+    }
+  }
+
+  match handler.on_attachment_end(info) {
+    case Ok(_) -> {}
+    case Error(e) -> {
+      return Result.Error(
+        Error.from_string('Handler on_attachment_end failed: ${e}'),
+      )
+    }
+  }
+
+  Result.Ok(1)
 }
 
 # Process multipart body incrementally from an async reader
