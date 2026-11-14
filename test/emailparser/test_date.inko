@@ -4,7 +4,9 @@
 
 # Tests for RFC 5322 date formatting
 
-import emailparser.date (EmailDateFormatter, format_email_date)
+import emailparser.date (
+  EmailDateFormatter, format_email_date, format_email_date_with_tz,
+)
 import std.test (Tests)
 import std.time (DateTime)
 
@@ -228,5 +230,25 @@ fn pub tests(t: mut Tests) {
     }
 
     t.equal(formatter.format_datetime(date), 'Wed, 31 Dec 1969 18:00:00 -0600')
+  })
+
+  t.test('invalid_timezone_hours_fall_back_to_utc', fn (t) {
+    let too_many_hours = EmailDateFormatter.with_timezone('+9900')
+
+    t.equal(too_many_hours.format_timezone_offset, '+0000')
+
+    let too_many_minutes = EmailDateFormatter.with_timezone('-1260')
+
+    t.equal(too_many_minutes.format_timezone_offset, '+0000')
+
+    let valid = EmailDateFormatter.with_timezone('+1400')
+
+    t.equal(valid.format_timezone_offset, '+1400')
+  })
+
+  t.test('format_with_invalid_timezone_uses_utc', fn (t) {
+    let formatted = format_email_date_with_tz(DateTime.local, '+9999')
+
+    t.true(formatted.ends_with?('+0000'))
   })
 }

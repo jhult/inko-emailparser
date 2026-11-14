@@ -168,7 +168,7 @@ impl EmailDateFormatter {
     } else {
       match parse_timezone_seconds(@timezone) {
         case Some(seconds) -> seconds
-        case None -> date.utc_offset
+        case None -> 0
       }
     }
 
@@ -242,70 +242,13 @@ impl EmailDateFormatter {
     }
   }
 
-  # Format timezone offset
+  # Format timezone offset, falling back to UTC for invalid values
   fn pub format_timezone_offset -> String {
-    # Parse timezone string like "+0000" or "-0500"
-    # Validate timezone format: ±HHMM
-    # Returns format: ±HHMM (RFC 5322 format without colon)
-    if @timezone.size == 5 {
-      match @timezone.get(0) {
-        case Ok(first_byte) -> {
-          # First char must be + or -
-          if first_byte != ASCII_PLUS and first_byte != ASCII_HYPHEN {
-            return '+0000'
-          }
-
-          # Validate remaining 4 chars are digits
-          let mut valid = true
-          let mut i = 1
-
-          while i < 5 {
-            match @timezone.get(i) {
-              case Ok(b) -> {
-                if b < ASCII_DIGIT_0 or b > ASCII_DIGIT_9 {
-                  valid = false
-                  break
-                }
-
-                i = i + 1
-              }
-              case Error(_) -> {
-                valid = false
-                break
-              }
-            }
-          }
-
-          if valid { @timezone.to_string } else { '+0000' }
-        }
-        case Error(_) -> '+0000'
+    match parse_timezone_seconds(@timezone) {
+      case Some(_) -> {
+        if @timezone.size == 5 { @timezone.to_string } else { '+${@timezone}' }
       }
-    } else if @timezone.size == 4 {
-      # Validate all 4 chars are digits, then add + prefix
-      let mut valid = true
-      let mut i = 0
-
-      while i < 4 {
-        match @timezone.get(i) {
-          case Ok(b) -> {
-            if b < ASCII_DIGIT_0 or b > ASCII_DIGIT_9 {
-              valid = false
-              break
-            }
-
-            i = i + 1
-          }
-          case Error(_) -> {
-            valid = false
-            break
-          }
-        }
-      }
-
-      if valid { '+${@timezone}' } else { '+0000' }
-    } else {
-      # Invalid timezone
-      '+0000'
+      case None -> '+0000'
     }
   }
 }
@@ -374,7 +317,7 @@ fn parse_timezone_seconds(timezone: String) -> Option[Int] {
   let hours = (h1 * 10) + h2
   let minutes = (m1 * 10) + m2
 
-  if minutes > 59 { return Option.None }
+  if hours > 23 or minutes > 59 { return Option.None }
 
   Option.Some(sign * ((hours * 3600) + (minutes * 60)))
 }
