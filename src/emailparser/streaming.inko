@@ -1351,10 +1351,24 @@ if
     @current_content_type = main_type
 
     # Nested multipart: buffer the part body and parse it as a new multipart
-    # document when the part ends.
+    # document when the part ends. Reject excessive nesting before buffering
+    # anything so a depth bomb cannot allocate the whole nested payload first.
     if main_type.starts_with?('multipart/') {
       match get_param_value_impl(ref ct_params, 'boundary') {
         case Some(nested_boundary) -> {
+          if @depth + 1 > @max_depth {
+            return Result.Error(
+              Error.MultipartDepthExceeded(
+                Severity.Error,
+                @depth + 1,
+                @max_depth,
+                Option.None,
+                Option.None,
+                Option.None,
+              ),
+            )
+          }
+
           @nested_buffer = Option.Some(ByteArray.new)
           @nested_boundary = Option.Some(nested_boundary)
           return Result.Ok(0)
@@ -1434,7 +1448,8 @@ if
   ) -> Result[Int, Error] {
     match @nested_buffer {
       case Some(mut buffer) -> {
-        buffer.append(data.clone)
+        # `append` takes its argument by reference, so no copy is needed here
+        buffer.append(data)
         return Result.Ok(0)
       }
       case None -> {}
@@ -1663,96 +1678,44 @@ if
   }
 
   fn pub mut on_part_end -> Result[Int, Error] {
-    # Nested multipart: parse the buffered body with a child parser.
-    let mut is_nested = false
-    let mut nested_buffer = ByteArray.new
+    # Nested multipart: hand the buffered body to a child parser. The buffer is
+    # borrowed, not cloned, so the payload exists only once.
     let mut nested_boundary = ''
 
-    match @nested_buffer {
-      case Some(b) -> {
-        nested_buffer = b.clone
-        is_nested = true
-      }
+    match @nested_boundary {
+      case Some(nb) -> nested_boundary = nb
       case None -> {}
     }
 
-    if is_nested {
-      match @nested_boundary {
-        case Some(b) -> nested_boundary = b
+    if !@nested_buffer.none? {
+      match @nested_buffer {
+        case Some(b) -> {
+          if !nested_boundary.empty? {
+            match
+              finish_nested(
+                @handler,
+                ref b,
+                nested_boundary,
+                @attachment_count,
+                @max_size,
+                @chunk_size,
+                @max_headers,
+                @strict_mode,
+                @max_attachments,
+                @depth,
+                @max_depth,
+              )
+            {
+              case Ok(count) -> @attachment_count = count
+              case Error(e) -> return Result.Error(e)
+            }
+          }
+        }
         case None -> {}
       }
 
       @nested_buffer = Option.None
       @nested_boundary = Option.None
-
-      if nested_boundary.empty? { return Result.Ok(0) }
-
-      if @depth + 1 > @max_depth {
-        return Result.Error(
-          Error.MultipartDepthExceeded(
-            Severity.Error,
-            @depth + 1,
-            @max_depth,
-            Option.None,
-            Option.None,
-            Option.None,
-          ),
-        )
-      }
-
-      let mut nested_parser = match
-        MultipartStreamParser.new(
-          nested_boundary,
-          @max_depth,
-          @chunk_size,
-          false,
-          @max_headers,
-          @max_size,
-        )
-      {
-        case Ok(p) -> p
-        case Error(e) -> return Result.Error(e)
-      }
-
-      let mut nested_wrapper = MultipartHandlerWrapper(
-        handler: @handler,
-        attachment_count: @attachment_count,
-        current_info: Option.None,
-        base64_decoder: Option.None,
-        qp_decoder: Option.None,
-        current_encoding: '7bit',
-        current_content_type: 'text/plain',
-        max_size: @max_size,
-        chunk_size: @chunk_size,
-        max_headers: @max_headers,
-        strict_mode: @strict_mode,
-        max_attachments: @max_attachments,
-        current_attachment_size: 0,
-        depth: @depth + 1,
-        max_depth: @max_depth,
-        nested_buffer: Option.None,
-        nested_boundary: Option.None,
-      )
-
-      match nested_parser.feed(ref nested_buffer, nested_wrapper, '7bit') {
-        case Ok(_) -> {}
-        case Error(e) -> {
-          if @strict_mode or !is_recoverable_part_error(ref e) {
-            return Result.Error(e)
-          }
-        }
-      }
-
-      match nested_parser.finish(nested_wrapper) {
-        case Ok(_) -> {}
-        case Error(e) -> {
-          if @strict_mode or !is_recoverable_part_error(ref e) {
-            return Result.Error(e)
-          }
-        }
-      }
-
-      @attachment_count = nested_wrapper.attachment_count
 
       return Result.Ok(0)
     }
@@ -1910,6 +1873,91 @@ if
 
     Result.Ok(0)
   }
+}
+
+# Parse a buffered nested multipart part with a child parser.
+#
+# The buffer is borrowed, not copied: the caller moves the part body out of the
+# wrapper before calling this, so the payload exists only once.
+fn finish_nested[H: mut + StreamHandler](
+  handler: mut H,
+  nested_buffer: ref ByteArray,
+  nested_boundary: String,
+  attachment_count: Int,
+  max_size: Int,
+  chunk_size: Int,
+  max_headers: Int,
+  strict_mode: Bool,
+  max_attachments: Int,
+  depth: Int,
+  max_depth: Int,
+) -> Result[Int, Error] {
+  if depth + 1 > max_depth {
+    return Result.Error(
+      Error.MultipartDepthExceeded(
+        Severity.Error,
+        depth + 1,
+        max_depth,
+        Option.None,
+        Option.None,
+        Option.None,
+      ),
+    )
+  }
+
+  let mut nested_parser = match
+    MultipartStreamParser.new(
+      nested_boundary,
+      max_depth,
+      chunk_size,
+      false,
+      max_headers,
+      max_size,
+    )
+  {
+    case Ok(p) -> p
+    case Error(e) -> return Result.Error(e)
+  }
+
+  let mut nested_wrapper = MultipartHandlerWrapper(
+    handler: handler,
+    attachment_count: attachment_count,
+    current_info: Option.None,
+    base64_decoder: Option.None,
+    qp_decoder: Option.None,
+    current_encoding: '7bit',
+    current_content_type: 'text/plain',
+    max_size: max_size,
+    chunk_size: chunk_size,
+    max_headers: max_headers,
+    strict_mode: strict_mode,
+    max_attachments: max_attachments,
+    current_attachment_size: 0,
+    depth: depth + 1,
+    max_depth: max_depth,
+    nested_buffer: Option.None,
+    nested_boundary: Option.None,
+  )
+
+  match nested_parser.feed(ref nested_buffer, nested_wrapper, '7bit') {
+    case Ok(_) -> {}
+    case Error(e) -> {
+      if strict_mode or !is_recoverable_part_error(ref e) {
+        return Result.Error(e)
+      }
+    }
+  }
+
+  match nested_parser.finish(nested_wrapper) {
+    case Ok(_) -> {}
+    case Error(e) -> {
+      if strict_mode or !is_recoverable_part_error(ref e) {
+        return Result.Error(e)
+      }
+    }
+  }
+
+  Result.Ok(nested_wrapper.attachment_count)
 }
 
 # Parse multipart with streaming using MultipartStreamParser
