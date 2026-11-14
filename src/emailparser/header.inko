@@ -178,6 +178,24 @@ fn parse_headers_impl(
       line_str = line_str.substring(0, line_str.size - 1)
     }
 
+    # A CR that is not part of a CRLF line ending is a header-injection
+    # primitive: reject it in strict mode and neutralise it otherwise.
+    if line_str.contains?('\r') {
+      if strict_mode {
+        return Result.Error(
+          Error.MalformedHeader(
+            Severity.Error,
+            'bare carriage return in header',
+            Option.Some(line_number),
+            Option.None,
+            Option.Some(line_str.clone),
+          ),
+        )
+      }
+
+      line_str = line_str.replace('\r', ' ')
+    }
+
     # Skip empty lines (after stripping CR)
     if line_str.empty? {
       if in_header {

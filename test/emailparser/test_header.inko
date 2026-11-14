@@ -386,6 +386,30 @@ fn pub tests(t: mut Tests) {
     }
   })
 
+  t.test('permissive_mode_neutralises_bare_cr', fn (t) {
+    let parser = EmailParser.new
+    let raw = 'Subject: hello\rBcc: victim@example.com\n\nBody'
+
+    match parser.parse(raw) {
+      case Ok(msg) -> {
+        t.false(msg.subject.contains?('\r'))
+        t.true(msg.subject.contains?('hello'))
+        t.equal(msg.addresses.bcc.size, 0)
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
+  t.test('strict_mode_rejects_bare_cr', fn (t) {
+    let parser = EmailParser.new.with_strict_mode(true)
+    let raw = 'Subject: hello\rBcc: victim@example.com\n\nBody'
+
+    match parser.parse_headers(raw) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.true(e.to_message.contains?('carriage return'))
+    }
+  })
+
   t.test('strict_mode_allows_repeatable_headers', fn (t) {
     let parser = EmailParser.new.with_strict_mode(true)
     let raw = 'Received: from a by b\nReceived: from c by d\nComments: one\nComments: two\n\nBody'
