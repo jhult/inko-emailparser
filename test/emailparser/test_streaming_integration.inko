@@ -666,4 +666,43 @@ JVBERi0='
       case Error(e) -> t.true(e.to_message.contains?('stream_chunk_size'))
     }
   })
+
+  t.test('missing_close_delimiter_keeps_body', fn (t) {
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Truncated
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+Hi there'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.equal(handler.get_text_body, 'Hi there')
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
+  t.test('padded_close_delimiter_at_eof_keeps_body', fn (t) {
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Padded
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+Hi there
+--b  '
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.equal(handler.get_text_body, 'Hi there')
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
 }

@@ -208,7 +208,7 @@ impl MultipartStreamParser {
           }
         }
         case ReadingBody -> {
-          match process_reading_body(self, handler, default_encoding) {
+          match process_reading_body(self, handler, default_encoding, false) {
             case Ok(_) -> {}
             case Error(e) -> return Result.Error(e)
           }
@@ -304,9 +304,24 @@ impl MultipartStreamParser {
         }
       }
       case ReadingBody -> {
-        # Parser stopped while reading body - try to finalize current part
+        # Emit the retained tail and accept a delimiter truncated by EOF
+        match process_reading_body(self, handler, '', true) {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
+        }
+
+        # If the part is still open the closing delimiter is missing: treat
+        # EOF as the end of the part instead of dropping its body.
         match @current_context {
-          case Some(_) -> handler.on_part_end
+          case Some(_) -> {
+            match handler.on_part_end {
+              case Ok(_) -> {}
+              case Error(e) -> return Result.Error(e)
+            }
+
+            @current_context = Option.None
+            Result.Ok(0)
+          }
           case None -> Result.Ok(0)
         }
       }
@@ -326,7 +341,7 @@ fn process_preamble[H: mut + MultipartStreamHandler](
   let boundary_bytes = boundary_marker.to_byte_array
 
   # Scan for first boundary
-  match find_boundary_in_buffer(ref parser.buffer, ref boundary_bytes) {
+  match find_boundary_in_buffer(ref parser.buffer, ref boundary_bytes, false) {
     case Some(pos) -> {
       # Found boundary - advance to AtBoundary state
       # Remove everything up to and including the boundary
@@ -611,27 +626,31 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
   parser: mut MultipartStreamParser,
   handler: mut H,
   default_encoding: String,
+  at_eof: Bool,
 ) -> Result[Int, Error] {
   let boundary_marker = '--' + parser.boundary
   let boundary_bytes = boundary_marker.to_byte_array
 
   # Scan for next boundary
-  match find_boundary_in_buffer(ref parser.buffer, ref boundary_bytes) {
+  match find_boundary_in_buffer(ref parser.buffer, ref boundary_bytes, at_eof) {
     case Some(pos) -> {
       # Found boundary - emit body data before it
       let mut body_data = ByteArray.new
       let mut i = 0
 
-      # Copy body data up to boundary
-      # Per RFC 2046, CRLF before boundary is part of the boundary delimiter, not the body
+      # Copy body data up to boundary.
+      # Per RFC 2046 the CRLF before the boundary belongs to the delimiter.
+      # A bare LF is only treated as delimiter padding at EOF, matching the
+      # existing behaviour for well-formed LF-only messages.
       let body_end = if pos >= 2 {
         match parser.buffer.get(pos - 1) {
           case Ok(b1) -> {
             match parser.buffer.get(pos - 2) {
               case Ok(b2) -> {
-                if b2 == 13 and b1 == 10 {
-                  # Found CRLF before boundary, exclude it
+                if b1 == 10 and b2 == 13 {
                   pos - 2
+                } else if at_eof and b1 == 10 {
+                  pos - 1
                 } else {
                   pos
                 }
@@ -639,6 +658,11 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
               case Error(_) -> pos
             }
           }
+          case Error(_) -> pos
+        }
+      } else if pos >= 1 {
+        match parser.buffer.get(pos - 1) {
+          case Ok(b1) -> if at_eof and b1 == 10 { pos - 1 } else { pos }
           case Error(_) -> pos
         }
       } else {
@@ -706,9 +730,10 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
       Result.Ok(0)
     }
     case None -> {
-      # Boundary not found - emit available data except for safety buffer
+      # Boundary not found - emit available data except for safety buffer.
+      # At EOF there is nothing left to arrive, so emit everything.
       let boundary_size = boundary_bytes.size
-      let safety_buffer = boundary_size + 10 # Keep extra bytes in case boundary is split
+      let safety_buffer = if at_eof { 0 } else { boundary_size + 10 }
 
       if parser.buffer.size > safety_buffer {
         let emit_size = parser.buffer.size - safety_buffer
@@ -765,6 +790,7 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
 fn find_boundary_in_buffer(
   buffer: ref ByteArray,
   boundary: ref ByteArray,
+  at_eof: Bool,
 ) -> Option[Int] {
   if buffer.size < boundary.size { return Option.None }
 
@@ -777,7 +803,7 @@ fn find_boundary_in_buffer(
     if
       is_line_start(ref buffer, i)
         and bytes_match_at(ref buffer, ref boundary, i)
-        and is_valid_boundary_tail(ref buffer, i + boundary.size)
+        and is_valid_boundary_tail(ref buffer, i + boundary.size, at_eof)
     {
       return Option.Some(i)
     }
@@ -827,14 +853,17 @@ fn bytes_match_at(
 #
 # RFC 2046 allows transport padding (spaces/tabs) followed by CRLF, a bare LF,
 # or a second "--" for the close delimiter. An incomplete tail (end of buffer)
-# is rejected so a partial delimiter is not mistaken for a boundary.
-fn is_valid_boundary_tail(buffer: ref ByteArray, pos: Int) -> Bool {
-  if pos >= buffer.size { return false }
+# is rejected while streaming so a partial delimiter is not mistaken for a
+# boundary. At EOF (`at_eof`) an incomplete tail is accepted: the message was
+# simply truncated rather than split across reads.
+fn is_valid_boundary_tail(buffer: ref ByteArray, pos: Int, at_eof: Bool) -> Bool
+{
+  if pos >= buffer.size { return at_eof }
 
   match buffer.get(pos) {
     case Ok(b) -> {
       if b == 13 {
-        if pos + 1 >= buffer.size { return false }
+        if pos + 1 >= buffer.size { return at_eof }
 
         match buffer.get(pos + 1) {
           case Ok(b2) -> b2 == 10
@@ -844,14 +873,14 @@ fn is_valid_boundary_tail(buffer: ref ByteArray, pos: Int) -> Bool {
         true
       } else if b == 45 {
         # Close delimiter is exactly "--"
-        if pos + 1 >= buffer.size { return false }
+        if pos + 1 >= buffer.size { return at_eof }
 
         match buffer.get(pos + 1) {
           case Ok(b2) -> b2 == 45
           case Error(_) -> false
         }
       } else if b == 32 or b == 9 {
-        valid_transport_padding(ref buffer, pos)
+        valid_transport_padding(ref buffer, pos, at_eof)
       } else {
         false
       }
@@ -861,18 +890,22 @@ fn is_valid_boundary_tail(buffer: ref ByteArray, pos: Int) -> Bool {
 }
 
 # Whether `pos` begins transport padding terminated by CRLF/LF
-fn valid_transport_padding(buffer: ref ByteArray, pos: Int) -> Bool {
+fn valid_transport_padding(
+  buffer: ref ByteArray,
+  pos: Int,
+  at_eof: Bool,
+) -> Bool {
   let mut i = pos
 
   loop {
-    if i >= buffer.size { return false }
+    if i >= buffer.size { return at_eof }
 
     match buffer.get(i) {
       case Ok(b) -> {
         if b == 32 or b == 9 {
           i = i + 1
         } else if b == 13 {
-          if i + 1 >= buffer.size { return false }
+          if i + 1 >= buffer.size { return at_eof }
 
           match buffer.get(i + 1) {
             case Ok(b2) -> return b2 == 10
