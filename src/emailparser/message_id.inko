@@ -211,7 +211,7 @@ fn pub parse_message_ids_impl(raw: String) -> Array[String] {
     # Only extract if we found both brackets and they're in the right order
     if lt_pos < raw.size and gt_pos < raw.size and lt_pos < gt_pos {
       # Extract from angle brackets
-      let msg_id = raw.substring(lt_pos + 1, gt_pos).trim
+      let msg_id = raw.slice(lt_pos + 1, gt_pos).to_string.trim
 
       # Only add non-empty message IDs
       if msg_id.empty? == false { result.push(msg_id) }
@@ -247,7 +247,7 @@ impl MessageIdGenerator {
     let random = rng.int.to_string
 
     let rand_part = if random.size >= 16 {
-      random.substring(0, 16)
+      random.slice(0, 16).to_string
     } else {
       random
     }
@@ -262,7 +262,7 @@ impl MessageIdGenerator {
     let random = rng.int.to_string
 
     let rand_part = if random.size >= 12 {
-      random.substring(0, 12)
+      random.slice(0, 12).to_string
     } else {
       random
     }
@@ -290,12 +290,12 @@ impl MessageIdGenerator {
           # Extract local part (id-left) - everything between < and @
           let local_start = 1
           let local_end = at_pos
-          let local_part = message_id.substring(local_start, local_end)
+          let local_part = message_id.slice(local_start, local_end).to_string
 
           # Extract domain part (id-right) - everything between @ and >
           let domain_start = at_pos + 1
           let domain_end = message_id.size - 1
-          let domain_part = message_id.substring(domain_start, domain_end)
+          let domain_part = message_id.slice(domain_start, domain_end).to_string
 
           # Validate local part (id-left): dot-atom-text per RFC 5322
           # RFC 5322: id-left = dot-atom-text / obs-id-left
@@ -394,13 +394,13 @@ impl MessageIdGenerator {
   # Removes leading '<' and trailing '>' if present
   fn strip_angle_brackets(s: String) -> String {
     let without_start = if s.starts_with?('<') {
-      s.substring(1, s.size)
+      s.slice(1, s.size).to_string
     } else {
       s
     }
 
     if without_start.ends_with?('>') {
-      without_start.substring(0, without_start.size - 1)
+      without_start.slice(0, without_start.size - 1).to_string
     } else {
       without_start
     }
@@ -411,7 +411,7 @@ impl MessageIdGenerator {
     let without_brackets = strip_angle_brackets(message_id)
 
     match without_brackets.index_of('@', 0) {
-      case Some(pos) -> without_brackets.substring(0, pos)
+      case Some(pos) -> without_brackets.slice(0, pos).to_string
       case None -> without_brackets
     }
   }
@@ -422,7 +422,7 @@ impl MessageIdGenerator {
 
     match without_brackets.index_of('@', 0) {
       case Some(pos) -> {
-        without_brackets.substring(pos + 1, without_brackets.size)
+        without_brackets.slice(pos + 1, without_brackets.size).to_string
       }
       case None -> ''
     }

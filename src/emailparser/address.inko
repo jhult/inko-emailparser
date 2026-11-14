@@ -99,7 +99,7 @@ fn pub remove_comments(input: String) -> String {
 fn pub unquote_string(input: String) -> String {
   if !is_quoted_string(input) { return input }
 
-  let inner = input.substring(1, input.size - 1)
+  let inner = input.slice(1, input.size - 1).to_string
   let result = ByteArray.new
   let mut i = 0
 
@@ -142,7 +142,7 @@ fn pub extract_display_name(input: String) -> (Option[String], String) {
   match trimmed.index_of('<', 0) {
     case Some(lt_pos) -> {
       if lt_pos > 0 {
-        let name_part = trimmed.substring(0, lt_pos).trim
+        let name_part = trimmed.slice(0, lt_pos).to_string.trim
         let name = if is_quoted_string(name_part) {
           unquote_string(name_part)
         } else {
@@ -172,7 +172,7 @@ fn pub is_valid_email_format(email: String) -> Bool {
 
   if email.index_of('@', at_pos + 1).some? { return false }
 
-  let local_part = email.substring(0, at_pos)
+  let local_part = email.slice(0, at_pos).to_string
 
   if local_part.empty? { return false }
 
@@ -202,7 +202,7 @@ fn pub is_valid_email_format(email: String) -> Bool {
 
   if !local_valid { return false }
 
-  let domain = email.substring(at_pos + 1, email.size)
+  let domain = email.slice(at_pos + 1, email.size).to_string
 
   if domain.empty? { return false }
 
@@ -248,7 +248,9 @@ fn extract_angle_bracket_content(input: String) -> String {
   let gt_pos = input.index_of('>', 0)
 
   match (lt_pos, gt_pos) {
-    case (Some(lt), Some(gt)) if lt < gt -> input.substring(lt + 1, gt).trim
+    case (Some(lt), Some(gt)) if lt < gt -> {
+      input.slice(lt + 1, gt).to_string.trim
+    }
     case _ -> input.trim
   }
 }
@@ -409,12 +411,12 @@ fn parse_address_list_impl(
 
       match group_colon_opt {
         case Some(colon) -> {
-          let _group_name = decoded.substring(0, colon).trim
-          let group_content = decoded.substring(colon + 1, decoded.size)
+          let _group_name = decoded.slice(0, colon).to_string.trim
+          let group_content = decoded.slice(colon + 1, decoded.size).to_string
 
           let semi_pos = group_content.index_of(';', 0)
           let content = match semi_pos {
-            case Some(pos) -> group_content.substring(0, pos)
+            case Some(pos) -> group_content.slice(0, pos).to_string
             case None -> group_content
           }
 

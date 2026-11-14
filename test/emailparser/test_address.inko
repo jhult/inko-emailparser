@@ -398,4 +398,39 @@ fn pub tests(t: mut Tests) {
     t.false(is_valid_email_format('a@b.-c.com'))
     t.false(is_valid_email_format('a@b.c-.com'))
   })
+
+  t.test('extract_display_name_non_ascii', fn (t) {
+    let (name, rest) = extract_display_name('Müller <m@example.com>')
+
+    match name {
+      case Some(value) -> t.equal(value, 'Müller')
+      case None -> t.false(true)
+    }
+
+    t.equal(rest, 'Müller <m@example.com>')
+  })
+
+  t.test('parse_address_non_ascii_display_name', fn (t) {
+    let addresses = parse_comma_separated_addresses(
+      'Müller <m@example.com>, 日本語 <jp@example.com>',
+    )
+
+    t.equal(addresses.size, 2)
+
+    match addresses.get(0) {
+      case Ok(addr) -> {
+        t.equal(addr.address, 'm@example.com')
+        t.equal(addr.name, Option.Some('Müller'))
+      }
+      case Error(_) -> t.false(true)
+    }
+
+    match addresses.get(1) {
+      case Ok(addr) -> {
+        t.equal(addr.address, 'jp@example.com')
+        t.equal(addr.name, Option.Some('日本語'))
+      }
+      case Error(_) -> t.false(true)
+    }
+  })
 }

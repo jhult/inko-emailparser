@@ -271,4 +271,18 @@ A'
       case Error(_) -> t.true(true)
     }
   })
+
+  t.test('strict_mode_accepts_non_ascii_display_names', fn (t) {
+    let parser = EmailParser.new.with_strict_mode(true)
+    let raw = 'From: Müller <m@example.com>\nTo: 日本語 <jp@example.com>\nSubject: x\n\nBody'
+
+    match parser.parse(raw) {
+      case Ok(msg) -> {
+        t.equal(msg.addresses.from.address, 'm@example.com')
+        t.equal(msg.addresses.from.name, Option.Some('Müller'))
+        t.equal(msg.addresses.to.size, 1)
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
 }
