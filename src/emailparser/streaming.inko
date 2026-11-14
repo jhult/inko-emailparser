@@ -10,6 +10,7 @@
 #
 # See docs/streaming-api.md for complete design documentation.
 
+import emailparser (validate_addresses, validate_required_headers)
 import emailparser.address (EmailAddress)
 import emailparser.decoder (decode_body_impl)
 import emailparser.error (Error)
@@ -256,6 +257,41 @@ impl StreamingParser {
       ref headers,
     )
 
+    # Run the same validators as the buffered parser
+    match validate_required_headers(ref headers, @config.strict_mode) {
+      case Ok(_) -> {}
+      case Error(e) -> {
+        match handler.on_error(e) {
+          case Ok(_) -> {}
+          case Error(err) -> {
+            return Result.Error(
+              Error.from_string('Handler on_error failed: ${err}'),
+            )
+          }
+        }
+
+        return Result.Error(e)
+      }
+    }
+
+    match
+      validate_addresses(ref from, ref to, ref cc, ref bcc, @config.strict_mode)
+    {
+      case Ok(_) -> {}
+      case Error(e) -> {
+        match handler.on_error(e) {
+          case Ok(_) -> {}
+          case Error(err) -> {
+            return Result.Error(
+              Error.from_string('Handler on_error failed: ${err}'),
+            )
+          }
+        }
+
+        return Result.Error(e)
+      }
+    }
+
     let (ct_main, ct_params, content_transfer_encoding, charset) = match
       parse_mime_metadata(ref headers)
     {
@@ -494,6 +530,42 @@ impl StreamingParser {
     let (in_reply_to, references, thread_id) = parse_threading_headers(
       ref headers,
     )
+
+    # Run the same validators as the buffered parser
+    match validate_required_headers(ref headers, @config.strict_mode) {
+      case Ok(_) -> {}
+      case Error(e) -> {
+        match handler.on_error(e) {
+          case Ok(_) -> {}
+          case Error(err) -> {
+            return Result.Error(
+              Error.from_string('Handler on_error failed: ${err}'),
+            )
+          }
+        }
+
+        return Result.Error(e)
+      }
+    }
+
+    match
+      validate_addresses(ref from, ref to, ref cc, ref bcc, @config.strict_mode)
+    {
+      case Ok(_) -> {}
+      case Error(e) -> {
+        match handler.on_error(e) {
+          case Ok(_) -> {}
+          case Error(err) -> {
+            return Result.Error(
+              Error.from_string('Handler on_error failed: ${err}'),
+            )
+          }
+        }
+
+        return Result.Error(e)
+      }
+    }
+
     let (ct_main, ct_params, content_transfer_encoding, charset) = match
       parse_mime_metadata(ref headers)
     {
@@ -1186,7 +1258,11 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
   if initial_body.size > 0 {
     match parser.feed(ref initial_body, wrapper, default_encoding) {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error(e)
+      case Error(e) -> {
+        if strict_mode or !is_recoverable_part_error(ref e) {
+          return Result.Error(e)
+        }
+      }
     }
   }
 
@@ -1212,7 +1288,13 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
 
         match parser.feed(ref chunk, wrapper, default_encoding) {
           case Ok(_) -> {}
-          case Error(e) -> return Result.Error(e)
+          case Error(e) -> {
+            if strict_mode or !is_recoverable_part_error(ref e) {
+              return Result.Error(e)
+            }
+
+            break
+          }
         }
       }
       case Error(e) -> return Result.Error(Error.from_string(e))
@@ -1221,7 +1303,11 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
 
   match parser.finish(wrapper) {
     case Ok(_) -> {}
-    case Error(e) -> return Result.Error(e)
+    case Error(e) -> {
+      if strict_mode or !is_recoverable_part_error(ref e) {
+        return Result.Error(e)
+      }
+    }
   }
 
   Result.Ok(wrapper.attachment_count)
@@ -1637,12 +1723,20 @@ if
 
       match nested_parser.feed(ref nested_buffer, nested_wrapper, '7bit') {
         case Ok(_) -> {}
-        case Error(e) -> return Result.Error(e)
+        case Error(e) -> {
+          if @strict_mode or !is_recoverable_part_error(ref e) {
+            return Result.Error(e)
+          }
+        }
       }
 
       match nested_parser.finish(nested_wrapper) {
         case Ok(_) -> {}
-        case Error(e) -> return Result.Error(e)
+        case Error(e) -> {
+          if @strict_mode or !is_recoverable_part_error(ref e) {
+            return Result.Error(e)
+          }
+        }
       }
 
       @attachment_count = nested_wrapper.attachment_count
@@ -1890,15 +1984,43 @@ fn parse_multipart_stream[H: mut + StreamHandler](
 
   match parser.feed(ref data, wrapper, default_encoding) {
     case Ok(_) -> {}
-    case Error(e) -> return Result.Error(e)
+    case Error(e) -> {
+      if strict_mode or !is_recoverable_part_error(ref e) {
+        return Result.Error(e)
+      }
+    }
   }
 
   match parser.finish(wrapper) {
     case Ok(_) -> {}
-    case Error(e) -> return Result.Error(e)
+    case Error(e) -> {
+      if strict_mode or !is_recoverable_part_error(ref e) {
+        return Result.Error(e)
+      }
+    }
   }
 
   Result.Ok(wrapper.attachment_count)
+}
+
+# Whether an error should be skipped as a malformed multipart part
+#
+# The buffered parser skips malformed parts in permissive mode but still fails
+# on size, attachment and structural limits. Keep the streaming paths consistent
+# with that split.
+fn is_recoverable_part_error(error: ref Error) -> Bool {
+  let variant = error.variant
+
+  variant == 'MalformedHeader'
+    or variant == 'HeaderWithoutColon'
+    or variant == 'InvalidHeaderFieldName'
+    or variant == 'DuplicateHeader'
+    or variant == 'HeaderValueTooLarge'
+    or variant == 'DecodingFailed'
+    or variant == 'DecodedSizeTooLarge'
+    or variant == 'InvalidContentType'
+    or variant == 'NoBodyInPart'
+    or variant == 'MultipartWithoutParts'
 }
 
 # Extract and sanitize the filename from a Content-Disposition value
