@@ -705,4 +705,56 @@ Hi there
       case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
+
+  t.test('qp_body_preserves_literal_equals', fn (t) {
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: QP
+Content-Type: text/plain
+Content-Transfer-Encoding: quoted-printable
+
+a=ZZb'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.equal(handler.get_text_body, 'a=ZZb')
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
+  t.test('qp_attachment_preserves_literal_equals', fn (t) {
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: QP
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+body
+--b
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="f.bin"
+Content-Transfer-Encoding: quoted-printable
+
+a=ZZb
+--b--'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> {
+        let attachments = handler.get_attachments
+
+        t.equal(attachments.size, 1)
+
+        match attachments.get(0) {
+          case Ok((_, data)) -> t.equal(data.clone.into_string.trim, 'a=ZZb')
+          case Error(_) -> t.false(true)
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
 }

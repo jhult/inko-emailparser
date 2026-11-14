@@ -887,11 +887,7 @@ fn stream_body_impl[H: mut + StreamHandler](
       }
     }
   } else if encoding_lower == 'quoted-printable' {
-    let mut d = QuotedPrintableStreamingDecoder.new(
-      max_size,
-      strict_mode,
-      false,
-    )
+    let mut d = QuotedPrintableStreamingDecoder.new(max_size, true, false)
 
     match d.feed(body_raw) {
       case Ok(decoded) -> {
@@ -1088,11 +1084,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
       }
     }
   } else if encoding_lower == 'quoted-printable' {
-    let mut decoder = QuotedPrintableStreamingDecoder.new(
-      max_size,
-      strict_mode,
-      false,
-    )
+    let mut decoder = QuotedPrintableStreamingDecoder.new(max_size, true, false)
 
     # Feed initial body data
     if initial_body.size > 0 {
@@ -1607,11 +1599,7 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
       }
     }
   } else if encoding_lower == 'quoted-printable' {
-    let mut decoder = QuotedPrintableStreamingDecoder.new(
-      max_size,
-      strict_mode,
-      false,
-    )
+    let mut decoder = QuotedPrintableStreamingDecoder.new(max_size, true, false)
 
     if initial_body.size > 0 {
       match decoder.feed(initial_body.into_string) {
@@ -2075,7 +2063,7 @@ if
           match @qp_decoder {
             case None -> {
               @qp_decoder = Option.Some(
-                QuotedPrintableStreamingDecoder.new(@max_size, false, false),
+                QuotedPrintableStreamingDecoder.new(@max_size, true, false),
               )
             }
             case Some(_) -> {}
@@ -2188,7 +2176,7 @@ if
             match @qp_decoder {
               case None -> {
                 @qp_decoder = Option.Some(
-                  QuotedPrintableStreamingDecoder.new(@max_size, false, false),
+                  QuotedPrintableStreamingDecoder.new(@max_size, true, false),
                 )
               }
               case Some(_) -> {}
