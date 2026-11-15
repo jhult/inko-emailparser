@@ -10,15 +10,19 @@
 #
 # Key features demonstrated:
 # - Incremental file writing (write chunks as they arrive)
-# - Filename sanitization (prevent path traversal attacks)
+# - Filename sanitization (via `emailparser.header.sanitize_filename`, which
+#   strips path components, control characters and platform-reserved names)
 # - Verbose progress output
 # - I/O error handling
+#
+# The output directory is created on start. Attachments without a usable
+# filename (or with one that cannot be sanitized) are skipped.
 
 import emailparser.email_generator (TestAttachment, TestDataGenerator)
 import emailparser.error (Error)
-import emailparser.streaming (
-  AttachmentInfo, StreamHandler, StreamingParser, StreamingResult,
-)
+import emailparser.header (sanitize_filename)
+import emailparser.streaming (AttachmentInfo, StreamHandler, StreamingParser)
+import std.fs.file (WriteOnlyFile)
 import std.stdio (Stderr, Stdout)
 
 # FileAttachmentSaver saves attachments to disk incrementally
@@ -39,11 +43,22 @@ type OutputFile {
   let mut @filename: String
   let mut @chunk_count: Int
   let mut @total_bytes: Int
+  let mut @file: WriteOnlyFile
 }
 
 impl OutputFile {
-  fn pub static new(path: String, filename: String) -> OutputFile {
-    OutputFile(path: path, filename: filename, chunk_count: 0, total_bytes: 0)
+  fn pub static new(
+    path: String,
+    filename: String,
+    file: WriteOnlyFile,
+  ) -> OutputFile {
+    OutputFile(
+      path: path,
+      filename: filename,
+      chunk_count: 0,
+      total_bytes: 0,
+      file: file,
+    )
   }
 }
 
@@ -67,44 +82,19 @@ impl FileAttachmentSaver {
     @attachment_count
   }
 
-  # Sanitize a filename to prevent path traversal attacks
-  #
-  # Removes or replaces dangerous characters like path separators.
-  fn mut sanitize_filename(name: String) -> String {
-    let mut result = recover ByteArray.new
-    let mut i = 0
-
-    while i < name.size {
-      match name.get(i) {
-        case Ok(byte) -> {
-          # Replace path separators with underscores
-          if byte == 47 or byte == 92 {
-            result.push(95)
-          } else if byte == 0 {
-            # Remove null bytes
-          } else {
-            result.push(byte)
-          }
-        }
-        case Error(_) -> {}
-      }
-
-      i = i + 1
-    }
-
-    result.into_string
-  }
-
   # Create a safe output path for an attachment
   #
-  # Combines output directory with sanitized filename.
-  fn mut create_output_path(filename: String) -> String {
-    let safe_name = sanitize_filename(filename)
-
-    # Prefix with attachment index to avoid collisions
-    let prefix = @attachment_count.to_string + '_'
-
-    @output_dir + '/' + prefix + safe_name
+  # Uses the library's `sanitize_filename`, which strips path components,
+  # control characters, bidi overrides and Windows-reserved names.
+  fn mut create_output_path(filename: String) -> Option[String] {
+    match sanitize_filename(filename) {
+      case Some(safe_name) -> {
+        Option.Some(
+          @output_dir + '/' + @attachment_count.to_string + '_' + safe_name,
+        )
+      }
+      case None -> Option.None
+    }
   }
 }
 
@@ -112,6 +102,14 @@ impl StreamHandler for FileAttachmentSaver {
   # Called when parsing begins
   fn pub mut on_begin -> Result[Int, String] {
     @attachment_count = 0
+
+    # Create the output directory (and any parents) before writing files
+    match @output_dir.to_path.create_directory_all {
+      case Ok(_) -> {}
+      case Error(e) -> {
+        return Result.Error('cannot create output directory: ${e}')
+      }
+    }
 
     if @verbose {
       let _ = Stdout.new.print('Starting email parsing...')
@@ -159,10 +157,38 @@ impl StreamHandler for FileAttachmentSaver {
   fn pub mut on_attachment_begin(
     info: ref AttachmentInfo,
   ) -> Result[Int, String] {
-    match info.filename {
-      case Some(filename) -> {
-        let output_path = create_output_path(filename)
+    let filename = match info.filename {
+      case Some(name) -> name
+      case None -> {
+        if @verbose {
+          let _ = Stdout.new.print(
+            'Attachment #' + info.index.to_string + ': unnamed (skipping)',
+          )
+        }
 
+        @current_file = Option.None
+        return Result.Ok(0)
+      }
+    }
+
+    let output_path = match create_output_path(filename.clone) {
+      case Some(path) -> path
+      case None -> {
+        if @verbose {
+          let _ = Stdout.new.print(
+            'Attachment #'
+              + info.index.to_string
+              + ': unusable filename (skipping)',
+          )
+        }
+
+        @current_file = Option.None
+        return Result.Ok(0)
+      }
+    }
+
+    match WriteOnlyFile.new(output_path.to_path) {
+      case Ok(file) -> {
         if @verbose {
           let _ = Stdout.new.print(
             'Attachment #' + info.index.to_string + ': ' + filename,
@@ -172,14 +198,13 @@ impl StreamHandler for FileAttachmentSaver {
           let _ = Stdout.new.print('  Saving to: ' + output_path)
         }
 
-        # Create output file tracker (simulating file creation)
-        @current_file = Option.Some(OutputFile.new(output_path, filename))
+        @current_file = Option.Some(OutputFile.new(output_path, filename, file))
         @attachment_count = @attachment_count + 1
       }
-      case None -> {
+      case Error(e) -> {
         if @verbose {
-          let _ = Stdout.new.print(
-            'Attachment #' + info.index.to_string + ': unnamed (skipping)',
+          let _ = Stderr.new.print(
+            'Failed to create ' + output_path + ': ' + e.to_string,
           )
         }
 
@@ -199,8 +224,13 @@ impl StreamHandler for FileAttachmentSaver {
   ) -> Result[Int, String] {
     match @current_file {
       case Some(mut file) -> {
-        # In a real implementation, this would write to disk
-        # For this example, we simulate writing by tracking stats
+        match file.file.write(ref chunk) {
+          case Ok(_) -> {}
+          case Error(e) -> {
+            return Result.Error('failed to write ' + file.path + ': ${e}')
+          }
+        }
+
         file.total_bytes = file.total_bytes + chunk.size
         file.chunk_count = file.chunk_count + 1
 
@@ -230,7 +260,14 @@ impl StreamHandler for FileAttachmentSaver {
   fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String]
   {
     match @current_file {
-      case Some(file) -> {
+      case Some(mut file) -> {
+        match file.file.flush {
+          case Ok(_) -> {}
+          case Error(e) -> {
+            return Result.Error('failed to flush ' + file.path + ': ${e}')
+          }
+        }
+
         if @verbose {
           let _ = Stdout.new.print(
             '  Completed: '
@@ -240,8 +277,6 @@ impl StreamHandler for FileAttachmentSaver {
               + ' bytes total',
           )
         }
-
-        @current_file = Option.None
       }
       case None -> {}
     }
@@ -277,7 +312,7 @@ type async Main {
 
     let _ = out.print('=== FileAttachmentSaver Example ===')
     let _ = out.print(
-      'This example demonstrates saving email attachments to disk',
+      'Attachments are written to ./attachments as their chunks arrive',
     )
     let _ = out.print('')
 
