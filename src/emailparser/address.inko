@@ -49,10 +49,14 @@
 #   - 3.4.2: Angle Bracket and Comment Syntax
 #
 import emailparser.ascii (
-  UNICODE_REPLACEMENT_CHAR_UTF8, is_alnum, is_domain_char,
+  ASCII_BACKSLASH, ASCII_COLON, ASCII_CR, ASCII_DOT, ASCII_DQUOTE, ASCII_HYPHEN,
+  ASCII_LF, ASCII_SPACE, UNICODE_REPLACEMENT_CHAR_UTF8, is_alnum,
   is_email_local_special,
 )
-import emailparser.validation (is_quoted_string)
+import emailparser.limits (
+  MAX_DOMAIN_SIZE, MAX_EMAIL_ADDRESS_SIZE, MAX_LOCAL_PART_SIZE,
+)
+import emailparser.validation (is_quoted_string, is_valid_domain)
 import std.bytes (ByteArray)
 import std.option (Option)
 
@@ -167,8 +171,14 @@ fn pub extract_display_name(input: String) -> (Option[String], String) {
   }
 }
 
+# Validate the form of an email address (RFC 5321/5322)
+#
+# Accepts dot-atom local parts, quoted-string local parts ("a b"@example.com)
+# and address literals (a@[192.168.0.1]). Lengths follow RFC 5321: 64 octets
+# for the local part, 255 for the domain and 254 for the whole address.
+# Domains are validated by `is_valid_domain`, which `message_id` shares.
 fn pub is_valid_email_format(email: String) -> Bool {
-  if email.empty? { return false }
+  if email.empty? or email.size > MAX_EMAIL_ADDRESS_SIZE { return false }
 
   let at_pos = match email.index_of('@', 0) {
     case Some(pos) -> pos
@@ -183,65 +193,163 @@ fn pub is_valid_email_format(email: String) -> Bool {
 
   let local_part = email.slice(0, at_pos).to_string
 
-  if local_part.empty? { return false }
+  if local_part.empty? or local_part.size > MAX_LOCAL_PART_SIZE { return false }
 
-  # dot-atom-text: no leading/trailing/consecutive dots (RFC 5322 3.2.3)
-  if
-    local_part.starts_with?('.')
-      or local_part.ends_with?('.')
-      or local_part.contains?('..')
-  {
-    return false
-  }
-
-  let mut local_valid = false
-  let mut i = 0
-
-  while i < local_part.size {
-    match local_part.get(i) {
-      case Ok(byte) -> {
-        if !(is_alnum(byte) or is_email_local_special(byte)) { return false }
-
-        local_valid = true
-        i = i + 1
-      }
-      case Error(_) -> return false
+  if is_quoted_string(local_part) {
+    if !is_valid_quoted_local_part(local_part) { return false }
+  } else {
+    # dot-atom-text: no leading/trailing/consecutive dots (RFC 5322 3.2.3)
+    if
+      local_part.starts_with?('.')
+        or local_part.ends_with?('.')
+        or local_part.contains?('..')
+    {
+      return false
     }
-  }
 
-  if !local_valid { return false }
+    let mut local_valid = false
+    let mut i = 0
+
+    while i < local_part.size {
+      match local_part.get(i) {
+        case Ok(byte) -> {
+          if !(is_alnum(byte) or is_email_local_special(byte)) { return false }
+
+          local_valid = true
+          i = i + 1
+        }
+        case Error(_) -> return false
+      }
+    }
+
+    if !local_valid { return false }
+  }
 
   let domain = email.slice(at_pos + 1, email.size).to_string
 
   if domain.empty? { return false }
 
-  if domain.starts_with?('.') or domain.starts_with?('-') { return false }
+  if is_valid_domain(domain) { return true }
 
-  if domain.ends_with?('.') or domain.ends_with?('-') { return false }
+  is_valid_address_literal(domain)
+}
 
-  # No empty labels and no label starting/ending with a hyphen
-  if
-    domain.contains?('..') or domain.contains?('.-') or domain.contains?('-.')
-  {
-    return false
+# Validate the content of a quoted-string local part (without the quotes)
+fn is_valid_quoted_local_part(local: String) -> Bool {
+  let inner = local.slice(1, local.size - 1).to_string
+  let mut i = 0
+
+  while i < inner.size {
+    match inner.get(i) {
+      case Ok(byte) -> {
+        if byte == ASCII_BACKSLASH {
+          # An escape must have a character to escape
+          if i + 1 >= inner.size { return false }
+
+          i = i + 2
+        } else {
+          # qtextSMTP: printable ASCII, space and non-ASCII; no bare quote
+          if
+            byte == ASCII_DQUOTE
+              or byte == ASCII_CR
+              or byte == ASCII_LF
+              or byte < ASCII_SPACE
+              or byte == 127
+          {
+            return false
+          }
+
+          i = i + 1
+        }
+      }
+      case Error(_) -> return false
+    }
   }
 
+  true
+}
+
+# Validate an address literal domain such as "[192.168.0.1]" or "[IPv6:::1]"
+fn is_valid_address_literal(domain: String) -> Bool {
+  if domain.size < 3 { return false }
+
+  if !domain.starts_with?('[') or !domain.ends_with?(']') { return false }
+
+  let inner = domain.slice(1, domain.size - 1).to_string
+
+  if inner.empty? or inner.size > MAX_DOMAIN_SIZE { return false }
+
+  let mut has_colon = false
   let mut i = 0
-  let mut domain_valid = false
 
-  while i < domain.size {
-    match domain.get(i) {
+  while i < inner.size {
+    match inner.get(i) {
       case Ok(byte) -> {
-        if !is_domain_char(byte) { return false }
+        if
+          byte == ASCII_DOT
+            or is_alnum(byte)
+            or byte == ASCII_COLON
+            or byte == ASCII_HYPHEN
+        {
+          if byte == ASCII_COLON { has_colon = true }
+        } else {
+          return false
+        }
 
-        domain_valid = true
         i = i + 1
       }
       case Error(_) -> return false
     }
   }
 
-  domain_valid
+  # IPv6 (and IPv6: prefixed) literals carry colons; otherwise require a
+  # dotted-quad IPv4 address.
+  if has_colon { return true }
+
+  is_valid_dotted_quad(inner)
+}
+
+# Validate an IPv4 dotted-quad without leading-zero octets
+fn is_valid_dotted_quad(inner: String) -> Bool {
+  let mut octets = 0
+  let mut value = 0
+  let mut digits = 0
+  let mut i = 0
+
+  while i < inner.size {
+    match inner.get(i) {
+      case Ok(byte) -> {
+        if byte == ASCII_DOT {
+          if digits == 0 { return false }
+
+          octets = octets + 1
+          value = 0
+          digits = 0
+
+          if octets > 3 { return false }
+        } else if byte >= 48 and byte <= 57 {
+          if digits == 0 and byte == 48 and i + 1 < inner.size {
+            match inner.get(i + 1) {
+              case Ok(following) -> if following != ASCII_DOT { return false }
+              case Error(_) -> {}
+            }
+          }
+
+          value = (value * 10) + (byte - 48)
+          digits = digits + 1
+
+          if digits > 3 or value > 255 { return false }
+        } else {
+          return false
+        }
+
+        i = i + 1
+      }
+      case Error(_) -> return false
+    }
+  }
+
+  octets == 3 and digits > 0
 }
 
 fn byte_array_to_string(bytes: Array[Int]) -> String {

@@ -257,6 +257,39 @@ fn pub tests(t: mut Tests) {
     t.true(is_valid_email_format('123@example.com'))
   })
 
+  t.test('is_valid_email_format_quoted_local_part', fn (t) {
+    t.true(is_valid_email_format('"a b"@example.com'))
+    t.true(is_valid_email_format('"john.doe"@example.com'))
+    t.false(is_valid_email_format('"a"b"@example.com'))
+    t.false(is_valid_email_format('"a\\"@example.com'))
+  })
+
+  t.test('is_valid_email_format_address_literal', fn (t) {
+    t.true(is_valid_email_format('user@[192.168.0.1]'))
+    t.true(is_valid_email_format('user@[IPv6:2001:db8::1]'))
+    t.false(is_valid_email_format('user@[999.1.1.1]'))
+    t.false(is_valid_email_format('user@[192.168.0]'))
+    t.false(is_valid_email_format('user@[]'))
+  })
+
+  t.test('is_valid_email_format_length_limits', fn (t) {
+    let mut local_64 = ''
+
+    while local_64.size < 64 { local_64 = local_64 + 'a' }
+
+    let local_65 = local_64 + 'a'
+
+    t.true(is_valid_email_format('${local_64}@example.com'))
+    t.false(is_valid_email_format('${local_65}@example.com'))
+
+    # A single domain label longer than 63 bytes is invalid
+    let mut label_64 = ''
+
+    while label_64.size < 64 { label_64 = label_64 + 'b' }
+
+    t.false(is_valid_email_format('user@${label_64}.example.com'))
+  })
+
   t.test('is_valid_email_format_all_numeric_local', fn (t) {
     t.true(is_valid_email_format('123456@example.com'))
   })
