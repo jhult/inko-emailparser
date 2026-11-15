@@ -383,6 +383,21 @@ impl StreamingParser {
     self.parse_stream(raw, handler)
   }
 
+  # Report a failure to the handler and return the error to propagate
+  #
+  # Every failure in the async reader path funnels through here so `on_error`
+  # is called exactly once per failure, including failures that used to skip it
+  # (metadata parsing, boundary validation, header-section limits).
+  fn notify_error[H: mut + StreamHandler](
+    handler: mut H,
+    failure: Error,
+  ) -> Error {
+    match handler.on_error(ref failure) {
+      case Ok(_) -> failure
+      case Error(e) -> Error.from_string('Handler on_error failed: ${e}')
+    }
+  }
+
   # Parse an email from an async reader using streaming callbacks
   #
   # Reads email data incrementally from an async reader and processes it using
@@ -407,6 +422,7 @@ impl StreamingParser {
     let mut buffer = ByteArray.new
     let mut headers: Array[(String, String)] = []
     let mut initial_body = ByteArray.new
+    let mut headers_parsed = false
 
     let chunk_size = @config.stream_chunk_size
     let mut total_bytes = 0
@@ -428,16 +444,7 @@ impl StreamingParser {
               Option.None,
             )
 
-            match handler.on_error(failure) {
-              case Ok(_) -> {}
-              case Error(e) -> {
-                return Result.Error(
-                  Error.from_string('Handler on_error failed: ${e}'),
-                )
-              }
-            }
-
-            return Result.Error(failure)
+            return Result.Error(notify_error(handler, failure))
           }
 
           let mut i = 0
@@ -467,18 +474,7 @@ impl StreamingParser {
                 )
               {
                 case Ok(h) -> h
-                case Error(e) -> {
-                  match handler.on_error(e) {
-                    case Ok(_) -> {}
-                    case Error(err) -> {
-                      return Result.Error(
-                        Error.from_string('Handler on_error failed: ${err}'),
-                      )
-                    }
-                  }
-
-                  return Result.Error(e)
-                }
+                case Error(e) -> return Result.Error(notify_error(handler, e))
               }
 
               match handler.on_headers(ref headers) {
@@ -489,6 +485,8 @@ impl StreamingParser {
                   )
                 }
               }
+
+              headers_parsed = true
 
               # Extract body bytes remaining in buffer after headers
               let mut j = pos + separator_size
@@ -506,9 +504,11 @@ impl StreamingParser {
             }
             case None -> {
               if buffer.size > MAX_HEADERS_SECTION_SIZE {
-                return Result.Error(
-                  Error.from_string('Headers too large or malformed'),
+                let failure = Error.from_string(
+                  'Headers too large or malformed',
                 )
+
+                return Result.Error(notify_error(handler, failure))
               }
             }
           }
@@ -516,16 +516,35 @@ impl StreamingParser {
         case Error(e) -> {
           let failure = Error.from_string(e)
 
-          match handler.on_error(failure) {
-            case Ok(_) -> {}
-            case Error(err) -> {
-              return Result.Error(
-                Error.from_string('Handler on_error failed: ${err}'),
-              )
-            }
-          }
+          return Result.Error(notify_error(handler, failure))
+        }
+      }
+    }
 
-          return Result.Error(failure)
+    # EOF before a header/body separator: treat the accumulated bytes as the
+    # header section with an empty body, matching `parse_stream`. Without this
+    # a truncated stream silently lost the subject, sender and thread info.
+    if !headers_parsed {
+      let headers_raw = buffer.clone.into_string
+
+      headers = match
+        parse_headers_impl(
+          headers_raw,
+          @config.strict_mode,
+          @config.max_email_size,
+          @config.max_headers,
+        )
+      {
+        case Ok(h) -> h
+        case Error(e) -> return Result.Error(notify_error(handler, e))
+      }
+
+      match handler.on_headers(ref headers) {
+        case Ok(_) -> {}
+        case Error(e) -> {
+          return Result.Error(
+            Error.from_string('Handler on_headers failed: ${e}'),
+          )
         }
       }
     }
@@ -540,49 +559,27 @@ impl StreamingParser {
     # Run the same validators as the buffered parser
     match validate_required_headers(ref headers, @config.strict_mode) {
       case Ok(_) -> {}
-      case Error(e) -> {
-        match handler.on_error(e) {
-          case Ok(_) -> {}
-          case Error(err) -> {
-            return Result.Error(
-              Error.from_string('Handler on_error failed: ${err}'),
-            )
-          }
-        }
-
-        return Result.Error(e)
-      }
+      case Error(e) -> return Result.Error(notify_error(handler, e))
     }
 
     match
       validate_addresses(ref from, ref to, ref cc, ref bcc, @config.strict_mode)
     {
       case Ok(_) -> {}
-      case Error(e) -> {
-        match handler.on_error(e) {
-          case Ok(_) -> {}
-          case Error(err) -> {
-            return Result.Error(
-              Error.from_string('Handler on_error failed: ${err}'),
-            )
-          }
-        }
-
-        return Result.Error(e)
-      }
+      case Error(e) -> return Result.Error(notify_error(handler, e))
     }
 
     let (ct_main, ct_params, content_transfer_encoding, charset) = match
       parse_mime_metadata(ref headers, @config.strict_mode)
     {
       case Ok(result) -> result
-      case Error(e) -> return Result.Error(e)
+      case Error(e) -> return Result.Error(notify_error(handler, e))
     }
     let boundary = extract_boundary(ref ct_params)
 
     match validate_multipart_boundary(ct_main.clone, ref boundary) {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error(e)
+      case Error(e) -> return Result.Error(notify_error(handler, e))
     }
 
     # Phase 2: Process body incrementally
@@ -614,20 +611,7 @@ impl StreamingParser {
             )
           {
             case Ok(count) -> count
-            case Error(e) -> {
-              let failure = e
-
-              match handler.on_error(failure) {
-                case Ok(_) -> {}
-                case Error(err) -> {
-                  return Result.Error(
-                    Error.from_string('Handler on_error failed: ${err}'),
-                  )
-                }
-              }
-
-              return Result.Error(failure)
-            }
+            case Error(e) -> return Result.Error(notify_error(handler, e))
           }
         }
         case None -> 0

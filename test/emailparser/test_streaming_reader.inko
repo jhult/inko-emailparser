@@ -21,6 +21,7 @@ type pub CollectingHandler {
   let pub mut @attachment_data: ByteArray
   let pub mut @attachment_started: Bool
   let pub mut @attachment_ended: Bool
+  let pub mut @errors_received: Int
 }
 
 impl CollectingHandler {
@@ -33,6 +34,7 @@ impl CollectingHandler {
       attachment_data: recover ByteArray.new,
       attachment_started: false,
       attachment_ended: false,
+      errors_received: 0,
     )
   }
 }
@@ -87,6 +89,7 @@ impl StreamHandler for CollectingHandler {
   }
 
   fn pub mut on_error(error: ref Error) -> Result[Int, String] {
+    @errors_received = @errors_received + 1
     Result.Ok(0)
   }
 }
@@ -305,6 +308,41 @@ JVBERi0='
         t.equal(handler.attachment_data.clone.into_string, '%PDF-')
       }
       case Error(e) -> panic('parse_async_reader failed: ${e.to_message}')
+    }
+  })
+
+  t.test('parse_async_reader_eof_without_separator_keeps_headers', fn (t) {
+    let mut parser = StreamingParser.new
+    let mut handler = CollectingHandler.new
+    # Truncated stream: no blank line separating headers from the body
+    let raw = 'From: a@example.com\nTo: b@example.com\nSubject: Truncated'
+    let mut reader = ByteArrayReader.from_string(raw)
+
+    match parser.parse_async_reader(mut reader, mut handler) {
+      case Ok(result) -> {
+        t.equal(result.subject, 'Truncated')
+        t.true(handler.headers_received)
+        t.true(handler.ended)
+      }
+      case Error(e) -> panic('parse_async_reader failed: ${e.to_message}')
+    }
+  })
+
+  t.test('parse_async_reader_reports_boundary_error_to_handler', fn (t) {
+    let mut parser = StreamingParser.new
+    let mut handler = CollectingHandler.new
+    let mut invalid_boundary = ''
+
+    while invalid_boundary.size < 100 {
+      invalid_boundary = invalid_boundary + 'a'
+    }
+
+    let raw = 'From: a@example.com\nTo: b@example.com\nSubject: x\nContent-Type: multipart/mixed; boundary="${invalid_boundary}"\n\n--${invalid_boundary}\n\nbody'
+    let mut reader = ByteArrayReader.from_string(raw)
+
+    match parser.parse_async_reader(mut reader, mut handler) {
+      case Ok(_) -> t.false(true)
+      case Error(_) -> t.equal(handler.errors_received, 1)
     }
   })
 
