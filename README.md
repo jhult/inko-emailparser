@@ -183,18 +183,38 @@ match parser.parse(raw_email_string) {
 
 ### Configuration Options
 
-Create a parser with custom limits:
+Use the per-limit builders when only one or two limits need to change:
 
 ```inko
 import emailparser (EmailParser)
 
-let parser = EmailParser.new.with_limits(
+let parser = EmailParser.new
+  .with_max_email_size(100_000_000)
+  .with_max_attachment_size(50_000_000)
+```
+
+Or configure everything at once with a shared `Limits` value. The same
+`Limits` record works for `EmailParser` and `StreamingParser`:
+
+```inko
+import emailparser (EmailParser)
+import emailparser.limits (Limits)
+import emailparser.streaming (StreamingParser)
+
+let limits = Limits(
   max_email_size: 100_000_000,
   max_attachment_size: 50_000_000,
   max_multipart_depth: 15,
   max_attachments: 200,
   max_headers: 2000,
 )
+
+let parser = EmailParser.new.with_limits(limits)
+let streaming = StreamingParser.new.with_limits(limits)
+
+# Streaming-only setting: bytes delivered per callback. Invalid values
+# (zero or negative) are ignored.
+let streaming = streaming.with_stream_chunk_size(32_768)
 ```
 
 ### Strict Mode
@@ -522,8 +542,8 @@ match parser.parse(raw_email_string) {
 
 ### Streaming Errors
 
-`StreamingParser.parse_stream`, `parse_async_raw` and `parse_async_reader`
-return `Result[StreamingResult, Error]` as well. The `StreamHandler.on_error`
+`StreamingParser.parse_stream` and `parse_async_reader` return
+`Result[StreamingResult, Error]` as well. The `StreamHandler.on_error`
 callback receives `ref Error`, so handlers can inspect it before the parser
 returns it to the caller.
 

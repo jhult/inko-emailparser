@@ -15,6 +15,7 @@ import emailparser (EmailParser, ParserConfig)
 import emailparser.attachment (EmailAttachment)
 import emailparser.email_generator (TestAttachment, TestDataGenerator)
 import emailparser.error (Error)
+import emailparser.limits (Limits)
 import emailparser.streaming (
   AttachmentInfo, StreamHandler, StreamingConfig, StreamingParser,
 )
@@ -1496,6 +1497,67 @@ QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB
         )
       }
     }
+  })
+
+  t.test('shared_limits_apply_to_both_parsers', fn (t) {
+    let limits = Limits(
+      max_email_size: 1000,
+      max_attachment_size: 500,
+      max_multipart_depth: 2,
+      max_attachments: 3,
+      max_headers: 4,
+    )
+
+    let buffered = EmailParser.new.with_limits(limits)
+
+    let limits = Limits(
+      max_email_size: 1000,
+      max_attachment_size: 500,
+      max_multipart_depth: 2,
+      max_attachments: 3,
+      max_headers: 4,
+    )
+
+    let streaming = StreamingParser.new.with_limits(limits)
+
+    t.equal(buffered.config.max_email_size, 1000)
+    t.equal(buffered.config.max_attachment_size, 500)
+    t.equal(buffered.config.max_multipart_depth, 2)
+    t.equal(buffered.config.max_attachments, 3)
+    t.equal(buffered.config.max_headers, 4)
+
+    t.equal(streaming.config.max_email_size, 1000)
+    t.equal(streaming.config.max_attachment_size, 500)
+    t.equal(streaming.config.max_multipart_depth, 2)
+    t.equal(streaming.config.max_attachments, 3)
+    t.equal(streaming.config.max_headers, 4)
+  })
+
+  t.test('streaming_per_limit_builders', fn (t) {
+    let parser = StreamingParser
+      .new
+      .with_strict_mode(true)
+      .with_max_email_size(2000)
+      .with_max_attachment_size(600)
+      .with_max_multipart_depth(4)
+      .with_max_attachments(5)
+      .with_max_headers(6)
+      .with_stream_chunk_size(1024)
+
+    t.true(parser.config.strict_mode)
+    t.equal(parser.config.max_email_size, 2000)
+    t.equal(parser.config.max_attachment_size, 600)
+    t.equal(parser.config.max_multipart_depth, 4)
+    t.equal(parser.config.max_attachments, 5)
+    t.equal(parser.config.max_headers, 6)
+    t.equal(parser.config.stream_chunk_size, 1024)
+  })
+
+  t.test('streaming_chunk_size_invalid_value_ignored', fn (t) {
+    let parser = StreamingParser.new.with_stream_chunk_size(0)
+
+    # The invalid value is ignored, leaving the default in place
+    t.true(parser.config.stream_chunk_size > 0)
   })
 
   t.test('part_headers_ignore_attachment_size_limit', fn (t) {

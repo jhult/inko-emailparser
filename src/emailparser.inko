@@ -32,7 +32,7 @@ import emailparser.header_extraction (
   parse_threading_headers, validate_multipart_boundary,
 )
 import emailparser.limits (
-  MAX_ATTACHMENTS, MAX_ATTACHMENT_SIZE, MAX_EMAIL_SIZE, MAX_HEADERS,
+  Limits, MAX_ATTACHMENTS, MAX_ATTACHMENT_SIZE, MAX_EMAIL_SIZE, MAX_HEADERS,
   MAX_HEADERS_SECTION_SIZE, MAX_MULTIPART_DEPTH,
 )
 import emailparser.message_id (parse_message_ids_impl)
@@ -393,18 +393,16 @@ impl EmailParser {
     self
   }
 
-  fn pub move with_limits(
-    max_email_size: Int,
-    max_attachment_size: Int,
-    max_multipart_depth: Int,
-    max_attachments: Int,
-    max_headers: Int,
-  ) -> EmailParser {
-    @config.max_email_size = max_email_size
-    @config.max_attachment_size = max_attachment_size
-    @config.max_multipart_depth = max_multipart_depth
-    @config.max_attachments = max_attachments
-    @config.max_headers = max_headers
+  # Apply a shared `Limits` value
+  #
+  # Use the per-limit builders (`with_max_email_size` etc.) when only one
+  # limit needs to change.
+  fn pub move with_limits(limits: Limits) -> EmailParser {
+    @config.max_email_size = limits.max_email_size
+    @config.max_attachment_size = limits.max_attachment_size
+    @config.max_multipart_depth = limits.max_multipart_depth
+    @config.max_attachments = limits.max_attachments
+    @config.max_headers = limits.max_headers
     self
   }
 

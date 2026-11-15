@@ -261,3 +261,40 @@ let pub MAX_BOUNDARY_LENGTH = 70
 #
 # RFC reference: RFC 2047 section 6 (Encoded-Word Syntax)
 let pub MAX_HEADER_ITERATIONS = 1000
+
+# ========== Shared Limit Set ==========
+
+# A set of parser limits shared by the buffered and streaming parsers
+#
+# Both `EmailParser` and `StreamingParser` accept a `Limits` value through
+# `with_limits`, so a caller can configure either parser (or both) from one
+# place instead of passing five positional values.
+type pub Limits {
+  # Maximum email size in bytes
+  let pub @max_email_size: Int
+
+  # Maximum attachment size in bytes
+  let pub @max_attachment_size: Int
+
+  # Maximum multipart nesting depth
+  let pub @max_multipart_depth: Int
+
+  # Maximum number of attachments
+  let pub @max_attachments: Int
+
+  # Maximum number of headers
+  let pub @max_headers: Int
+}
+
+impl Limits {
+  # Create a limit set from the library defaults
+  fn pub static new -> Limits {
+    Limits(
+      max_email_size: MAX_EMAIL_SIZE,
+      max_attachment_size: MAX_ATTACHMENT_SIZE,
+      max_multipart_depth: MAX_MULTIPART_DEPTH,
+      max_attachments: MAX_ATTACHMENTS,
+      max_headers: MAX_HEADERS,
+    )
+  }
+}

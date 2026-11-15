@@ -24,7 +24,7 @@ import emailparser.header_extraction (
   parse_threading_headers, validate_multipart_boundary,
 )
 import emailparser.limits (
-  MAX_ATTACHMENTS, MAX_ATTACHMENT_SIZE, MAX_EMAIL_SIZE, MAX_HEADERS,
+  Limits, MAX_ATTACHMENTS, MAX_ATTACHMENT_SIZE, MAX_EMAIL_SIZE, MAX_HEADERS,
   MAX_HEADERS_SECTION_SIZE, MAX_MULTIPART_DEPTH,
 )
 import emailparser.mime (
@@ -155,6 +155,57 @@ impl StreamingParser {
 
   fn pub static with_config(config: StreamingConfig) -> StreamingParser {
     StreamingParser(config: config)
+  }
+
+  fn pub move with_strict_mode(strict: Bool) -> StreamingParser {
+    @config.strict_mode = strict
+    self
+  }
+
+  # Apply a shared `Limits` value
+  fn pub move with_limits(limits: Limits) -> StreamingParser {
+    @config.max_email_size = limits.max_email_size
+    @config.max_attachment_size = limits.max_attachment_size
+    @config.max_multipart_depth = limits.max_multipart_depth
+    @config.max_attachments = limits.max_attachments
+    @config.max_headers = limits.max_headers
+    self
+  }
+
+  fn pub move with_max_email_size(size: Int) -> StreamingParser {
+    @config.max_email_size = size
+    self
+  }
+
+  fn pub move with_max_attachment_size(size: Int) -> StreamingParser {
+    @config.max_attachment_size = size
+    self
+  }
+
+  fn pub move with_max_multipart_depth(depth: Int) -> StreamingParser {
+    @config.max_multipart_depth = depth
+    self
+  }
+
+  fn pub move with_max_attachments(count: Int) -> StreamingParser {
+    @config.max_attachments = count
+    self
+  }
+
+  fn pub move with_max_headers(count: Int) -> StreamingParser {
+    @config.max_headers = count
+    self
+  }
+
+  # Set the number of bytes processed per callback
+  #
+  # Invalid values (zero or negative) are ignored so a parser can never be
+  # constructed that would make no progress; the parse methods validate the
+  # value again as a safety net.
+  fn pub move with_stream_chunk_size(size: Int) -> StreamingParser {
+    if validate_stream_chunk_size(size).ok? { @config.stream_chunk_size = size }
+
+    self
   }
 
   # Parse an email using streaming callbacks
@@ -368,19 +419,6 @@ impl StreamingParser {
         attachment_count: attachment_count,
       ),
     )
-  }
-
-  # Parse an email using streaming callbacks from async source
-  #
-  # This async version of parse_stream allows for async processing of callbacks.
-  # Returns the same result as parse_stream but handlers can perform async operations.
-  fn pub mut parse_async_raw[H: mut + StreamHandler](
-    raw: String,
-    handler: mut H,
-  ) -> Result[StreamingResult, Error] {
-    # Delegate to parse_stream since the logic is identical
-    # The difference is in the trait constraint which allows async handlers
-    self.parse_stream(raw, handler)
   }
 
   # Report a failure to the handler and return the error to propagate
