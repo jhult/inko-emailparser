@@ -20,7 +20,9 @@ import emailparser.decoder (decode_charset)
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.hex (parse_hex_byte, two_bytes_to_hex_string)
-import emailparser.limits (MAX_FILENAME_SIZE, MAX_HEADER_VALUE_LENGTH)
+import emailparser.limits (
+  MAX_FILENAME_SIZE, MAX_HEADER_VALUE_LENGTH, MAX_RFC2231_SEGMENTS,
+)
 import emailparser.size_tracker (SizeTracker)
 import emailparser.validation (is_quoted_string, is_valid_mime_type)
 import std.bytes (ByteArray)
@@ -887,45 +889,114 @@ fn pub extract_filename_param(disposition: String) -> Option[String] {
         case None -> {}
       }
 
-      let mut assembled = ''
-      let mut index = 0
-      let mut found = false
-      let mut stop = false
-
-      while index < 20 and !stop {
-        let star_key = 'filename*${index}*'
-        let plain_key = 'filename*${index}'
-        let has_continuation = match
-          get_param_value_impl(ref params, star_key)
-        {
-          case Some(value) -> {
-            found = true
-            assembled = assembled + decode_rfc2231_value(value, index == 0)
-            true
-          }
-          case None -> false
-        }
-
-        if !has_continuation {
-          match get_param_value_impl(ref params, plain_key) {
-            case Some(value) -> {
-              found = true
-              assembled = assembled + value
-            }
-            case None -> stop = true
-          }
-        }
-
-        index = index + 1
+      # RFC 2231 continuation segments must be assembled before decoding:
+      # percent-decoding each segment separately destroys multi-byte
+      # sequences (and escaped octets) split across segments.
+      match assemble_rfc2231_continuation(ref params, 'filename') {
+        case Some(value) -> return sanitize_filename(value)
+        case None -> {}
       }
-
-      if found { return sanitize_filename(assembled) }
 
       match get_param_value_impl(ref params, 'filename') {
         case Some(value) -> sanitize_filename(value)
         case None -> Option.None
       }
     }
+  }
+}
+
+# Assemble an RFC 2231 parameter continuation ("prefix*0*", "prefix*1*", ...)
+#
+# Segments are concatenated as raw bytes in index order and decoded once at the
+# end, so a UTF-8 sequence or a percent escape split across segments survives.
+# The charset is taken from the first segment (if it declares one). Returns
+# None when no continuation segment exists or the segment count exceeds
+# MAX_RFC2231_SEGMENTS.
+fn assemble_rfc2231_continuation(
+  params: ref Array[(String, String)],
+  prefix: String,
+) -> Option[String] {
+  let mut bytes = ByteArray.new
+  let mut charset = 'utf-8'
+  let mut index = 0
+  let mut found = false
+
+  while index < MAX_RFC2231_SEGMENTS {
+    let star_key = '${prefix}*${index}*'
+    let plain_key = '${prefix}*${index}'
+    let mut segment = Option.None
+    let mut encoded = false
+
+    match get_param_value_impl(ref params, star_key) {
+      case Some(value) -> {
+        segment = Option.Some(value)
+        encoded = true
+      }
+      case None -> {
+        match get_param_value_impl(ref params, plain_key) {
+          case Some(value) -> segment = Option.Some(value)
+          case None -> {}
+        }
+      }
+    }
+
+    match segment {
+      case Some(value) -> {
+        found = true
+
+        if index == 0 and encoded {
+          match split_rfc2231_charset(value) {
+            case Some((declared, rest)) -> {
+              charset = declared
+              bytes.append(percent_decode(rest))
+            }
+            case None -> bytes.append(percent_decode(value))
+          }
+        } else if encoded {
+          bytes.append(percent_decode(value))
+        } else {
+          bytes.append(value.to_byte_array)
+        }
+
+        index = index + 1
+      }
+      case None -> {
+        # A gap ends the continuation
+        index = MAX_RFC2231_SEGMENTS
+      }
+    }
+  }
+
+  # Reject rather than silently truncate an over-long continuation
+  if index >= MAX_RFC2231_SEGMENTS and found {
+    match
+      get_param_value_impl(ref params, '${prefix}*${MAX_RFC2231_SEGMENTS}*')
+    {
+      case Some(_) -> return Option.None
+      case None -> {}
+    }
+  }
+
+  if found { Option.Some(decode_charset(bytes, charset)) } else { Option.None }
+}
+
+# Split "charset'language'value" into its charset and encoded value
+fn split_rfc2231_charset(value: String) -> Option[(String, String)] {
+  match value.index_of("'", 0) {
+    case Some(first) -> {
+      match value.index_of("'", first + 1) {
+        case Some(second) -> {
+          Option.Some(
+            (
+              value.slice(0, first).to_string,
+              value.slice(second + 1, value.size).to_string,
+            ),
+          )
+        }
+        case None -> Option.None
+      }
+    }
+    case None -> Option.None
   }
 }
 
@@ -940,8 +1011,8 @@ fn decode_rfc2231_value(value: String, has_charset: Bool) -> String {
       case Some(first) -> {
         match value.index_of("'", first + 1) {
           case Some(second) -> {
-            charset = value.substring(0, first)
-            encoded = value.substring(second + 1, value.size)
+            charset = value.slice(0, first).to_string
+            encoded = value.slice(second + 1, value.size).to_string
           }
           case None -> {}
         }

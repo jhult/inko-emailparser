@@ -169,6 +169,31 @@ fn pub tests(t: mut Tests) {
     )
   })
 
+  t.test('extract_filename_param_rfc2231_split_utf8', fn (t) {
+    # The UTF-8 sequence for "€" is split across two segments and must be
+    # decoded after the segments are concatenated.
+    t.equal(
+      extract_filename_param(
+        "attachment; filename*0*=utf-8''%E2%82; filename*1*=%AC.txt",
+      ),
+      Option.Some('€.txt'),
+    )
+  })
+
+  t.test('extract_filename_param_rfc2231_more_than_twenty_segments', fn (t) {
+    let mut disposition = 'attachment'
+    let mut expected = ''
+    let mut i = 0
+
+    while i < 25 {
+      disposition = disposition + '; filename*${i}*=x'
+      expected = expected + 'x'
+      i = i + 1
+    }
+
+    t.equal(extract_filename_param(disposition), Option.Some(expected))
+  })
+
   t.test('sanitize_filename_windows_reserved', fn (t) {
     t.equal(sanitize_filename('CON'), Option.None)
     t.equal(sanitize_filename('PRN'), Option.None)

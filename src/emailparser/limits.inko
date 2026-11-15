@@ -188,6 +188,18 @@ let pub MAX_HEADERS_SECTION_SIZE = 65536
 # RFC reference: RFC 5322 section 3.6.4 (Message-ID Header Field)
 let pub MAX_MESSAGE_IDS = 100
 
+# Maximum number of RFC 2231 continuation segments (100)
+#
+# Rationale:
+# - Real-world usage: filenames spanning more than a handful of segments are
+#   essentially unheard of; RFC 2231 places no explicit bound
+# - DoS prevention: bounds the loop that assembles continuation segments
+# - Exceeding the limit rejects the parameter instead of silently truncating
+#   the assembled filename
+#
+# RFC reference: RFC 2231 section 3 (Parameter Value Continuations)
+let pub MAX_RFC2231_SEGMENTS = 100
+
 # ========== Structural Limits ==========
 
 # Maximum nesting depth for multipart messages (10 levels)
