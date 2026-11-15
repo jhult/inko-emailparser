@@ -450,9 +450,49 @@ fn pub tests(t: mut Tests) {
 
     t.false(generator.is_valid('<test@${too_long_domain}>'))
 
-    # Domain = 255 chars should be valid
-    let max_domain = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    # Domain = 255 chars (four 63-byte labels) should be valid
+    let label = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    let max_domain = '${label}.${label}.${label}.${label}'
 
     t.true(generator.is_valid('<test@${max_domain}>'))
+
+    # A single label longer than 63 bytes is invalid
+    let too_long_label = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+    t.false(generator.is_valid('<test@${too_long_label}.example.com>'))
+
+    # Labels may not start or end with a hyphen
+    t.false(generator.is_valid('<test@-bad.example.com>'))
+    t.false(generator.is_valid('<test@bad-.example.com>'))
+    t.false(generator.is_valid('<test@bad..example.com>'))
+  })
+
+  t.test('generate_with_invalid_hostname_falls_back', fn (t) {
+    let generator = MessageIdGenerator.new('bad hostname')
+    let message_id = generator.generate
+
+    t.true(generator.is_valid(message_id))
+    t.true(message_id.contains?('@localhost>'))
+  })
+
+  t.test('generate_with_empty_prefix_omits_prefix', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+    let message_id = generator.generate_with_prefix('')
+
+    t.true(generator.is_valid(message_id))
+    t.true(message_id.contains?('@example.com>'))
+  })
+
+  t.test('generated_ids_have_no_negative_components', fn (t) {
+    let mut generator = MessageIdGenerator.new('example.com')
+    let mut i = 0
+
+    while i < 50 {
+      let message_id = generator.generate_with_prefix('component')
+
+      t.true(generator.is_valid(message_id))
+
+      i = i + 1
+    }
   })
 }

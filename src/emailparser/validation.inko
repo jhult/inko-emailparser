@@ -182,11 +182,63 @@ import emailparser.ascii (
   ASCII_APOSTROPHE, ASCII_COLON, ASCII_COMMA, ASCII_DEL, ASCII_DOT,
   ASCII_EQUALS, ASCII_HYPHEN, ASCII_LPAREN, ASCII_PLUS, ASCII_QUESTION,
   ASCII_RPAREN, ASCII_SLASH, ASCII_SPACE, ASCII_UNDERSCORE, is_alnum,
-  is_control_char, is_mime_tspecial, is_printable_ascii,
+  is_control_char, is_domain_char, is_mime_tspecial, is_printable_ascii,
 )
-import emailparser.limits (MAX_BOUNDARY_LENGTH)
+import emailparser.limits (
+  MAX_BOUNDARY_LENGTH, MAX_DOMAIN_LABEL_SIZE, MAX_DOMAIN_SIZE,
+)
 
 # ========== String Validation Helpers ==========
+
+# Validate a domain name (RFC 1035/5321 dot-atom form)
+#
+# A domain is a dot-separated list of labels. Each label must be 1-63 bytes of
+# alphanumerics or hyphens and must not start or end with a hyphen. Empty
+# labels (leading/trailing dot or consecutive dots) are rejected, as is a
+# domain longer than 255 bytes.
+fn pub is_valid_domain(domain: String) -> Bool {
+  if domain.empty? or domain.size > MAX_DOMAIN_SIZE { return false }
+
+  let mut label_length = 0
+  let mut i = 0
+
+  while i < domain.size {
+    match domain.get(i) {
+      case Ok(byte) -> {
+        if byte == ASCII_DOT {
+          if label_length == 0 { return false }
+
+          # The label must not end with a hyphen
+          match domain.get(i - 1) {
+            case Ok(previous) -> if previous == ASCII_HYPHEN { return false }
+            case Error(_) -> return false
+          }
+
+          label_length = 0
+        } else {
+          if !is_domain_char(byte) { return false }
+
+          # A label must not start with a hyphen
+          if label_length == 0 and byte == ASCII_HYPHEN { return false }
+
+          label_length = label_length + 1
+
+          if label_length > MAX_DOMAIN_LABEL_SIZE { return false }
+        }
+
+        i = i + 1
+      }
+      case Error(_) -> return false
+    }
+  }
+
+  if label_length == 0 { return false }
+
+  match domain.get(domain.size - 1) {
+    case Ok(last) -> last != ASCII_HYPHEN
+    case Error(_) -> false
+  }
+}
 
 # Check if a string is enclosed in double quotes
 fn pub is_quoted_string(s: String) -> Bool {

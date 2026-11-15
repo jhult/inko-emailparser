@@ -200,6 +200,26 @@ let pub MAX_MESSAGE_IDS = 100
 # RFC reference: RFC 2231 section 3 (Parameter Value Continuations)
 let pub MAX_RFC2231_SEGMENTS = 100
 
+# Maximum length of a single DNS label (63 octets)
+#
+# Rationale:
+# - RFC 1035 section 2.3.4: labels are limited to 63 octets
+# - Longer labels cannot be resolved and are invalid in email addresses
+let pub MAX_DOMAIN_LABEL_SIZE = 63
+
+# Maximum length of an email local part (64 octets)
+#
+# Rationale:
+# - RFC 5321 section 4.5.3.1.1: the local part is limited to 64 octets
+let pub MAX_LOCAL_PART_SIZE = 64
+
+# Maximum length of a complete email address (254 octets)
+#
+# Rationale:
+# - RFC 5321 section 4.5.3.1.3: the reverse-path/forward-path is limited to
+#   256 octets including the angle brackets, i.e. 254 for the address itself
+let pub MAX_EMAIL_ADDRESS_SIZE = 254
+
 # ========== Structural Limits ==========
 
 # Maximum nesting depth for multipart messages (10 levels)

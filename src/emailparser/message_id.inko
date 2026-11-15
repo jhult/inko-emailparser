@@ -154,10 +154,11 @@
 # ```
 
 import emailparser.ascii (
-  ASCII_DOT, ASCII_GREATER_THAN, ASCII_HYPHEN, ASCII_LESS_THAN, is_alnum,
-  is_domain_char, is_email_local_special,
+  ASCII_DOT, ASCII_GREATER_THAN, ASCII_LESS_THAN, is_alnum,
+  is_email_local_special,
 )
-import emailparser.limits (MAX_DOMAIN_SIZE, MAX_MESSAGE_IDS)
+import emailparser.limits (MAX_MESSAGE_IDS)
+import emailparser.validation (is_valid_domain)
 import std.rand (Random)
 import std.time (DateTime)
 
@@ -259,32 +260,37 @@ impl MessageIdGenerator {
   # Generate a unique Message-ID per RFC 5322
   # Format: <timestamp.random@hostname>
   fn pub generate -> String {
-    let timestamp = DateTime.local.to_int
-    let mut rng = Random.new
-    let random = rng.int.to_string
-
-    let rand_part = if random.size >= 16 {
-      random.slice(0, 16).to_string
-    } else {
-      random
-    }
-
-    '<${timestamp}.${rand_part}@${@hostname}>'
+    generate_id(@hostname, '', 16)
   }
 
   # Generate Message-ID with custom prefix
+  #
+  # An empty or invalid prefix is omitted, and an invalid hostname falls back
+  # to "localhost", so the result is always a valid Message-ID.
   fn pub generate_with_prefix(prefix: String) -> String {
+    generate_id(@hostname, prefix, 12)
+  }
+
+  # Build a Message-ID from a validated hostname/prefix and a random component
+  fn generate_id(hostname: String, prefix: String, random_size: Int) -> String {
     let timestamp = DateTime.local.to_int
     let mut rng = Random.new
-    let random = rng.int.to_string
+    let random = rng.int.absolute.to_string
 
-    let rand_part = if random.size >= 12 {
-      random.slice(0, 12).to_string
+    let rand_part = if random.size >= random_size {
+      random.slice(0, random_size).to_string
     } else {
       random
     }
 
-    '<${prefix}.${timestamp}.${rand_part}@${@hostname}>'
+    let host = if is_valid_domain(hostname) { hostname } else { 'localhost' }
+    let safe_prefix = if is_valid_local_part(prefix) { prefix } else { '' }
+
+    if safe_prefix.empty? {
+      '<${timestamp}.${rand_part}@${host}>'
+    } else {
+      '<${safe_prefix}.${timestamp}.${rand_part}@${host}>'
+    }
   }
 
   # Validate a Message-ID format per RFC 5322
@@ -366,45 +372,11 @@ impl MessageIdGenerator {
   }
 
   # Validate domain part (id-right) as dot-atom-text per RFC 5322
+  #
+  # Shares the label rules (length, hyphen placement) with
+  # `is_valid_email_format`.
   fn is_valid_domain_part(domain: String) -> Bool {
-    if domain.empty? { return false }
-
-    # Maximum length for domain (255 chars is DNS limit)
-    if domain.size > MAX_DOMAIN_SIZE { return false }
-
-    let mut i = 0
-
-    while i < domain.size {
-      match domain.get(i) {
-        case Ok(byte) -> {
-          # Allow alphanumeric, dot, and hyphen (valid hostname characters)
-          if !is_domain_char(byte) { return false }
-
-          # Cannot start or end with hyphen
-          if byte == ASCII_HYPHEN and (i == 0 or i == (domain.size - 1)) {
-            return false
-          }
-
-          # Cannot start or end with dot
-          if byte == ASCII_DOT and (i == 0 or i == (domain.size - 1)) {
-            return false
-          }
-
-          # Cannot have consecutive dots
-          if byte == ASCII_DOT and i > 0 {
-            match domain.get(i - 1) {
-              case Ok(prev) -> if prev == ASCII_DOT { return false }
-              case Error(_) -> return false
-            }
-          }
-
-          i = i + 1
-        }
-        case Error(_) -> return false
-      }
-    }
-
-    true
+    is_valid_domain(domain)
   }
 
   # Strip angle brackets from a string
