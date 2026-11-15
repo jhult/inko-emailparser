@@ -1,0 +1,167 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# ==============================================================================
+# MIME Boundary Matching
+# ==============================================================================
+#
+# Single implementation of the RFC 2046 delimiter rules shared by the buffered
+# multipart parser and the streaming multipart state machine.
+#
+# A delimiter is "--" followed by the boundary value and only matches when:
+# - it starts a line (position 0 or immediately after an LF; the CR of a CRLF
+#   is optional)
+# - it is followed by transport padding (spaces/tabs) and a line break, a
+#   second "--" (close delimiter), or the end of the input
+#
+# While streaming, an incomplete tail (the buffer ends before the delimiter is
+# complete) is rejected so a partial delimiter is not mistaken for a boundary.
+# At EOF the tail is accepted: the message was truncated rather than split
+# across reads.
+#
+# ## RFC Compliance
+#
+# - RFC 2046 section 5.1.1: Multipart boundary
+
+import std.bytes (ByteArray)
+import std.option (Option)
+
+# Whether a valid boundary delimiter appears at `pos`
+fn pub boundary_at(
+  buffer: ref ByteArray,
+  marker: ref ByteArray,
+  pos: Int,
+  at_eof: Bool,
+) -> Bool {
+  is_line_start(ref buffer, pos)
+    and bytes_match_at(ref buffer, ref marker, pos)
+    and is_valid_boundary_tail(ref buffer, pos + marker.size, at_eof)
+}
+
+# Find the first boundary marker in `buffer`
+fn pub find_boundary(
+  buffer: ref ByteArray,
+  marker: ref ByteArray,
+  at_eof: Bool,
+) -> Option[Int] {
+  if marker.size == 0 or buffer.size < marker.size { return Option.None }
+
+  let max_i = buffer.size - marker.size
+  let mut i = 0
+
+  while i <= max_i {
+    if boundary_at(ref buffer, ref marker, i, at_eof) { return Option.Some(i) }
+
+    i = i + 1
+  }
+
+  Option.None
+}
+
+# Whether position `pos` starts a line in `buffer`
+fn pub is_line_start(buffer: ref ByteArray, pos: Int) -> Bool {
+  if pos == 0 { return true }
+
+  match buffer.get(pos - 1) {
+    case Ok(b) -> b == 10
+    case Error(_) -> false
+  }
+}
+
+# Whether `needle` occurs in `buffer` starting at `pos`
+fn pub bytes_match_at(
+  buffer: ref ByteArray,
+  needle: ref ByteArray,
+  pos: Int,
+) -> Bool {
+  if pos + needle.size > buffer.size { return false }
+
+  let mut j = 0
+
+  while j < needle.size {
+    match buffer.get(pos + j) {
+      case Ok(buffer_byte) -> {
+        match needle.get(j) {
+          case Ok(needle_byte) -> if buffer_byte != needle_byte { return false }
+          case Error(_) -> return false
+        }
+      }
+      case Error(_) -> return false
+    }
+
+    j = j + 1
+  }
+
+  true
+}
+
+# Whether the bytes after a boundary marker form a valid delimiter tail
+fn pub is_valid_boundary_tail(
+  buffer: ref ByteArray,
+  pos: Int,
+  at_eof: Bool,
+) -> Bool {
+  if pos >= buffer.size { return at_eof }
+
+  match buffer.get(pos) {
+    case Ok(b) -> {
+      if b == 13 {
+        if pos + 1 >= buffer.size { return at_eof }
+
+        match buffer.get(pos + 1) {
+          case Ok(following) -> following == 10
+          case Error(_) -> false
+        }
+      } else if b == 10 {
+        true
+      } else if b == 45 {
+        # Close delimiter is exactly "--"
+        if pos + 1 >= buffer.size { return at_eof }
+
+        match buffer.get(pos + 1) {
+          case Ok(following) -> following == 45
+          case Error(_) -> false
+        }
+      } else if b == 32 or b == 9 {
+        valid_transport_padding(ref buffer, pos, at_eof)
+      } else {
+        false
+      }
+    }
+    case Error(_) -> false
+  }
+}
+
+# Whether `pos` begins transport padding terminated by CRLF/LF
+fn valid_transport_padding(
+  buffer: ref ByteArray,
+  pos: Int,
+  at_eof: Bool,
+) -> Bool {
+  let mut i = pos
+
+  loop {
+    if i >= buffer.size { return at_eof }
+
+    match buffer.get(i) {
+      case Ok(b) -> {
+        if b == 32 or b == 9 {
+          i = i + 1
+        } else if b == 13 {
+          if i + 1 >= buffer.size { return at_eof }
+
+          match buffer.get(i + 1) {
+            case Ok(following) -> return following == 10
+            case Error(_) -> return false
+          }
+        } else if b == 10 {
+          return true
+        } else {
+          return false
+        }
+      }
+      case Error(_) -> return false
+    }
+  }
+}

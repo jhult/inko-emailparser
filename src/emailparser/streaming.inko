@@ -10,7 +10,9 @@
 #
 # See docs/streaming-api.md for complete design documentation.
 
-import emailparser (validate_addresses, validate_required_headers)
+import emailparser (
+  normalize_line_endings, validate_addresses, validate_required_headers,
+)
 import emailparser.address (EmailAddress)
 import emailparser.decoder (decode_body_bytes_impl, decode_body_impl)
 import emailparser.error (Error, Severity, is_recoverable_part_error)
@@ -231,7 +233,7 @@ impl StreamingParser {
     }
 
     # Normalize line endings
-    let normalized = normalize_line_endings_stream(raw)
+    let normalized = normalize_line_endings(raw)
     let email_size = normalized.size
 
     # Check email size limit
@@ -757,11 +759,6 @@ impl StreamingParser {
 }
 
 # Helper functions for streaming parser
-
-# Normalize line endings for streaming
-fn normalize_line_endings_stream(text: String) -> String {
-  text.replace('\r\n', '\n')
-}
 
 # Find the end of the header section
 #

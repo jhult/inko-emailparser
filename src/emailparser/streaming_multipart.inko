@@ -8,12 +8,14 @@
 # incrementally without loading entire parts into memory. Uses a state machine
 # to track parsing progress through multipart structure.
 
+import emailparser.boundary (find_boundary)
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.header (
-  eq_ignore_case, extract_filename_param, parse_headers_impl,
+  extract_filename_param, get_header_value_impl, parse_headers_impl,
 )
 import emailparser.limits (MAX_HEADERS_SECTION_SIZE)
+import emailparser.mime (classify_part)
 import emailparser.validation (is_valid_boundary)
 import std.bytes (ByteArray)
 import std.option (Option)
@@ -325,7 +327,7 @@ fn process_preamble[H: mut + MultipartStreamHandler](
   let boundary_bytes = boundary_marker.to_byte_array
 
   # Scan for first boundary
-  match find_boundary_in_buffer(ref parser.buffer, ref boundary_bytes, false) {
+  match find_boundary(ref parser.buffer, ref boundary_bytes, false) {
     case Some(pos) -> {
       # Found boundary - advance to AtBoundary state
       # Remove everything up to and including the boundary
@@ -462,48 +464,39 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
       # Extract key header values
       # RFC 2045 section 5.2: a part without Content-Type defaults to
       # text/plain.
-      let content_type = get_header_value(ref headers, 'Content-Type').or(
+      let content_type = get_header_value_impl(ref headers, 'Content-Type').or(
         'text/plain',
       )
-      let content_disposition = get_header_value(
+      let content_disposition = get_header_value_impl(
         ref headers,
         'Content-Disposition',
       )
         .or('')
-      let content_transfer_encoding = get_header_value(
+      let content_transfer_encoding = get_header_value_impl(
         ref headers,
         'Content-Transfer-Encoding',
       )
         .or(default_encoding)
-      let content_id = get_header_value(ref headers, 'Content-ID')
+      let content_id = get_header_value_impl(ref headers, 'Content-ID')
 
       # Determine if attachment (RFC 2183 values are case-insensitive)
       #
-      # Classification mirrors the regular parser: explicit attachment
-      # dispositions, inline parts with a filename or image type, and any
-      # non-text/non-multipart part (which has no text body to live in).
-      let disp_lower = content_disposition.to_lower
-      let ct_lower = content_type.to_lower
-      let is_text_part = ct_lower.starts_with?('text/plain')
-        or ct_lower.starts_with?('text/html')
-      let is_multipart_part = ct_lower.starts_with?('multipart/')
-      let is_attachment = disp_lower.starts_with?('attachment')
-        or disp_lower.starts_with?('file')
-        or (
-          disp_lower.starts_with?('inline')
-            and disp_lower.contains?('filename=')
+      # Use the shared classifier so the streaming and buffered parsers agree
+      # on what is a body and what is an attachment (including "file"
+      # dispositions and RFC 2231 filename parameters).
+      let mut filename = extract_filename_param(content_disposition.clone)
+      let is_attachment = match
+        classify_part(
+          content_type.clone,
+          content_disposition.clone,
+          ref filename,
         )
-        or (
-          disp_lower.starts_with?('inline') and ct_lower.starts_with?('image/')
-        )
-        or (!is_text_part and !is_multipart_part)
-
-      # Extract filename if present
-      let filename = if is_attachment {
-        extract_filename_from_disposition(content_disposition)
-      } else {
-        Option.None
+      {
+        case Attachment -> true
+        case _ -> false
       }
+
+      if !is_attachment { filename = Option.None }
 
       # Get attachment index for this part
       let att_index = if is_attachment { parser.attachment_count } else { -1 }
@@ -616,7 +609,7 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
   let boundary_bytes = boundary_marker.to_byte_array
 
   # Scan for next boundary
-  match find_boundary_in_buffer(ref parser.buffer, ref boundary_bytes, at_eof) {
+  match find_boundary(ref parser.buffer, ref boundary_bytes, at_eof) {
     case Some(pos) -> {
       # Found boundary - emit body data before it
       let mut body_data = ByteArray.new
@@ -768,144 +761,6 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
   }
 }
 
-# Find boundary marker in buffer
-#
-# Returns the position where boundary starts, or None if not found.
-fn find_boundary_in_buffer(
-  buffer: ref ByteArray,
-  boundary: ref ByteArray,
-  at_eof: Bool,
-) -> Option[Int] {
-  if buffer.size < boundary.size { return Option.None }
-
-  let mut i = 0
-  let max_i = buffer.size - boundary.size
-
-  while i <= max_i {
-    # RFC 2046: the delimiter must start a line, i.e. be at the start of the
-    # buffer or immediately follow an LF (the CR of a CRLF is optional).
-    if
-      is_line_start(ref buffer, i)
-        and bytes_match_at(ref buffer, ref boundary, i)
-        and is_valid_boundary_tail(ref buffer, i + boundary.size, at_eof)
-    {
-      return Option.Some(i)
-    }
-
-    i = i + 1
-  }
-
-  Option.None
-}
-
-# Whether position `pos` starts a line in `buffer`
-fn is_line_start(buffer: ref ByteArray, pos: Int) -> Bool {
-  if pos == 0 { return true }
-
-  match buffer.get(pos - 1) {
-    case Ok(b) -> b == 10
-    case Error(_) -> false
-  }
-}
-
-# Whether `needle` occurs in `buffer` starting at `pos`
-fn bytes_match_at(
-  buffer: ref ByteArray,
-  needle: ref ByteArray,
-  pos: Int,
-) -> Bool {
-  let mut j = 0
-
-  while j < needle.size {
-    match buffer.get(pos + j) {
-      case Ok(buf_byte) -> {
-        match needle.get(j) {
-          case Ok(needle_byte) -> if buf_byte != needle_byte { return false }
-          case Error(_) -> return false
-        }
-      }
-      case Error(_) -> return false
-    }
-
-    j = j + 1
-  }
-
-  true
-}
-
-# Whether the bytes after a boundary marker form a valid delimiter tail
-#
-# RFC 2046 allows transport padding (spaces/tabs) followed by CRLF, a bare LF,
-# or a second "--" for the close delimiter. An incomplete tail (end of buffer)
-# is rejected while streaming so a partial delimiter is not mistaken for a
-# boundary. At EOF (`at_eof`) an incomplete tail is accepted: the message was
-# simply truncated rather than split across reads.
-fn is_valid_boundary_tail(buffer: ref ByteArray, pos: Int, at_eof: Bool) -> Bool
-{
-  if pos >= buffer.size { return at_eof }
-
-  match buffer.get(pos) {
-    case Ok(b) -> {
-      if b == 13 {
-        if pos + 1 >= buffer.size { return at_eof }
-
-        match buffer.get(pos + 1) {
-          case Ok(b2) -> b2 == 10
-          case Error(_) -> false
-        }
-      } else if b == 10 {
-        true
-      } else if b == 45 {
-        # Close delimiter is exactly "--"
-        if pos + 1 >= buffer.size { return at_eof }
-
-        match buffer.get(pos + 1) {
-          case Ok(b2) -> b2 == 45
-          case Error(_) -> false
-        }
-      } else if b == 32 or b == 9 {
-        valid_transport_padding(ref buffer, pos, at_eof)
-      } else {
-        false
-      }
-    }
-    case Error(_) -> false
-  }
-}
-
-# Whether `pos` begins transport padding terminated by CRLF/LF
-fn valid_transport_padding(
-  buffer: ref ByteArray,
-  pos: Int,
-  at_eof: Bool,
-) -> Bool {
-  let mut i = pos
-
-  loop {
-    if i >= buffer.size { return at_eof }
-
-    match buffer.get(i) {
-      case Ok(b) -> {
-        if b == 32 or b == 9 {
-          i = i + 1
-        } else if b == 13 {
-          if i + 1 >= buffer.size { return at_eof }
-
-          match buffer.get(i + 1) {
-            case Ok(b2) -> return b2 == 10
-            case Error(_) -> return false
-          }
-        } else if b == 10 {
-          return true
-        } else {
-          return false
-        }
-      }
-      case Error(_) -> return false
-    }
-  }
-}
-
 # Number of bytes taken up by a line break at the start of the buffer
 #
 # Returns 2 for CRLF, 1 for a lone CR or LF, and 0 otherwise.
@@ -995,21 +850,4 @@ fn parse_part_headers(
     case Ok(headers) -> Result.Ok(headers)
     case Error(e) -> Result.Error(e)
   }
-}
-
-# Get header value by name (case-insensitive)
-fn get_header_value(
-  headers: ref Array[(String, String)],
-  name: String,
-) -> Option[String] {
-  for (key, value) in headers.iter {
-    if eq_ignore_case(key.clone, name) { return Option.Some(value.clone) }
-  }
-
-  Option.None
-}
-
-# Extract and sanitize the filename from a Content-Disposition header
-fn extract_filename_from_disposition(disposition: String) -> Option[String] {
-  extract_filename_param(disposition)
 }

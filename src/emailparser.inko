@@ -140,7 +140,7 @@ impl ParserConfig {
 
 # Normalize line endings to LF for consistent parsing
 # RFC 5322 specifies CRLF, but we accept LF-only for compatibility
-fn normalize_line_endings(text: String) -> String {
+fn pub normalize_line_endings(text: String) -> String {
   # Replace CRLF with LF
   text.replace('\r\n', '\n')
 }

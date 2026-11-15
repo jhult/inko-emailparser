@@ -65,11 +65,10 @@
 fn pub parse_hex_byte(hex: String) -> Option[Int] {
   if hex.size != 2 { return Option.None }
 
-  let upper = hex.to_upper
   let mut value = 0
 
   # First digit
-  match upper.get(0) {
+  match hex.get(0) {
     case Ok(byte) -> {
       match hex_char_to_value(byte) {
         case Some(v) -> value = v * 16
@@ -80,7 +79,7 @@ fn pub parse_hex_byte(hex: String) -> Option[Int] {
   }
 
   # Second digit
-  match upper.get(1) {
+  match hex.get(1) {
     case Ok(byte) -> {
       match hex_char_to_value(byte) {
         case Some(v) -> value = value + v
@@ -93,7 +92,11 @@ fn pub parse_hex_byte(hex: String) -> Option[Int] {
   Option.Some(value)
 }
 
-# Convert hex character to value (0-15)
+# Convert a hex character to its value (0-15)
+#
+# This is the single hex helper: `parse_hex_byte`, the QP state machine and
+# RFC 2231 percent decoding all use it instead of round-tripping bytes through
+# strings and `String.to_upper`.
 #
 # Maps ASCII characters to their hexadecimal values:
 # - '0'-'9' -> 0-9

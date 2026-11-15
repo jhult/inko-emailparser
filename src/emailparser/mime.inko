@@ -15,6 +15,8 @@
 # - `is_multipart`: Check for a `multipart/*` Content-Type
 # - `is_text_plain`: Check for a `text/plain` Content-Type
 # - `is_text_html`: Check for a `text/html` Content-Type
+# - `main_type`: Extract the lower-cased `type/subtype` from a header value
+# - `classify_part`: Classify a part as text, HTML, multipart or attachment
 # - `extract_boundary`: Get the `boundary` parameter from Content-Type params
 #
 # ## RFC Compliance
@@ -24,6 +26,69 @@
 
 import emailparser.header (eq_ignore_case)
 import std.option (Option)
+
+# Role of a MIME part
+type pub enum PartKind {
+  # text/plain content, merged into the message's text body
+  case TextBody
+
+  # text/html content, merged into the message's HTML body
+  case HtmlBody
+
+  # multipart/* content, parsed recursively by the caller
+  case Multipart
+
+  # Everything else, including inline images and parts with an explicit
+  # attachment/file disposition
+  case Attachment
+}
+
+# Extract the lower-cased `type/subtype` from a Content-Type header value
+#
+# Parameters are removed, so "Text/Plain; charset=UTF-8" becomes "text/plain".
+fn pub main_type(content_type: String) -> String {
+  let trimmed = content_type.trim
+
+  match trimmed.index_of(';', 0) {
+    case Some(pos) -> trimmed.slice(0, pos).to_string.trim.to_lower
+    case None -> trimmed.to_lower
+  }
+}
+
+# Classify a MIME part
+#
+# This is the single part classifier used by both the buffered and streaming
+# multipart parsers, so they cannot disagree about whether a part is a body or
+# an attachment:
+# - multipart/* is returned as `Multipart` for recursive parsing
+# - an attachment/file disposition, or an inline part with a filename, is an
+#   attachment (this covers inline images in multipart/related)
+# - text/plain and text/html are bodies
+# - everything else is an attachment
+fn pub classify_part(
+  content_type: String,
+  content_disposition: String,
+  filename: ref Option[String],
+) -> PartKind {
+  let ct = main_type(content_type)
+  let disposition = content_disposition.trim.to_lower
+
+  if is_multipart(ct.clone) { return PartKind.Multipart }
+
+  if
+    disposition.starts_with?('attachment')
+      or disposition.starts_with?('file')
+      or (disposition.starts_with?('inline') and filename.some?)
+  {
+    return PartKind.Attachment
+  }
+
+  if ct == 'text/plain' { return PartKind.TextBody }
+
+  if ct == 'text/html' { return PartKind.HtmlBody }
+
+  PartKind.Attachment
+}
 
 # Check if content is multipart
 fn pub is_multipart(content_type: String) -> Bool {

@@ -19,7 +19,7 @@ import emailparser.ascii (
 import emailparser.decoder (decode_charset)
 import emailparser.error (Error)
 import emailparser.error (Severity)
-import emailparser.hex (parse_hex_byte, two_bytes_to_hex_string)
+import emailparser.hex (hex_char_to_value)
 import emailparser.limits (
   MAX_FILENAME_SIZE, MAX_HEADER_VALUE_LENGTH, MAX_RFC2231_SEGMENTS,
 )
@@ -1037,10 +1037,18 @@ fn percent_decode(value: String) -> ByteArray {
             case Ok(b1) -> {
               match value.get(i + 2) {
                 case Ok(b2) -> {
-                  match parse_hex_byte(two_bytes_to_hex_string(b1, b2)) {
-                    case Some(decoded) -> {
-                      out.push(decoded)
-                      i = i + 3
+                  match hex_char_to_value(b1) {
+                    case Some(high) -> {
+                      match hex_char_to_value(b2) {
+                        case Some(low) -> {
+                          out.push((high * 16) + low)
+                          i = i + 3
+                        }
+                        case None -> {
+                          out.push(byte)
+                          i = i + 1
+                        }
+                      }
                     }
                     case None -> {
                       out.push(byte)
