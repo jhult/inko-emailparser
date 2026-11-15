@@ -160,7 +160,7 @@ impl EmailAttachment {
 
   # Check if this is an image attachment
   fn pub is_image? -> Bool {
-    @content_type.starts_with?('image/')
+    @content_type.to_lower.starts_with?('image/')
   }
 
   # Get the filename or a default placeholder if none exists

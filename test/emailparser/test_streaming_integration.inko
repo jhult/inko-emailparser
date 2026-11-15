@@ -291,10 +291,10 @@ fn pub tests(t: mut Tests) {
         match attachments.get(0) {
           case Ok((info, data)) -> {
             t.equal(info.filename, Option.Some('test.txt'))
-            t.equal(
-              info.content_type,
-              'application/octet-stream; name="test.txt"',
-            )
+            # The main type is normalised; parameters stay in the filename
+            t.equal(info.content_type, 'application/octet-stream')
+            t.equal(info.content_disposition, 'attachment')
+            t.true(info.size > 0)
             t.equal(data.clone().into_string.trim, 'Attachment Content')
           }
           case Error(_) -> t.equal('should have attachment', 'got error')

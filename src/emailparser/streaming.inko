@@ -1899,6 +1899,17 @@ if
       'Content-Disposition',
     )
       .or('')
+
+    # Normalise the disposition type the same way the buffered parser does
+    let mut disposition = if is_attachment { 'attachment' } else { 'inline' }
+
+    match
+      parse_content_disposition_impl(content_disposition.clone, @strict_mode)
+    {
+      case Ok((disp, _)) -> if !disp.empty? { disposition = disp }
+      case Error(_) -> {}
+    }
+
     let content_transfer_encoding = get_header_value_impl(
       ref headers,
       'Content-Transfer-Encoding',
@@ -1936,9 +1947,9 @@ if
 
       let info = AttachmentInfo(
         index: @attachment_count,
-        content_type: content_type,
+        content_type: main_type,
         filename: filename,
-        content_disposition: content_disposition,
+        content_disposition: disposition,
         content_id: content_id,
         size: 0,
         transfer_encoding: content_transfer_encoding,
@@ -2274,6 +2285,18 @@ if
     # Now pass decoded data to handler
     match @current_info {
       case Some(info) -> {
+        # Report the accumulated decoded size and normalised type; the info
+        # passed to on_attachment_begin still has size 0.
+        let final_info = AttachmentInfo(
+          index: info.index,
+          content_type: info.content_type,
+          filename: info.filename.clone,
+          content_disposition: info.content_disposition,
+          content_id: info.content_id.clone,
+          size: @current_attachment_size,
+          transfer_encoding: info.transfer_encoding,
+        )
+
         match base64_decoded {
           case Some(data) -> {
             @current_attachment_size = @current_attachment_size + data.size
@@ -2332,7 +2355,7 @@ if
           case None -> {}
         }
 
-        match @handler.on_attachment_end(info) {
+        match @handler.on_attachment_end(final_info) {
           case Ok(_) -> {}
           case Error(e) -> {
             return Result.Error(

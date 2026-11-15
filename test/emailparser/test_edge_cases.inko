@@ -12,6 +12,7 @@
 # - Mid-stream error handling and resource cleanup
 
 import emailparser (EmailParser, ParserConfig)
+import emailparser.attachment (EmailAttachment)
 import emailparser.email_generator (TestAttachment, TestDataGenerator)
 import emailparser.error (Error)
 import emailparser.streaming (
@@ -1495,6 +1496,19 @@ QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB
         )
       }
     }
+  })
+
+  t.test('is_image_is_case_insensitive', fn (t) {
+    let attachment = EmailAttachment.from_decoded_part(
+      content_type: 'Image/PNG',
+      filename: Option.Some('x.png'),
+      content_disposition: 'inline',
+      content_id: Option.None,
+      decoded_bytes: ByteArray.new,
+    )
+
+    t.true(attachment.is_image?)
+    t.true(attachment.is_inline?)
   })
 
   # Permissive mode must not lose a message because one parameter is malformed
