@@ -10,7 +10,7 @@
 import emailparser (EmailParser)
 import emailparser.header (
   extract_extra_headers, extract_filename_param, get_header_value_impl,
-  is_valid_field_name, sanitize_filename,
+  is_valid_field_name, parse_content_type_impl, sanitize_filename,
 )
 import std.test (Tests)
 
@@ -104,6 +104,42 @@ fn pub tests(t: mut Tests) {
       extract_filename_param('attachment; filename="report.pdf"'),
       Option.Some('report.pdf'),
     )
+  })
+
+  t.test('extract_filename_param_quoted_non_ascii', fn (t) {
+    # Byte offsets and character offsets must not be mixed when unquoting
+    t.equal(
+      extract_filename_param('attachment; filename="résumé.pdf"'),
+      Option.Some('résumé.pdf'),
+    )
+  })
+
+  t.test(
+    'extract_filename_param_quoted_non_ascii_with_trailing_param',
+    fn (t) {
+      t.equal(
+        extract_filename_param('attachment; filename="résumé.pdf"; size=1'),
+        Option.Some('résumé.pdf'),
+      )
+    },
+  )
+
+  t.test('content_type_quoted_non_ascii_boundary', fn (t) {
+    match parse_content_type_impl('multipart/mixed; boundary="ersönlich"') {
+      case Ok((main_type, params)) -> {
+        t.equal(main_type, 'multipart/mixed')
+        t.equal(params.size, 1)
+
+        match params.get(0) {
+          case Ok((key, value)) -> {
+            t.equal(key, 'boundary')
+            t.equal(value, 'ersönlich')
+          }
+          case Error(_) -> t.true(false)
+        }
+      }
+      case Error(e) -> t.equal('should parse', e.to_message)
+    }
   })
 
   t.test('extract_filename_param_rfc2231_utf8', fn (t) {
