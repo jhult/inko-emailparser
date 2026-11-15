@@ -625,6 +625,51 @@ Content-Type: text/plain
     t.true(handler.data_chunks.size >= 1)
   })
 
+  t.test('multipart_many_parts_not_truncated', fn (t) {
+    let mut parser = match
+      MultipartStreamParser.new(
+        boundary: 'many',
+        max_depth: 10,
+        chunk_size: 65536,
+        strict_mode: false,
+        max_headers: 100,
+        max_attachment_size: 10_000_000,
+      )
+    {
+      case Ok(p) -> p
+      case Error(e) -> panic('Failed to create parser: ${e.to_message}')
+    }
+
+    let mut handler = TestHandler.new
+
+    # 400 parts used to be silently capped at ~333 by a fixed iteration budget
+    let mut raw_multipart = ''
+    let mut i = 0
+
+    while i < 400 {
+      raw_multipart = raw_multipart
+        + '--many\nContent-Type: text/plain\n\npart {i}\n'
+      i = i + 1
+    }
+
+    raw_multipart = raw_multipart + '--many--'
+
+    let data = raw_multipart.to_byte_array
+
+    match parser.feed(ref data, mut handler, '7bit') {
+      case Ok(_) -> {}
+      case Error(e) -> panic('Feed failed: ${e.to_message}')
+    }
+
+    match parser.finish(mut handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic('Finish failed: ${e.to_message}')
+    }
+
+    t.equal(handler.parts_begun, 400)
+    t.equal(handler.parts_ended, 400)
+  })
+
   t.test('multipart_no_end_boundary_strict', fn (t) {
     let mut parser = match
       MultipartStreamParser.new(

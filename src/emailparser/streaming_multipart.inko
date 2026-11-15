@@ -107,6 +107,7 @@ type pub MultipartStreamParser {
   let mut @current_context: Option[CurrentPartContext]
   let mut @context_stack: Array[ContextStackEntry]
   let mut @attachment_count: Int
+  let mut @default_encoding: String
 }
 
 impl MultipartStreamParser {
@@ -150,6 +151,7 @@ impl MultipartStreamParser {
         current_context: Option.None,
         context_stack: [],
         attachment_count: 0,
+        default_encoding: '',
       ),
     )
   }
@@ -180,59 +182,10 @@ impl MultipartStreamParser {
       i = i + 1
     }
 
+    @default_encoding = default_encoding
+
     # Process buffer according to current state
-    # Loop to handle multiple state transitions in one call
-    let mut iterations = 0
-    let max_iterations = 1000 # Prevent infinite loops
-
-    while iterations < max_iterations {
-      let old_state = @state.to_int
-
-      match @state {
-        case Preamble -> {
-          match process_preamble(self, handler) {
-            case Ok(_) -> {}
-            case Error(e) -> return Result.Error(e)
-          }
-        }
-        case AtBoundary -> {
-          match process_at_boundary(self, handler) {
-            case Ok(_) -> {}
-            case Error(e) -> return Result.Error(e)
-          }
-        }
-        case ReadingHeaders -> {
-          match process_reading_headers(self, handler, default_encoding) {
-            case Ok(_) -> {}
-            case Error(e) -> return Result.Error(e)
-          }
-        }
-        case ReadingBody -> {
-          match process_reading_body(self, handler, default_encoding, false) {
-            case Ok(_) -> {}
-            case Error(e) -> return Result.Error(e)
-          }
-        }
-        case AtEndBoundary -> return Result.Ok(0)
-        case Done -> return Result.Ok(0)
-      }
-
-      let new_state = @state.to_int
-
-      # If state didn't change, we've processed as much as we can
-      if old_state == new_state {
-        # Exception: keep going if we're in AtBoundary state (might need to transition)
-        if new_state == 1 and iterations < 2 {
-          iterations = iterations + 1
-        } else {
-          break
-        }
-      } else {
-        iterations = iterations + 1
-      }
-    }
-
-    Result.Ok(0)
+    drain_buffer(self, handler, default_encoding, false)
   }
 
   # Finalize parsing
@@ -242,16 +195,11 @@ impl MultipartStreamParser {
   fn pub mut finish[H: mut + MultipartStreamHandler](
     handler: mut H,
   ) -> Result[Int, Error] {
-    # If we're at a boundary, check if it's end boundary
-    match @state {
-      case AtBoundary -> {
-        # Process AtBoundary state one more time
-        match process_at_boundary(self, handler) {
-          case Ok(_) -> {}
-          case Error(e) -> return Result.Error(e)
-        }
-      }
-      case _ -> {}
+    # Drain with EOF semantics: flush any retained body tail and process every
+    # buffered part instead of stopping after a fixed number of iterations.
+    match drain_buffer(self, handler, @default_encoding, true) {
+      case Ok(_) -> {}
+      case Error(e) -> return Result.Error(e)
     }
 
     # Ensure we're in a valid end state
@@ -327,6 +275,67 @@ impl MultipartStreamParser {
       }
     }
   }
+}
+
+# Drain the parser buffer until no more progress can be made
+#
+# Progress means the state advanced or the buffer shrank. The iteration cap is
+# a safety net only: every productive iteration consumes at least one byte, so
+# a buffer of N bytes cannot require more than N + 32 iterations. This avoids
+# the old fixed 1000-iteration budget, which silently truncated messages with
+# roughly 333 parts.
+fn drain_buffer[H: mut + MultipartStreamHandler](
+  parser: mut MultipartStreamParser,
+  handler: mut H,
+  default_encoding: String,
+  at_eof: Bool,
+) -> Result[Int, Error] {
+  let max_iterations = parser.buffer.size + 32
+  let mut iterations = 0
+
+  while iterations < max_iterations {
+    let old_state = parser.state.to_int
+    let old_buffer_size = parser.buffer.size
+
+    match parser.state {
+      case Preamble -> {
+        match process_preamble(parser, handler) {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
+        }
+      }
+      case AtBoundary -> {
+        match process_at_boundary(parser, handler) {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
+        }
+      }
+      case ReadingHeaders -> {
+        match process_reading_headers(parser, handler, default_encoding) {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
+        }
+      }
+      case ReadingBody -> {
+        match process_reading_body(parser, handler, default_encoding, at_eof) {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
+        }
+      }
+      case AtEndBoundary -> return Result.Ok(0)
+      case Done -> return Result.Ok(0)
+    }
+
+    iterations = iterations + 1
+
+    if
+      parser.state.to_int == old_state and parser.buffer.size == old_buffer_size
+    {
+      break
+    }
+  }
+
+  Result.Ok(0)
 }
 
 # Process Preamble state
