@@ -232,6 +232,28 @@ fn pub is_email_local_special(byte: Int) -> Bool {
     or byte == ASCII_TILDE
 }
 
+# Check if a byte is a MIME tspecial (RFC 2045)
+#
+# tspecials = "(" / ")" / "<" / ">" / "@" / "," / ";" / ":" / "\" / <">
+#           / "/" / "[" / "]" / "?" / "="
+fn pub is_mime_tspecial(byte: Int) -> Bool {
+  byte == ASCII_LPAREN
+    or byte == ASCII_RPAREN
+    or byte == ASCII_LESS_THAN
+    or byte == ASCII_GREATER_THAN
+    or byte == ASCII_AT
+    or byte == ASCII_COMMA
+    or byte == ASCII_SEMICOLON
+    or byte == ASCII_COLON
+    or byte == ASCII_BACKSLASH
+    or byte == ASCII_DQUOTE
+    or byte == ASCII_SLASH
+    or byte == ASCII_LEFT_BRACKET
+    or byte == ASCII_RIGHT_BRACKET
+    or byte == ASCII_QUESTION
+    or byte == ASCII_EQUALS
+}
+
 # Check if a byte is a valid domain character (alphanumeric, dot, or hyphen)
 fn pub is_domain_char(byte: Int) -> Bool {
   is_alnum(byte) or byte == ASCII_DOT or byte == ASCII_HYPHEN

@@ -105,7 +105,22 @@ fn pub tests(t: mut Tests) {
     t.false(is_valid_mime_subtype('plain;text'))
     t.false(is_valid_mime_subtype('plain(text)'))
     t.false(is_valid_mime_subtype('plain<text>'))
-    t.false(is_valid_mime_subtype('plain{text}'))
+    t.false(is_valid_mime_subtype('plain[text]'))
+    t.false(is_valid_mime_subtype('plain=text'))
+    t.false(is_valid_mime_subtype('plain?text'))
+    t.false(is_valid_mime_subtype('plain@text'))
+    t.false(is_valid_mime_subtype('plain,text'))
+    t.false(is_valid_mime_subtype('plain;char'))
+  })
+
+  t.test('is_valid_mime_subtype_braces_are_token_chars', fn (t) {
+    # RFC 2045 tspecials do not include '{' or '}', so they are legal here
+    t.true(is_valid_mime_subtype('plain{text}'))
+  })
+
+  t.test('is_valid_mime_subtype_non_ascii_rejected', fn (t) {
+    t.false(is_valid_mime_subtype('pläin'))
+    t.false(is_valid_mime_subtype('plain\u{7F}'))
   })
 
   t.test('is_valid_mime_subtype_control_chars', fn (t) {

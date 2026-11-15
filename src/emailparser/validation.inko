@@ -179,11 +179,10 @@
 # ```
 
 import emailparser.ascii (
-  ASCII_APOSTROPHE, ASCII_AT, ASCII_BACKSLASH, ASCII_COLON, ASCII_COMMA,
-  ASCII_DEL, ASCII_DOT, ASCII_DQUOTE, ASCII_EQUALS, ASCII_GREATER_THAN,
-  ASCII_HYPHEN, ASCII_LEFT_BRACE, ASCII_LESS_THAN, ASCII_LPAREN, ASCII_PLUS,
-  ASCII_QUESTION, ASCII_RIGHT_BRACE, ASCII_RPAREN, ASCII_SEMICOLON, ASCII_SLASH,
-  ASCII_SPACE, ASCII_UNDERSCORE, is_alnum, is_control_char, is_printable_ascii,
+  ASCII_APOSTROPHE, ASCII_COLON, ASCII_COMMA, ASCII_DEL, ASCII_DOT,
+  ASCII_EQUALS, ASCII_HYPHEN, ASCII_LPAREN, ASCII_PLUS, ASCII_QUESTION,
+  ASCII_RPAREN, ASCII_SLASH, ASCII_SPACE, ASCII_UNDERSCORE, is_alnum,
+  is_control_char, is_mime_tspecial, is_printable_ascii,
 )
 import emailparser.limits (MAX_BOUNDARY_LENGTH)
 
@@ -229,27 +228,12 @@ fn pub is_valid_mime_subtype(subtype: String) -> Bool {
   while i < subtype.size {
     match subtype.get(i) {
       case Ok(byte) -> {
-        # Reject control characters, spaces, and MIME special characters
-        if is_control_char(byte) or byte == ASCII_SPACE { return false }
+        # RFC 2045: token = 1*<any CHAR except SPACE, CTLs or tspecials>.
+        # Printable ASCII is 33-126, which excludes spaces, control
+        # characters, DEL and every non-ASCII byte.
+        if !is_printable_ascii(byte) { return false }
 
-        # MIME tspecials: ()<>[];:@\\,/\"
-        if
-          byte == ASCII_LPAREN
-            or byte == ASCII_RPAREN
-            or byte == ASCII_LESS_THAN
-            or byte == ASCII_GREATER_THAN
-            or byte == ASCII_LEFT_BRACE
-            or byte == ASCII_RIGHT_BRACE
-            or byte == ASCII_SEMICOLON
-            or byte == ASCII_COLON
-            or byte == ASCII_AT
-            or byte == ASCII_BACKSLASH
-            or byte == ASCII_COMMA
-            or byte == ASCII_SLASH
-            or byte == ASCII_DQUOTE
-        {
-          return false
-        }
+        if is_mime_tspecial(byte) { return false }
 
         i = i + 1
       }
@@ -289,8 +273,10 @@ fn pub is_valid_mime_type(content_type: String) -> Bool {
 
   match slash_pos {
     case Some(pos) -> {
-      let type_part = content_type.substring(0, pos)
-      let subtype_part = content_type.substring(pos + 1, content_type.size)
+      let type_part = content_type.slice(0, pos).to_string
+      let subtype_part = content_type
+        .slice(pos + 1, content_type.size)
+        .to_string
 
       # Validate type and subtype (both must be valid tokens)
       is_valid_mime_subtype(type_part) and is_valid_mime_subtype(subtype_part)
