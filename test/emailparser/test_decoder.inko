@@ -5,7 +5,8 @@
 # Tests for early size checks in decode_body_impl
 
 import emailparser.decoder (
-  decode_body_impl, decode_charset, decode_rfc2047_quoted_printable,
+  decode_body_impl, decode_charset, decode_header_value_impl,
+  decode_rfc2047_quoted_printable,
 )
 import std.test (Tests)
 
@@ -255,5 +256,27 @@ fn pub tests(t: mut Tests) {
     let decoded = decode_charset(bytes, 'x-unknown')
 
     t.equal(decoded, '\u{FFFD}A')
+  })
+
+  # Non-ASCII text around an encoded word must not shift byte offsets:
+  # index_of returns byte offsets while substring is character indexed.
+  t.test('decode_header_value_non_ascii_before_word', fn (t) {
+    let decoded = decode_header_value_impl('Grüße =?utf-8?B?SGVsbG8=?=')
+
+    t.equal(decoded, 'Grüße Hello')
+  })
+
+  t.test('decode_header_value_non_ascii_between_words', fn (t) {
+    let decoded = decode_header_value_impl(
+      '=?utf-8?B?SGVsbG8=?= Ü =?utf-8?B?V29ybGQ=?=',
+    )
+
+    t.equal(decoded, 'Hello Ü World')
+  })
+
+  t.test('decode_header_value_non_ascii_after_word', fn (t) {
+    let decoded = decode_header_value_impl('=?utf-8?B?SGVsbG8=?= Grüße')
+
+    t.equal(decoded, 'Hello Grüße')
   })
 }

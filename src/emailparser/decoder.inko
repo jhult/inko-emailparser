@@ -533,7 +533,7 @@ fn pub decode_header_value_impl(raw: String) -> String {
           case Some(end) -> {
             # Push text before the encoded word
             if begin > pos {
-              let before = raw.substring(pos, begin)
+              let before = raw.slice(pos, begin).to_string
 
               # RFC 2047 section 6.2: whitespace between two adjacent
               # encoded words is ignored.
@@ -543,7 +543,7 @@ fn pub decode_header_value_impl(raw: String) -> String {
             }
 
             # Decode and push the encoded word
-            let encoded_word = raw.substring(begin, end)
+            let encoded_word = raw.slice(begin, end).to_string
             let decoded = decode_rfc2047_word(encoded_word)
             let decoded_bytes = decoded.to_byte_array
 
@@ -562,7 +562,7 @@ fn pub decode_header_value_impl(raw: String) -> String {
 
   # Push any remaining text after the last encoded word
   if pos < raw.size {
-    let remaining = raw.substring(pos, raw.size)
+    let remaining = raw.slice(pos, raw.size).to_string
     let remaining_bytes = remaining.to_byte_array
 
     result.append(remaining_bytes)
