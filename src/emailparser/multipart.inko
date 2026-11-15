@@ -733,8 +733,8 @@ fn pub parse_single_multipart_part(
 
   match newline_pos {
     case Some(pos) -> {
-      let part_headers_raw = trimmed.substring(0, pos)
-      let part_body_raw = trimmed.substring(pos + 2, trimmed.size)
+      let part_headers_raw = trimmed.slice(0, pos).to_string
+      let part_body_raw = trimmed.slice(pos + 2, trimmed.size).to_string
 
       let part_headers = match
         parse_multipart_part_headers(

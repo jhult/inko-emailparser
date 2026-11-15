@@ -17,7 +17,7 @@ import emailparser.error (Error, Severity, is_recoverable_part_error)
 import emailparser.header (
   extract_extra_headers, extract_filename_param, get_header_value_impl,
   get_param_value_impl, parse_content_disposition_impl, parse_content_type_impl,
-  parse_headers_impl,
+  parse_headers_impl, split_header_body,
 )
 import emailparser.header_extraction (
   parse_address_headers, parse_basic_headers, parse_mime_metadata,
@@ -205,21 +205,8 @@ impl StreamingParser {
       return Result.Error(failure)
     }
 
-    # Split headers and body
-    let split_pos = normalized.index_of('\n\n', 0)
-
-    let (headers_raw, body_raw) = match split_pos {
-      case Some(pos) -> {
-        (
-          normalized.substring(0, pos),
-          normalized.substring(pos + 2, normalized.size),
-        )
-      }
-      case None -> {
-        # No body section
-        (normalized.clone(), '')
-      }
-    }
+    # Split headers and body (byte-offset safe for non-ASCII headers)
+    let (headers_raw, body_raw) = split_header_body(normalized)
 
     # Parse headers
     let headers = match
@@ -468,7 +455,7 @@ impl StreamingParser {
 
           match separator {
             case Some((pos, separator_size)) -> {
-              let headers_raw = buffer_str.substring(0, pos)
+              let headers_raw = buffer_str.slice(0, pos).to_string
 
               headers = match
                 parse_headers_impl(

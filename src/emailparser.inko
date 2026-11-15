@@ -25,6 +25,7 @@ import emailparser.header (
   extract_extra_headers, extract_filename_param, get_header_value_impl,
   get_param_value_impl, is_standard_header_impl, parse_content_disposition_impl,
   parse_content_type_impl, parse_headers_impl, sanitize_filename,
+  split_header_body,
 )
 import emailparser.header_extraction (
   parse_address_headers, parse_basic_headers, parse_mime_metadata,
@@ -431,23 +432,10 @@ impl EmailParser {
       )
     }
 
-    # Split headers and body
-    # RFC 5322 specifies CRLF, but we also accept LF-only for compatibility
-    # Body is optional - if no blank line found, treat entire email as headers
-    let split_pos = normalized.index_of('\n\n', 0)
-
-    let (headers_raw, body_raw) = match split_pos {
-      case Some(pos) -> {
-        (
-          normalized.substring(0, pos),
-          normalized.substring(pos + 2, normalized.size),
-        )
-      }
-      case None -> {
-        # No body section - treat entire email as headers with empty body
-        (normalized.clone(), '')
-      }
-    }
+    # Split headers and body. RFC 5322 specifies CRLF, but we also accept
+    # LF-only for compatibility. Body is optional - if no blank line is found,
+    # the entire email is treated as headers.
+    let (headers_raw, body_raw) = split_header_body(normalized)
 
     # Parse headers
     let headers = match

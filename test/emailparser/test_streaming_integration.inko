@@ -207,6 +207,34 @@ fn pub tests(t: mut Tests) {
     }
   })
 
+  t.test('non_ascii_header_streaming_matches_buffered', fn (t) {
+    # `index_of` returns byte offsets and `substring` is character indexed:
+    # mixing them used to shift the header/body split for non-ASCII headers.
+    let email = 'Subject: héllo wörld\nFrom: a@example.com\nTo: b@example.com\nContent-Type: text/plain\n\nBödy content'
+
+    let parser = EmailParser.new
+    let buffered = match parser.parse(email) {
+      case Ok(m) -> m
+      case Error(e) -> {
+        t.equal('should parse', e.to_message)
+        return
+      }
+    }
+
+    t.equal(buffered.subject, 'héllo wörld')
+
+    let streaming_parser = StreamingParser.new
+    let mut handler = MemoryBufferingHandler.new
+
+    match streaming_parser.parse_stream(email, handler) {
+      case Ok(result) -> {
+        t.equal(result.subject, 'héllo wörld')
+        t.equal(handler.get_text_body.trim, 'Bödy content')
+      }
+      case Error(e) -> t.equal('should parse streaming', e.to_message)
+    }
+  })
+
   t.test('simple_text_email_matches_non_streaming', fn (t) {
     let mut generator = TestDataGenerator.new
     let email = generator.generate_text_email(

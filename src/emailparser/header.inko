@@ -123,6 +123,27 @@ fn pub is_valid_field_name(name: String) -> Bool {
 # - Header count limit enforced to prevent memory exhaustion
 # - Strict mode detects malformed headers that could be attacks
 #
+# Split a message into its header section and body
+#
+# The header section ends at the first blank line ("\n\n"). When no blank line
+# is present the entire input is treated as headers, matching RFC 5322's
+# allowance for header-only messages.
+#
+# `String.index_of` and `String.slice` both use byte offsets, while
+# `String.substring` uses character offsets. Slicing here keeps messages with
+# non-ASCII headers intact.
+fn pub split_header_body(input: String) -> (String, String) {
+  match input.index_of('\n\n', 0) {
+    case Some(pos) -> {
+      (
+        input.slice(0, pos).to_string,
+        input.slice(pos + 2, input.size).to_string,
+      )
+    }
+    case None -> (input.clone, '')
+  }
+}
+
 # Performance optimizations:
 # - Lowercase header names cached to avoid O(n²) conversions
 # - Case-insensitive comparison without repeated string copies
