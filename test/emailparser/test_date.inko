@@ -56,32 +56,6 @@ fn pub tests(t: mut Tests) {
     t.equal(formatter.format_month(13), 'Jan')
   })
 
-  t.test('format_timezone_offset', fn (t) {
-    let default_formatter = EmailDateFormatter.new
-
-    t.equal(default_formatter.format_timezone_offset, '+0000')
-
-    let utc_formatter = EmailDateFormatter.with_timezone('+0000')
-
-    t.equal(utc_formatter.format_timezone_offset, '+0000')
-
-    let est_formatter = EmailDateFormatter.with_timezone('-0500')
-
-    t.equal(est_formatter.format_timezone_offset, '-0500')
-
-    let pst_formatter = EmailDateFormatter.with_timezone('-0800')
-
-    t.equal(pst_formatter.format_timezone_offset, '-0800')
-
-    let cst_formatter = EmailDateFormatter.with_timezone('+0800')
-
-    t.equal(cst_formatter.format_timezone_offset, '+0800')
-
-    let invalid_formatter = EmailDateFormatter.with_timezone('invalid')
-
-    t.equal(invalid_formatter.format_timezone_offset, '+0000')
-  })
-
   t.test('format_now', fn (t) {
     let formatter = EmailDateFormatter.new
     let date_str = formatter.format_now
@@ -233,17 +207,18 @@ fn pub tests(t: mut Tests) {
   })
 
   t.test('invalid_timezone_hours_fall_back_to_utc', fn (t) {
-    let too_many_hours = EmailDateFormatter.with_timezone('+9900')
+    # Out-of-range offsets are rejected and rendered as UTC
+    t.true(
+      format_email_date_with_tz(DateTime.local, '+9900').ends_with?('+0000'),
+    )
+    t.true(
+      format_email_date_with_tz(DateTime.local, '-1260').ends_with?('+0000'),
+    )
 
-    t.equal(too_many_hours.format_timezone_offset, '+0000')
-
-    let too_many_minutes = EmailDateFormatter.with_timezone('-1260')
-
-    t.equal(too_many_minutes.format_timezone_offset, '+0000')
-
-    let valid = EmailDateFormatter.with_timezone('+1400')
-
-    t.equal(valid.format_timezone_offset, '+1400')
+    # +1400 is the largest valid offset and is kept
+    t.true(
+      format_email_date_with_tz(DateTime.local, '+1400').ends_with?('+1400'),
+    )
   })
 
   t.test('format_with_invalid_timezone_uses_utc', fn (t) {

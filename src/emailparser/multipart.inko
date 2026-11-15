@@ -33,12 +33,9 @@
 #   - Output: Tuple of (text_body, html_body, attachments_array)
 #   - Handles: Nested multipart, text extraction, attachment parsing
 #
-# And one helper function:
-#
-# - `merge_multipart_part`: Merge a single part into existing results
-#   - Updates: text_body, html_body based on content type
-#   - Creates: EmailAttachment for disposition="attachment" parts
-#   - Returns: Updated tuple of (text, html, attachment)
+# Every other function in this module is an internal helper. The helpers
+# assume the input has already been normalized to LF-only line endings by the
+# caller (`EmailParser.parse` / `parse_multipart`).
 #
 # ## RFC Compliance
 #
@@ -77,7 +74,7 @@ import std.option (Option)
 import std.result (Result)
 
 # Process a single multipart part and merge results
-fn pub merge_multipart_part(
+fn merge_multipart_part(
   text_body: ref Option[String],
   html_body: ref Option[String],
   ct_main: String,
@@ -473,7 +470,7 @@ fn parse_multipart_impl(
 }
 
 # Split and validate multipart body by boundary
-fn pub split_multipart_body(
+fn split_multipart_body(
   raw: String,
   boundary: String,
 ) -> Result[Array[String], Error] {
@@ -619,7 +616,7 @@ fn bytes_range_to_string(bytes: ref ByteArray, start: Int, end: Int) -> String {
 }
 
 # Parse headers from a single multipart part
-fn pub parse_multipart_part_headers(
+fn parse_multipart_part_headers(
   part_headers_raw: String,
   max_headers: Int,
   strict_mode: Bool,
@@ -633,7 +630,7 @@ fn pub parse_multipart_part_headers(
 }
 
 # Extract metadata from a multipart part's headers
-fn pub extract_part_metadata(
+fn extract_part_metadata(
   part_headers: ref Array[(String, String)],
   default_encoding: String,
   strict_mode: Bool,
@@ -684,7 +681,7 @@ fn pub extract_part_metadata(
 }
 
 # Process a single multipart part's body
-fn pub process_multipart_part_body(
+fn process_multipart_part_body(
   part_body_raw: String,
   transfer_encoding: String,
   max_attachment_size: Int,
@@ -702,9 +699,7 @@ fn pub process_multipart_part_body(
 }
 
 # Extract content ID from part headers
-fn pub extract_content_id(
-  part_headers: Array[(String, String)],
-) -> Option[String] {
+fn extract_content_id(part_headers: Array[(String, String)]) -> Option[String] {
   get_header_value_impl(part_headers, 'Content-ID').map(fn (id) {
     let trimmed = id.trim
 
@@ -721,7 +716,7 @@ fn pub extract_content_id(
 }
 
 # Parse a single multipart part from its raw content
-fn pub parse_single_multipart_part(
+fn parse_single_multipart_part(
   trimmed: String,
   max_attachment_size: Int,
   max_headers: Int,

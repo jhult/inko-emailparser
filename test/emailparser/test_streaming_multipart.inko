@@ -92,32 +92,24 @@ impl MultipartStreamHandler for TestHandler {
 
 fn pub tests(t: mut Tests) {
   t.test('multipart_parser_new', fn (t) {
-    let parser = match
+    match
       MultipartStreamParser.new(
         boundary: 'boundary123',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
-      case Ok(p) -> p
+      case Ok(_) -> t.true(true)
       case Error(e) -> panic('Failed to create parser: ${e.to_message}')
     }
-
-    t.equal(parser.current_depth, 0)
   })
 
   t.test('multipart_simple_single_part', fn (t) {
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'boundary123',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -154,11 +146,8 @@ Hello World
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'abc123',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -198,11 +187,8 @@ Part Two
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'test',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -253,11 +239,8 @@ Part Two
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'splitboundary',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -294,11 +277,8 @@ Part Two
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'attach',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -344,11 +324,8 @@ Binary data
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'hdr',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -386,11 +363,8 @@ Content-ID: <part1@example.com>
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'empty',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -427,11 +401,8 @@ Content-Type: text/html
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'crlf',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -465,11 +436,8 @@ Content-Type: text/html
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'b',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -498,11 +466,8 @@ Content-Type: text/html
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'pre',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -539,11 +504,8 @@ Actual content
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'file',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -579,11 +541,8 @@ File contents
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'large',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -629,11 +588,8 @@ Content-Type: text/plain
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'many',
-        max_depth: 10,
-        chunk_size: 65536,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -674,11 +630,8 @@ Content-Type: text/plain
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'noend',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: true,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -711,11 +664,8 @@ Test'
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'empty',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -741,11 +691,8 @@ Test'
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'default',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -782,11 +729,8 @@ Plain text without headers
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'mixed',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p
@@ -817,11 +761,8 @@ Plain text without headers
     match
       MultipartStreamParser.new(
         boundary: 'bad"quoted',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: false,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(_) -> t.false(true)
@@ -833,11 +774,8 @@ Plain text without headers
     let mut parser = match
       MultipartStreamParser.new(
         boundary: 'empty',
-        max_depth: 10,
-        chunk_size: 8192,
         strict_mode: true,
         max_headers: 100,
-        max_attachment_size: 10_000_000,
       )
     {
       case Ok(p) -> p

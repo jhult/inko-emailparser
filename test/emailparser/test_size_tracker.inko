@@ -45,68 +45,10 @@ fn pub tests(t: mut Tests) {
     }
   })
 
-  t.test('track_decoded_within_limit', fn (t) {
-    let mut tracker = SizeTracker.new(1000, true)
-
-    match tracker.track_decoded(100) {
-      case Ok(size) -> {
-        t.equal(size, 100)
-        t.equal(tracker.current_size, 100)
-      }
-      case Error(_) -> t.equal('should pass', 'got error')
-    }
-  })
-
-  t.test('track_decoded_multiple_calls', fn (t) {
-    let mut tracker = SizeTracker.new(1000, true)
-
-    match tracker.track_decoded(100) {
-      case Ok(_) -> {}
-      case Error(_) -> t.equal('should pass', 'got error')
-    }
-
-    match tracker.track_decoded(200) {
-      case Ok(size) -> {
-        t.equal(size, 300)
-        t.equal(tracker.current_size, 300)
-      }
-      case Error(_) -> t.equal('should pass', 'got error')
-    }
-  })
-
-  t.test('track_decoded_exceeds_limit', fn (t) {
-    let mut tracker = SizeTracker.new(1000, true)
-
-    match tracker.track_decoded(900) {
-      case Ok(_) -> {}
-      case Error(_) -> t.equal('should pass', 'got error')
-    }
-
-    match tracker.track_decoded(101) {
-      case Ok(_) -> t.equal('should error', 'got ok')
-      case Error(e) -> t.true(e.to_message.contains?('Decoded'))
-    }
-  })
-
-  t.test('track_decoded_at_limit', fn (t) {
-    let mut tracker = SizeTracker.new(1000, true)
-
-    match tracker.track_decoded(1000) {
-      case Ok(size) -> {
-        t.equal(size, 1000)
-        t.equal(tracker.current_size, 1000)
-      }
-      case Error(_) -> t.equal('should pass', 'got error')
-    }
-  })
-
   t.test('check_add_within_limit', fn (t) {
-    let mut tracker = SizeTracker.new(1000, true)
+    let mut tracker = SizeTracker.new(1000)
 
-    match tracker.track_decoded(500) {
-      case Ok(_) -> {}
-      case Error(_) -> t.equal('should pass', 'got error')
-    }
+    let _ = tracker.add(500)
 
     match tracker.check_add(400) {
       case Ok(result) -> t.equal(result, true)
@@ -115,12 +57,9 @@ fn pub tests(t: mut Tests) {
   })
 
   t.test('check_add_exceeds_limit', fn (t) {
-    let mut tracker = SizeTracker.new(1000, true)
+    let mut tracker = SizeTracker.new(1000)
 
-    match tracker.track_decoded(500) {
-      case Ok(_) -> {}
-      case Error(_) -> t.equal('should pass', 'got error')
-    }
+    let _ = tracker.add(500)
 
     match tracker.check_add(501) {
       case Ok(_) -> t.equal('should error', 'got ok')
@@ -129,7 +68,7 @@ fn pub tests(t: mut Tests) {
   })
 
   t.test('add_without_check', fn (t) {
-    let mut tracker = SizeTracker.new(1000, true)
+    let mut tracker = SizeTracker.new(1000)
 
     let size = tracker.add(100)
 
@@ -138,75 +77,29 @@ fn pub tests(t: mut Tests) {
   })
 
   t.test('remaining_space', fn (t) {
-    let mut tracker = SizeTracker.new(1000, true)
+    let mut tracker = SizeTracker.new(1000)
 
     t.equal(tracker.remaining_space, 1000)
 
-    match tracker.track_decoded(300) {
+    match tracker.check_add(300) {
       case Ok(_) -> {}
       case Error(_) -> {}
     }
+
+    let _ = tracker.add(300)
 
     t.equal(tracker.remaining_space, 700)
   })
 
-  t.test('at_limit_false', fn (t) {
-    let mut tracker = SizeTracker.new(1000, true)
-
-    t.false(tracker.at_limit?)
-
-    match tracker.track_decoded(999) {
-      case Ok(_) -> {}
-      case Error(_) -> {}
-    }
-
-    t.false(tracker.at_limit?)
-  })
-
-  t.test('at_limit_true', fn (t) {
-    let mut tracker = SizeTracker.new(1000, true)
-
-    match tracker.track_decoded(1000) {
-      case Ok(_) -> {}
-      case Error(_) -> {}
-    }
-
-    t.true(tracker.at_limit?)
-  })
-
-  t.test('reset', fn (t) {
-    let mut tracker = SizeTracker.new(1000, true)
-
-    match tracker.track_decoded(500) {
-      case Ok(_) -> {}
-      case Error(_) -> {}
-    }
-
-    t.equal(tracker.current_size, 500)
-
-    tracker.reset
-    t.equal(tracker.current_size, 0)
-  })
-
-  t.test('strict_mode_true', fn (t) {
-    let tracker = SizeTracker.new(1000, true)
-
-    t.true(tracker.strict_mode)
-  })
-
-  t.test('strict_mode_false', fn (t) {
-    let tracker = SizeTracker.new(1000, false)
-
-    t.false(tracker.strict_mode)
-  })
-
   t.test('max_size_preserved', fn (t) {
-    let tracker = SizeTracker.new(1000, true)
+    let mut tracker = SizeTracker.new(1000)
 
-    match tracker.track_decoded(500) {
+    match tracker.check_add(500) {
       case Ok(_) -> {}
       case Error(_) -> {}
     }
+
+    let _ = tracker.add(500)
 
     # Accessing @max_size through remaining_space
     t.equal(tracker.remaining_space, 500)

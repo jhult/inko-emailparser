@@ -36,9 +36,6 @@ type pub enum MultipartState {
   # At the final boundary marker (--boundary--)
   case AtEndBoundary
 
-  # Parsing complete
-  case Done
-
   # Convert state to integer for comparison
   fn pub to_int -> Int {
     match self {
@@ -47,7 +44,6 @@ type pub enum MultipartState {
       case ReadingHeaders -> 2
       case ReadingBody -> 3
       case AtEndBoundary -> 4
-      case Done -> 5
     }
   }
 }
@@ -63,13 +59,6 @@ type pub CurrentPartContext {
   let pub @filename: Option[String]
   let pub @content_id: Option[String]
   let pub @bytes_read: Int
-}
-
-# Context stack entry for nested multipart handling
-type pub ContextStackEntry {
-  let pub @boundary: String
-  let pub @depth: Int
-  let pub @parent_context: Option[CurrentPartContext]
 }
 
 # Handler trait for multipart streaming events
@@ -101,11 +90,9 @@ type pub MultipartStreamParser {
   let mut @state: MultipartState
   let @boundary: String
   let mut @buffer: ByteArray
-  let @max_depth: Int
   let @strict_mode: Bool
   let @max_headers: Int
   let mut @current_context: Option[CurrentPartContext]
-  let mut @context_stack: Array[ContextStackEntry]
   let mut @attachment_count: Int
   let mut @default_encoding: String
 }
@@ -115,18 +102,15 @@ impl MultipartStreamParser {
   #
   # Parameters:
   # - boundary: The boundary string (without leading --)
-  # - max_depth: Maximum nesting depth (default 10)
-  # - chunk_size: Chunk size for reading (default 65536)
   # - strict_mode: Enable strict MIME validation
   # - max_headers: Maximum number of headers per part
-  # - max_attachment_size: Maximum attachment size in bytes
+  #
+  # Depth and attachment-size limits are enforced by the caller
+  # (`StreamingParser`), which owns the nesting and size accounting.
   fn pub static new(
     boundary: String,
-    max_depth: Int,
-    chunk_size: Int,
     strict_mode: Bool,
     max_headers: Int,
-    max_attachment_size: Int,
   ) -> Result[MultipartStreamParser, Error] {
     if !is_valid_boundary(boundary.clone) {
       return Result.Error(
@@ -145,20 +129,13 @@ impl MultipartStreamParser {
         state: MultipartState.Preamble,
         boundary: boundary,
         buffer: ByteArray.new,
-        max_depth: max_depth,
         strict_mode: strict_mode,
         max_headers: max_headers,
         current_context: Option.None,
-        context_stack: [],
         attachment_count: 0,
         default_encoding: '',
       ),
     )
-  }
-
-  # Get current nesting depth
-  fn pub current_depth -> Int {
-    @context_stack.size
   }
 
   # Feed data to the parser
@@ -205,7 +182,6 @@ impl MultipartStreamParser {
     # Ensure we're in a valid end state
     match @state {
       case AtEndBoundary -> Result.Ok(0)
-      case Done -> Result.Ok(0)
       case Preamble -> {
         # No parts found - could be valid for empty multipart
         if @strict_mode {
@@ -323,7 +299,6 @@ fn drain_buffer[H: mut + MultipartStreamHandler](
         }
       }
       case AtEndBoundary -> return Result.Ok(0)
-      case Done -> return Result.Ok(0)
     }
 
     iterations = iterations + 1

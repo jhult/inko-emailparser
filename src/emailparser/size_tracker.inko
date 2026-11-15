@@ -65,13 +65,12 @@ import std.result (Result)
 type pub SizeTracker {
   let mut @current_size: Int
   let @max_size: Int
-  let @strict_mode: Bool
 }
 
 impl SizeTracker {
   # Create a new size tracker with specified maximum
-  fn pub static new(max_size: Int, strict_mode: Bool) -> SizeTracker {
-    SizeTracker(current_size: 0, max_size: max_size, strict_mode: strict_mode)
+  fn pub static new(max_size: Int) -> SizeTracker {
+    SizeTracker(current_size: 0, max_size: max_size)
   }
 
   # Check if adding `additional` bytes would exceed `max` limit
@@ -100,53 +99,14 @@ impl SizeTracker {
     }
   }
 
-  # Track decoded data and check against limit
-  # Returns Ok with the new size if within limit, Error otherwise
-  fn pub mut track_decoded(amount: Int) -> Result[Int, Error] {
-    let new_size = @current_size + amount
-
-    if new_size > @max_size {
-      Result.Error(
-        Error.DecodedSizeTooLarge(
-          Severity.Error,
-          new_size,
-          @max_size,
-          'decoded data',
-          Option.None,
-          Option.None,
-          Option.None,
-        ),
-      )
-    } else {
-      @current_size = new_size
-      Result.Ok(new_size)
-    }
-  }
-
   # Check if an allocation of `additional` bytes is allowed
   # Returns Ok(true) if allowed, Error if limit would be exceeded
-  fn pub mut check_add(additional: Int) -> Result[Bool, Error] {
-    let new_size = @current_size + additional
-
-    if new_size > @max_size {
-      Result.Error(
-        Error.DecodedSizeTooLarge(
-          Severity.Error,
-          new_size,
-          @max_size,
-          'allocation',
-          Option.None,
-          Option.None,
-          Option.None,
-        ),
-      )
-    } else {
-      Result.Ok(true)
-    }
+  fn pub check_add(additional: Int) -> Result[Bool, Error] {
+    SizeTracker.check_allocation(@current_size, additional, @max_size)
   }
 
   # Add bytes to tracker without checking (use with caution)
-  # Should only be called after check_add or track_decoded succeeds
+  # Should only be called after check_add succeeds
   fn pub mut add(amount: Int) -> Int {
     @current_size = @current_size + amount
     @current_size
@@ -160,15 +120,5 @@ impl SizeTracker {
   # Get remaining space before hitting limit
   fn pub remaining_space -> Int {
     @max_size - @current_size
-  }
-
-  # Check if at or over limit
-  fn pub at_limit? -> Bool {
-    @current_size >= @max_size
-  }
-
-  # Reset tracker to zero
-  fn pub mut reset {
-    @current_size = 0
   }
 }

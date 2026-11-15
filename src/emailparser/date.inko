@@ -241,16 +241,6 @@ impl EmailDateFormatter {
       case _ -> 'Jan'
     }
   }
-
-  # Format timezone offset, falling back to UTC for invalid values
-  fn pub format_timezone_offset -> String {
-    match parse_timezone_seconds(@timezone) {
-      case Some(_) -> {
-        if @timezone.size == 5 { @timezone.to_string } else { '+${@timezone}' }
-      }
-      case None -> '+0000'
-    }
-  }
 }
 
 # Format current time as RFC 5322 date string

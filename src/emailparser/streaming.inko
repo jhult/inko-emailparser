@@ -1771,14 +1771,7 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
 ) -> Result[Int, Error] {
   let mut total_bytes = start_total_bytes
   let mut parser = match
-    MultipartStreamParser.new(
-      boundary,
-      max_depth,
-      chunk_size,
-      strict_mode,
-      max_headers,
-      max_size,
-    )
+    MultipartStreamParser.new(boundary, strict_mode, max_headers)
   {
     case Ok(p) -> p
     case Error(e) -> return Result.Error(e)
@@ -1790,7 +1783,6 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
     current_info: Option.None,
     base64_decoder: Option.None,
     qp_decoder: Option.None,
-    current_encoding: default_encoding,
     current_content_type: 'text/plain',
     max_size: max_size,
     chunk_size: chunk_size,
@@ -1871,7 +1863,6 @@ type MultipartHandlerWrapper[H: mut + StreamHandler] {
   let mut @current_info: Option[AttachmentInfo]
   let mut @base64_decoder: Option[Base64StreamingDecoder]
   let mut @qp_decoder: Option[QuotedPrintableStreamingDecoder]
-  let mut @current_encoding: String
   let mut @current_content_type: String
   let @max_size: Int
   let @chunk_size: Int
@@ -1952,8 +1943,6 @@ if
     )
       .or('7bit')
 
-    @current_encoding = content_transfer_encoding
-
     let content_id = get_header_value_impl(ref headers, 'Content-ID')
 
     # MultipartStreamParser already applies the shared classification.
@@ -2018,8 +2007,6 @@ if
       }
       case None -> {}
     }
-
-    @current_encoding = content_transfer_encoding
 
     let data_str = data.clone
 
@@ -2482,14 +2469,7 @@ fn finish_nested[H: mut + StreamHandler](
   }
 
   let mut nested_parser = match
-    MultipartStreamParser.new(
-      nested_boundary,
-      max_depth,
-      chunk_size,
-      false,
-      max_headers,
-      max_size,
-    )
+    MultipartStreamParser.new(nested_boundary, false, max_headers)
   {
     case Ok(p) -> p
     case Error(e) -> return Result.Error(e)
@@ -2501,7 +2481,6 @@ fn finish_nested[H: mut + StreamHandler](
     current_info: Option.None,
     base64_decoder: Option.None,
     qp_decoder: Option.None,
-    current_encoding: '7bit',
     current_content_type: 'text/plain',
     max_size: max_size,
     chunk_size: chunk_size,
@@ -2567,18 +2546,10 @@ fn parse_multipart_stream[H: mut + StreamHandler](
   let mut current_info: Option[AttachmentInfo] = Option.None
   let mut base64_decoder: Option[Base64StreamingDecoder] = Option.None
   let mut qp_decoder: Option[QuotedPrintableStreamingDecoder] = Option.None
-  let mut current_encoding: String = default_encoding
   let mut current_content_type: String = 'text/plain'
 
   let mut parser = match
-    MultipartStreamParser.new(
-      boundary,
-      max_depth,
-      chunk_size,
-      strict_mode,
-      max_headers,
-      max_size,
-    )
+    MultipartStreamParser.new(boundary, strict_mode, max_headers)
   {
     case Ok(p) -> p
     case Error(e) -> return Result.Error(e)
@@ -2590,7 +2561,6 @@ fn parse_multipart_stream[H: mut + StreamHandler](
     current_info: current_info,
     base64_decoder: base64_decoder,
     qp_decoder: qp_decoder,
-    current_encoding: current_encoding,
     current_content_type: current_content_type,
     max_size: max_size,
     chunk_size: chunk_size,
