@@ -156,10 +156,10 @@ fn parse_headers_impl(
   max_size: Int,
   max_headers: Int,
 ) -> Result[Array[(String, String)], Error] {
-  # Check email size limit before parsing
+  # Check the header-section size limit before parsing
   if raw.size > max_size {
     return Result.Error(
-      Error.EmailSizeTooLarge(
+      Error.HeaderSectionTooLarge(
         Severity.Error,
         raw.size,
         max_size,

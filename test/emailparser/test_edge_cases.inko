@@ -1498,6 +1498,40 @@ QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB
     }
   })
 
+  t.test('part_headers_ignore_attachment_size_limit', fn (t) {
+    # Part headers used to be parsed with max_attachment_size as their size
+    # limit, so a small attachment limit broke header parsing entirely.
+    let email = 'From: a@example.com\nTo: b@example.com\nSubject: x\nContent-Type: multipart/mixed; boundary=b\n\n--b\nContent-Type: text/plain\n\nhello\n--b--'
+
+    let parser = EmailParser.new.with_max_attachment_size(8)
+
+    match parser.parse(email) {
+      case Ok(msg) -> {
+        match msg.text_body {
+          case Some(body) -> t.true(body.contains?('hello'))
+          case None -> t.true(false)
+        }
+      }
+      case Error(e) -> t.equal('should parse', e.to_message)
+    }
+  })
+
+  t.test('part_headers_respect_strict_mode', fn (t) {
+    # A part header without a colon is ignored when permissive...
+    let email = 'From: a@example.com\nTo: b@example.com\nSubject: x\nContent-Type: multipart/mixed; boundary=b\n\n--b\nContent-Type text/plain\n\nhello\n--b--'
+
+    match EmailParser.new.parse(email) {
+      case Ok(_) -> t.true(true)
+      case Error(e) -> t.equal('permissive should parse', e.to_message)
+    }
+
+    # ...and rejected when strict
+    match EmailParser.new.with_strict_mode(true).parse(email) {
+      case Ok(_) -> t.true(false)
+      case Error(_) -> t.true(true)
+    }
+  })
+
   t.test('is_image_is_case_insensitive', fn (t) {
     let attachment = EmailAttachment.from_decoded_part(
       content_type: 'Image/PNG',

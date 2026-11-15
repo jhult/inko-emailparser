@@ -346,6 +346,26 @@ JVBERi0='
     }
   })
 
+  t.test('parse_async_reader_header_section_limit', fn (t) {
+    let mut parser = StreamingParser.new
+    let mut handler = CollectingHandler.new
+
+    # No blank line, so the parser keeps buffering headers past the 64 KiB cap
+    let mut raw = 'From: a@example.com\nX-Fill: '
+
+    while raw.size < 70_000 { raw = raw + 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
+
+    let mut reader = ByteArrayReader.from_string(raw)
+
+    match parser.parse_async_reader(mut reader, mut handler) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> {
+        t.equal(e.variant, 'HeaderSectionTooLarge')
+        t.equal(handler.errors_received, 1)
+      }
+    }
+  })
+
   t.test('parse_async_reader_rejects_zero_chunk_size', fn (t) {
     let mut config = StreamingConfig.new
 

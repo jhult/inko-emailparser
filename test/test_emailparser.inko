@@ -996,8 +996,8 @@ Body content here.'
     let result = parser.parse(raw_email)
 
     match result {
-      case Ok(msg) -> t.true(msg.subject.size <= 8192)
-      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+      case Ok(_) -> t.equal('should reject oversized headers', 'got Ok result')
+      case Error(e) -> t.equal(e.variant, 'HeaderSectionTooLarge')
     }
   })
 
@@ -1028,11 +1028,7 @@ Body content here.'
 
     match result {
       case Ok(_) -> t.equal('should error in strict mode', 'got Ok result')
-      case Error(e) -> {
-        t.true(
-          e.to_message.contains?('Header value exceeds maximum allowed size'),
-        )
-      }
+      case Error(e) -> t.equal(e.variant, 'HeaderSectionTooLarge')
     }
   })
 

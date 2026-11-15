@@ -71,6 +71,7 @@ import emailparser.header (
   parse_content_disposition_impl, parse_content_type_impl, parse_headers_impl,
   sanitize_filename,
 )
+import emailparser.limits (MAX_HEADERS_SECTION_SIZE)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
@@ -620,10 +621,15 @@ fn bytes_range_to_string(bytes: ref ByteArray, start: Int, end: Int) -> String {
 # Parse headers from a single multipart part
 fn pub parse_multipart_part_headers(
   part_headers_raw: String,
-  max_attachment_size: Int,
   max_headers: Int,
+  strict_mode: Bool,
 ) -> Result[Array[(String, String)], Error] {
-  parse_headers_impl(part_headers_raw, false, max_attachment_size, max_headers)
+  parse_headers_impl(
+    part_headers_raw,
+    strict_mode,
+    MAX_HEADERS_SECTION_SIZE,
+    max_headers,
+  )
 }
 
 # Extract metadata from a multipart part's headers
@@ -740,11 +746,7 @@ fn pub parse_single_multipart_part(
       let part_body_raw = trimmed.slice(pos + 2, trimmed.size).to_string
 
       let part_headers = match
-        parse_multipart_part_headers(
-          part_headers_raw,
-          max_attachment_size,
-          max_headers,
-        )
+        parse_multipart_part_headers(part_headers_raw, max_headers, strict_mode)
       {
         case Ok(h) -> h
         case Error(e) -> return Result.Error(e)

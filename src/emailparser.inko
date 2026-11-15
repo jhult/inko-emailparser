@@ -33,7 +33,7 @@ import emailparser.header_extraction (
 )
 import emailparser.limits (
   MAX_ATTACHMENTS, MAX_ATTACHMENT_SIZE, MAX_EMAIL_SIZE, MAX_HEADERS,
-  MAX_MULTIPART_DEPTH,
+  MAX_HEADERS_SECTION_SIZE, MAX_MULTIPART_DEPTH,
 )
 import emailparser.message_id (parse_message_ids_impl)
 import emailparser.mime (
@@ -442,7 +442,7 @@ impl EmailParser {
       parse_headers_impl(
         headers_raw,
         @config.strict_mode,
-        @config.max_email_size,
+        MAX_HEADERS_SECTION_SIZE,
         @config.max_headers,
       )
     {
@@ -622,7 +622,7 @@ impl EmailParser {
       parse_headers_impl(
         raw,
         @config.strict_mode,
-        @config.max_email_size,
+        MAX_HEADERS_SECTION_SIZE,
         @config.max_headers,
       )
     {

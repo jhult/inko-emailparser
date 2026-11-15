@@ -100,6 +100,14 @@ type pub enum Error {
     Option[Int],
     Option[String],
   )
+  case HeaderSectionTooLarge(
+    Severity,
+    Int,
+    Int,
+    Option[Int],
+    Option[Int],
+    Option[String],
+  )
 
   # Boundary and multipart errors
   case BoundaryNotFound(Severity, Option[Int], Option[Int], Option[String])
@@ -336,6 +344,19 @@ impl Error {
           fragment: frag.clone,
         )
       }
+      case HeaderSectionTooLarge(sev, size, max_size, line, pos, frag) -> {
+        ErrorContext(
+          severity: sev.copy,
+          message: 'Header section exceeds maximum allowed size: '
+            + size.to_string
+            + ' bytes (max: '
+            + max_size.to_string
+            + ' bytes)',
+          line: line.clone,
+          position: pos.clone,
+          fragment: frag.clone,
+        )
+      }
       case BoundaryNotFound(sev, line, pos, frag) -> {
         ErrorContext(
           severity: sev.copy,
@@ -472,6 +493,7 @@ impl Error {
       case HeaderWithoutColon(_, _, _, _) -> 'HeaderWithoutColon'
       case InvalidEmailFormat(_, _, _, _, _) -> 'InvalidEmailFormat'
       case HeaderValueTooLarge(_, _, _, _, _, _) -> 'HeaderValueTooLarge'
+      case HeaderSectionTooLarge(_, _, _, _, _, _) -> 'HeaderSectionTooLarge'
       case BoundaryNotFound(_, _, _, _) -> 'BoundaryNotFound'
       case InvalidBoundary(_, _, _, _, _) -> 'InvalidBoundary'
       case MultipartWithoutParts(_, _, _, _) -> 'MultipartWithoutParts'
@@ -549,6 +571,7 @@ fn pub is_recoverable_part_error(error: ref Error) -> Bool {
     or variant == 'InvalidHeaderFieldName'
     or variant == 'DuplicateHeader'
     or variant == 'HeaderValueTooLarge'
+    or variant == 'HeaderSectionTooLarge'
     or variant == 'DecodingFailed'
     or variant == 'InvalidContentType'
     or variant == 'NoBodyInPart'

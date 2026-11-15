@@ -213,7 +213,7 @@ impl StreamingParser {
       parse_headers_impl(
         headers_raw,
         @config.strict_mode,
-        @config.max_email_size,
+        MAX_HEADERS_SECTION_SIZE,
         @config.max_headers,
       )
     {
@@ -469,7 +469,7 @@ impl StreamingParser {
                 parse_headers_impl(
                   headers_raw,
                   @config.strict_mode,
-                  @config.max_email_size,
+                  MAX_HEADERS_SECTION_SIZE,
                   @config.max_headers,
                 )
               {
@@ -504,8 +504,13 @@ impl StreamingParser {
             }
             case None -> {
               if buffer.size > MAX_HEADERS_SECTION_SIZE {
-                let failure = Error.from_string(
-                  'Headers too large or malformed',
+                let failure = Error.HeaderSectionTooLarge(
+                  Severity.Error,
+                  buffer.size,
+                  MAX_HEADERS_SECTION_SIZE,
+                  Option.None,
+                  Option.None,
+                  Option.None,
                 )
 
                 return Result.Error(notify_error(handler, failure))
@@ -531,7 +536,7 @@ impl StreamingParser {
         parse_headers_impl(
           headers_raw,
           @config.strict_mode,
-          @config.max_email_size,
+          MAX_HEADERS_SECTION_SIZE,
           @config.max_headers,
         )
       {
