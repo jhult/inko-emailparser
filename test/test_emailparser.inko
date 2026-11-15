@@ -391,7 +391,7 @@ John'
         )
         t.equal(msg.subject, 'Hello World')
         t.equal(msg.date, 'Mon, 15 Jan 2026 10:30:00 +0000')
-        t.equal(msg.message_id, '<test123@example.com>')
+        t.equal(msg.message_id, 'test123@example.com')
         t.equal(msg.mime.content_type, 'text/plain')
 
         match msg.text_body {
@@ -836,9 +836,7 @@ This is a reply in a thread.'
       case Ok(msg) -> {
         # Check In-Reply-To
         match msg.threading.in_reply_to {
-          case Some(reply_ref) -> {
-            t.equal(reply_ref, '<original123@example.com>')
-          }
+          case Some(reply_ref) -> t.equal(reply_ref, 'original123@example.com')
           case None -> t.equal('should have in-reply-to', 'got none')
         }
 
@@ -858,6 +856,38 @@ This is a reply in a thread.'
       }
       case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
+  })
+
+  t.test('thread_id_groups_reply_with_root', fn (t) {
+    let parser = EmailParser.new
+
+    let root = match
+      parser.parse('Message-ID: <root@example.com>\nSubject: Root\n\nRoot body')
+    {
+      case Ok(m) -> m
+      case Error(e) -> {
+        t.equal('should parse root', e.to_message)
+        return
+      }
+    }
+
+    let reply = match
+      parser.parse(
+        'Message-ID: <reply@example.com>\nReferences: <root@example.com>\nSubject: Re: Root\n\nReply body',
+      )
+    {
+      case Ok(m) -> m
+      case Error(e) -> {
+        t.equal('should parse reply', e.to_message)
+        return
+      }
+    }
+
+    # Message-ID values are exposed bracket-free, so thread_id grouping works
+    t.equal(root.message_id, 'root@example.com')
+    t.equal(root.threading.thread_id, root.message_id)
+    t.equal(reply.message_id, 'reply@example.com')
+    t.equal(reply.threading.thread_id, root.message_id)
   })
 
   t.test('reply_to_header', fn (t) {

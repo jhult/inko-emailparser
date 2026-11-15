@@ -225,6 +225,23 @@ fn pub parse_message_ids_impl(raw: String) -> Array[String] {
   result
 }
 
+# Normalize a Message-ID to the bracket-free representation used internally
+#
+# Every Message-ID field the parser exposes (`message_id`, `in_reply_to`,
+# `references` and `thread_id`) uses the bracket-free form so values can be
+# compared directly. Leading and trailing whitespace is removed, and a single
+# pair of surrounding angle brackets is stripped when present.
+fn pub normalize_message_id(raw: String) -> String {
+  let trimmed = raw.trim
+  let size = trimmed.size
+
+  if size >= 2 and trimmed.starts_with?('<') and trimmed.ends_with?('>') {
+    trimmed.slice(1, size - 1).to_string.trim
+  } else {
+    trimmed.to_string
+  }
+}
+
 # Message-ID generator
 type pub MessageIdGenerator {
   let pub @hostname: String

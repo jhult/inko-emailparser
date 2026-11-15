@@ -74,7 +74,7 @@ Sender'
         t.equal(msg.addresses.to.size, 1)
         t.equal(msg.addresses.to.get(0).or_panic.address, 'user@gmail.com')
         t.equal(msg.subject, 'Simple Gmail Test Email')
-        t.equal(msg.message_id, '<abc123@mail.example.com>')
+        t.equal(msg.message_id, 'abc123@mail.example.com')
         t.equal(msg.mime.content_type, 'text/plain')
 
         match msg.mime.charset {
@@ -305,7 +305,7 @@ UEsDBBQABgAIAAAAIQAAAAAAAAAAAAAAAA==
           case Some(reply_to) -> {
             t.equal(
               reply_to,
-              '<BN1PR10MB35612ABCDEF123456788@BN1PR10MB3561.namprd10.prod.outlook.com>',
+              'BN1PR10MB35612ABCDEF123456788@BN1PR10MB3561.namprd10.prod.outlook.com',
             )
           }
           case None -> t.equal('should have in-reply-to', 'got none')

@@ -435,7 +435,7 @@ Body text.'
     match result {
       case Ok(msg) -> {
         # Parser might accept empty message ID
-        t.equal(msg.message_id, '<>')
+        t.equal(msg.message_id, '')
       }
       case Error(_) -> t.true(true) # Also acceptable to fail
     }

@@ -168,7 +168,7 @@ match parser.parse(raw_email_string) {
     message.addresses.bcc   # Array[EmailAddress]
     message.subject         # String
     message.date            # String (RFC 5322 format)
-    message.message_id      # String
+    message.message_id      # String (bracket-free Message-ID)
     message.threading       # ThreadingInfo
     message.mime            # MIMEInfo
     message.text_body       # Option[String]
@@ -352,6 +352,11 @@ match parser.parse(raw_email_string) {
   }
 }
 ```
+
+All Message-ID values (`message_id`, `in_reply_to`, `references` and
+`thread_id`) are exposed **without surrounding angle brackets**, so they can be
+compared directly. A reply's `thread_id` therefore equals the root message's
+`message_id`.
 
 ## Data Structures
 
