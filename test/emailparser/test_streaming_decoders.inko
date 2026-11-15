@@ -238,13 +238,14 @@ fn pub tests(t: mut Tests) {
   t.test('qp_soft_line_break_split', fn (t) {
     let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, false)
 
+    # Only the incomplete '=' is buffered; 'Hello' is emitted right away
     match decoder.feed('Hello=') {
-      case Ok(decoded) -> t.equal(decoded.size, 0)
+      case Ok(decoded) -> t.equal(decoded.into_string, 'Hello')
       case Error(e) -> panic('Failed: ${e}')
     }
 
     match decoder.feed('\r\nWorld') {
-      case Ok(decoded) -> t.equal(decoded.into_string, 'HelloWorld')
+      case Ok(decoded) -> t.equal(decoded.into_string, 'World')
       case Error(e) -> panic('Failed: ${e}')
     }
   })
@@ -286,6 +287,64 @@ fn pub tests(t: mut Tests) {
       case Ok(_) -> t.false(true)
       case Error(_) -> t.true(true)
     }
+  })
+
+  t.test('qp_trailing_equals_keeps_decoded_prefix', fn (t) {
+    # A trailing '=' must not swallow the rest of the chunk
+    let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, false)
+
+    let mut output = ByteArray.new
+
+    match decoder.feed('Hello=20World=') {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    match decoder.finish {
+      case Ok(final) -> output.append(final)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    t.equal(output.into_string, 'Hello World')
+  })
+
+  t.test('qp_trailing_equals_preserved_when_requested', fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, true, false)
+    let mut output = ByteArray.new
+
+    match decoder.feed('Hello=20World=') {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    match decoder.finish {
+      case Ok(final) -> output.append(final)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    t.equal(output.into_string, 'Hello World=')
+  })
+
+  t.test('qp_hex_escape_split_across_chunks', fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, false)
+    let mut output = ByteArray.new
+
+    match decoder.feed('Hello=2') {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    match decoder.feed('0World') {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    match decoder.finish {
+      case Ok(final) -> output.append(final)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    t.equal(output.into_string, 'Hello World')
   })
 
   t.test('qp_finish_empty', fn (t) {
