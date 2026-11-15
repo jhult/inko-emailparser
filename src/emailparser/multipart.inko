@@ -341,6 +341,7 @@ fn parse_multipart_impl(
             max_attachment_size,
             max_headers,
             default_encoding,
+            strict_mode,
           )
         {
           case
@@ -629,6 +630,7 @@ fn pub parse_multipart_part_headers(
 fn pub extract_part_metadata(
   part_headers: ref Array[(String, String)],
   default_encoding: String,
+  strict_mode: Bool,
 ) -> Result[
   (String, Array[(String, String)], String, Array[(String, String)], String),
   Error,
@@ -637,7 +639,7 @@ fn pub extract_part_metadata(
     'text/plain',
   )
 
-  match parse_content_type_impl(content_type) {
+  match parse_content_type_impl(content_type, strict_mode) {
     case Ok((ct_main, ct_params)) -> {
       let content_disposition = get_header_value_impl(
         part_headers,
@@ -655,7 +657,7 @@ fn pub extract_part_metadata(
 
         Result.Ok((ct_main, ct_params, 'inline', [], transfer_encoding))
       } else {
-        match parse_content_disposition_impl(content_disposition) {
+        match parse_content_disposition_impl(content_disposition, strict_mode) {
           case Ok((disp_main, disp_params)) -> {
             let transfer_encoding = get_header_value_impl(
               part_headers,
@@ -718,6 +720,7 @@ fn pub parse_single_multipart_part(
   max_attachment_size: Int,
   max_headers: Int,
   default_encoding: String,
+  strict_mode: Bool,
 ) -> Result[
   (
     String,
@@ -748,7 +751,7 @@ fn pub parse_single_multipart_part(
       }
 
       let (ct_main, ct_params, disp_main, _, transfer_encoding) = match
-        extract_part_metadata(part_headers, default_encoding)
+        extract_part_metadata(part_headers, default_encoding, strict_mode)
       {
         case Ok(metadata) -> metadata
         case Error(e) -> return Result.Error(e)

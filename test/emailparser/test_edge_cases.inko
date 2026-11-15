@@ -1496,4 +1496,54 @@ QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB
       }
     }
   })
+
+  # Permissive mode must not lose a message because one parameter is malformed
+  t.test('permissive_mode_ignores_malformed_content_type_parameter', fn (t) {
+    let email = 'From: a@example.com\nTo: b@example.com\nSubject: Kept\nContent-Type: text/plain; charset\n\nBody text'
+
+    let parser = EmailParser.new
+    let result = match parser.parse(email) {
+      case Ok(m) -> m
+      case Error(e) -> {
+        t.equal('should parse', e.to_message)
+        return
+      }
+    }
+
+    t.equal(result.subject, 'Kept')
+
+    match result.text_body {
+      case Some(body) -> t.equal(body.trim, 'Body text')
+      case None -> t.true(false)
+    }
+  })
+
+  t.test(
+    'permissive_mode_ignores_malformed_content_disposition_parameter',
+    fn (t) {
+      let email = 'From: a@example.com\nTo: b@example.com\nSubject: Kept\nContent-Type: text/plain\nContent-Disposition: attachment; filename\n\nBody text'
+
+      let parser = EmailParser.new
+      let result = match parser.parse(email) {
+        case Ok(m) -> m
+        case Error(e) -> {
+          t.equal('should parse', e.to_message)
+          return
+        }
+      }
+
+      t.equal(result.subject, 'Kept')
+    },
+  )
+
+  t.test('strict_mode_rejects_malformed_content_type_parameter', fn (t) {
+    let email = 'From: a@example.com\nTo: b@example.com\nSubject: Kept\nContent-Type: text/plain; charset\n\nBody text'
+
+    let parser = EmailParser.new.with_strict_mode(true)
+
+    match parser.parse(email) {
+      case Ok(_) -> t.true(false)
+      case Error(_) -> t.true(true)
+    }
+  })
 }

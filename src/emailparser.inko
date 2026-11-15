@@ -477,7 +477,7 @@ impl EmailParser {
 
     # Extract MIME headers (Content-Type, Content-Transfer-Encoding, charset)
     let (ct_main, ct_params, content_transfer_encoding, charset) = match
-      parse_mime_metadata(ref headers)
+      parse_mime_metadata(ref headers, @config.strict_mode)
     {
       case Ok(result) -> result
       case Error(e) -> return Result.Error(e)
@@ -538,7 +538,9 @@ impl EmailParser {
 
             match get_header_value_impl(headers, 'Content-Disposition') {
               case Some(raw_disp) -> {
-                match parse_content_disposition_impl(raw_disp) {
+                match
+                  parse_content_disposition_impl(raw_disp, @config.strict_mode)
+                {
                   case Ok((disp, _)) -> {
                     if !disp.empty? { disposition = disp }
 
@@ -661,7 +663,7 @@ impl EmailParser {
   fn pub parse_content_type(
     raw: String,
   ) -> Result[(String, Array[(String, String)]), Error] {
-    match parse_content_type_impl(raw) {
+    match parse_content_type_impl(raw, @config.strict_mode) {
       case Ok(result) -> Result.Ok(result)
       case Error(e) -> Result.Error(e)
     }

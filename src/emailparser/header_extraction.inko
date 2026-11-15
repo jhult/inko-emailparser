@@ -113,12 +113,13 @@ fn pub parse_basic_headers(
 # Extract MIME metadata (Content-Type, Content-Transfer-Encoding, charset)
 fn pub parse_mime_metadata(
   headers: ref Array[(String, String)],
+  strict_mode: Bool,
 ) -> Result[(String, Array[(String, String)], String, Option[String]), Error] {
   let content_type = get_header_value_impl(headers, 'Content-Type').or(
     'text/plain',
   )
 
-  match parse_content_type_impl(content_type) {
+  match parse_content_type_impl(content_type, strict_mode) {
     case Ok((ct_main, ct_params)) -> {
       let content_transfer_encoding = get_header_value_impl(
         headers,

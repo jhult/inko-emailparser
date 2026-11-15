@@ -285,7 +285,7 @@ impl StreamingParser {
     }
 
     let (ct_main, ct_params, content_transfer_encoding, charset) = match
-      parse_mime_metadata(ref headers)
+      parse_mime_metadata(ref headers, @config.strict_mode)
     {
       case Ok(result) -> result
       case Error(e) -> return Result.Error(e)
@@ -305,6 +305,7 @@ impl StreamingParser {
       ref headers,
       ct_main,
       content_transfer_encoding,
+      @config.strict_mode,
     )
 
     # Parse body with streaming
@@ -572,7 +573,7 @@ impl StreamingParser {
     }
 
     let (ct_main, ct_params, content_transfer_encoding, charset) = match
-      parse_mime_metadata(ref headers)
+      parse_mime_metadata(ref headers, @config.strict_mode)
     {
       case Ok(result) -> result
       case Error(e) -> return Result.Error(e)
@@ -589,6 +590,7 @@ impl StreamingParser {
       ref headers,
       ct_main,
       content_transfer_encoding,
+      @config.strict_mode,
     )
 
     let attachment_count = if is_multipart(ct_main) {
@@ -1251,13 +1253,14 @@ fn single_part_attachment_info(
   headers: ref Array[(String, String)],
   content_type: String,
   encoding: String,
+  strict_mode: Bool,
 ) -> AttachmentInfo {
   let mut disposition = 'attachment'
   let mut filename = Option.None
 
   match get_header_value_impl(headers, 'Content-Disposition') {
     case Some(raw) -> {
-      match parse_content_disposition_impl(raw) {
+      match parse_content_disposition_impl(raw, strict_mode) {
         case Ok((disp, params)) -> {
           if !disp.empty? { disposition = disp }
 
@@ -1855,7 +1858,9 @@ if
     content_type: String,
     is_attachment: Bool,
   ) -> Result[Int, Error] {
-    let (main_type, ct_params) = match parse_content_type_impl(content_type) {
+    let (main_type, ct_params) = match
+      parse_content_type_impl(content_type, @strict_mode)
+    {
       case Ok((mt, params)) -> (mt, params)
       case Error(_) -> (content_type, [])
     }

@@ -461,6 +461,7 @@ fn eq_ignore_case(a: String, b: String) -> Bool {
 
 fn parse_content_type_impl(
   raw: String,
+  strict_mode: Bool,
 ) -> Result[(String, Array[(String, String)]), Error] {
   # Validate Content-Type format per RFC 2045
   # Must be "type/subtype" optionally followed by parameters
@@ -499,7 +500,7 @@ fn parse_content_type_impl(
       let params_raw = trimmed.slice(pos + 1, trimmed_size).to_string
 
       # Parse parameters with quote awareness
-      match parse_parameters_impl(params_raw) {
+      match parse_parameters_impl(params_raw, strict_mode) {
         case Ok(parsed_params) -> params = parsed_params
         case Error(e) -> return Result.Error(e)
       }
@@ -520,6 +521,7 @@ fn parse_content_type_impl(
 # preserved. Quoted values are unquoted with a byte slice for the same reason.
 fn parse_parameters_impl(
   params_raw: String,
+  strict_mode: Bool,
 ) -> Result[Array[(String, String)], Error] {
   let mut params = []
   let mut i = 0
@@ -543,7 +545,7 @@ fn parse_parameters_impl(
                 case None -> {}
               }
             }
-            case Error(e) -> return Result.Error(e)
+            case Error(e) -> if strict_mode { return Result.Error(e) }
           }
 
           param_start = i + 1
@@ -566,7 +568,7 @@ fn parse_parameters_impl(
           case None -> {}
         }
       }
-      case Error(e) -> return Result.Error(e)
+      case Error(e) -> if strict_mode { return Result.Error(e) }
     }
   }
 
@@ -630,6 +632,7 @@ fn parse_single_parameter(
 # disposition-type is typically "inline" or "attachment" (not a MIME type)
 fn parse_content_disposition_impl(
   raw: String,
+  strict_mode: Bool,
 ) -> Result[(String, Array[(String, String)]), Error] {
   let trimmed = raw.trim
   let trimmed_size = trimmed.size
@@ -667,7 +670,7 @@ fn parse_content_disposition_impl(
       let params_raw = trimmed.slice(pos + 1, trimmed_size).to_string
 
       # Parse parameters with quote awareness
-      match parse_parameters_impl(params_raw) {
+      match parse_parameters_impl(params_raw, strict_mode) {
         case Ok(parsed_params) -> params = parsed_params
         case Error(e) -> return Result.Error(e)
       }
@@ -874,7 +877,7 @@ fn bidi_control_length(text: String, index: Int) -> Int {
 # Supports RFC 2183 filename parameters and RFC 2231 extended parameters
 # (filename*=UTF-8''... and the filename*0*/filename*1* continuation form).
 fn pub extract_filename_param(disposition: String) -> Option[String] {
-  match parse_content_disposition_impl(disposition) {
+  match parse_content_disposition_impl(disposition, false) {
     case Error(_) -> Option.None
     case Ok((_, params)) -> {
       match get_param_value_impl(ref params, 'filename*') {

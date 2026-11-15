@@ -125,7 +125,9 @@ fn pub tests(t: mut Tests) {
   )
 
   t.test('content_type_quoted_non_ascii_boundary', fn (t) {
-    match parse_content_type_impl('multipart/mixed; boundary="ersönlich"') {
+    match
+      parse_content_type_impl('multipart/mixed; boundary="ersönlich"', true)
+    {
       case Ok((main_type, params)) -> {
         t.equal(main_type, 'multipart/mixed')
         t.equal(params.size, 1)
