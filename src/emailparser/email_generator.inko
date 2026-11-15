@@ -36,7 +36,7 @@ impl TestDataGenerator {
     let email = 'From: sender@example.com
 To: recipient@example.com
 Subject: '
-      + subject
+      + sanitize_header_value(subject)
       + '
 Date: Mon, 15 Jan 2026 10:30:00 +0000
 Message-ID: <test-'
@@ -82,10 +82,10 @@ Please find attached file.
       + boundary
       + '
 Content-Type: application/octet-stream; name="'
-      + name
+      + escape_quoted_param(name.clone)
       + '"
 Content-Disposition: attachment; filename="'
-      + name
+      + escape_quoted_param(name.clone)
       + '"
 Content-Transfer-Encoding: '
       + encoding
@@ -141,10 +141,10 @@ Please find attached files.
 Content-Type: '
         + att.content_type
         + '; name="'
-        + att.name
+        + escape_quoted_param(att.name.clone)
         + '"
 Content-Disposition: attachment; filename="'
-        + att.name
+        + escape_quoted_param(att.name.clone)
         + '"
 Content-Transfer-Encoding: '
         + att.encoding
@@ -293,10 +293,10 @@ Content-Type: text/html; charset=UTF-8
         + outer_boundary
         + '
 Content-Type: application/octet-stream; name="'
-        + att_name
+        + escape_quoted_param(att_name.clone)
         + '"
 Content-Disposition: attachment; filename="'
-        + att_name
+        + escape_quoted_param(att_name.clone)
         + '"
 Content-Transfer-Encoding: base64
 
@@ -326,7 +326,7 @@ Content-Transfer-Encoding: base64
     let email = 'From: sender@example.com
 To: recipient@example.com
 Subject: '
-      + subject
+      + sanitize_header_value(subject)
       + '
 Date: Fri, 19 Jan 2026 12:00:00 +0000
 Message-ID: <test-'
@@ -371,7 +371,7 @@ Content-Type: text/html; charset=UTF-8
     let mut email = 'From: sender@example.com
 To: recipient@example.com
 Subject: '
-      + subject
+      + sanitize_header_value(subject)
       + '
 Date: Sat, 20 Jan 2026 13:00:00 +0000
 Message-ID: <test-'
@@ -402,7 +402,7 @@ Content-Type: text/html; charset=UTF-8
         + '
 Content-Type: image/png
 Content-ID: <'
-        + cid
+        + sanitize_header_value(cid.clone)
         + '>
 Content-Disposition: inline
 Content-Transfer-Encoding: base64
@@ -427,7 +427,7 @@ Content-Transfer-Encoding: base64
     let email = 'From: sender@example.com
 To: recipient@example.com
 Subject: '
-      + encoded_subject
+      + sanitize_header_value(encoded_subject)
       + '
 Date: Sun, 21 Jan 2026 14:00:00 +0000
 Message-ID: <test-'
@@ -442,6 +442,14 @@ Content-Type: text/plain; charset=UTF-8
     email
   }
 
+  # Convert generated text to CRLF line endings
+  #
+  # Fixtures are generated with LF-only line endings; use this to exercise
+  # CRLF and folding code paths.
+  fn pub static to_crlf(email: String) -> String {
+    email.replace('\r\n', '\n').replace('\n', '\r\n')
+  }
+
   # Encode data using specified encoding
   fn pub static encode_bytes(data: String, encoding: String) -> String {
     let enc_lower = encoding.to_lower
@@ -452,7 +460,7 @@ Content-Type: text/plain; charset=UTF-8
       let output = ByteArray.new
 
       encoder.encode(ref input, output)
-      output.into_string
+      wrap_base64(output.into_string)
     } else if enc_lower == 'quoted-printable' {
       encode_quoted_printable(data)
     } else {
@@ -478,6 +486,91 @@ Content-Type: text/plain; charset=UTF-8
     @attachment_counter = @attachment_counter + 1
     @attachment_counter
   }
+}
+
+# Neutralise characters that would break out of a header field
+#
+# Bare CR/LF in a header value is a header-injection primitive, so they are
+# replaced with a space.
+fn sanitize_header_value(value: String) -> String {
+  let output = ByteArray.new
+  let mut i = 0
+
+  while i < value.size {
+    match value.get(i) {
+      case Ok(byte) -> {
+        if byte == 13 or byte == 10 {
+          output.push(32)
+        } else {
+          output.push(byte)
+        }
+
+        i = i + 1
+      }
+      case Error(_) -> i = i + 1
+    }
+  }
+
+  output.into_string
+}
+
+# Escape a value for use inside a quoted MIME parameter
+#
+# Backslashes and double quotes are backslash-escaped (RFC 2045 quoted-string)
+# and CR/LF are neutralised.
+fn escape_quoted_param(value: String) -> String {
+  let output = ByteArray.new
+  let mut i = 0
+
+  while i < value.size {
+    match value.get(i) {
+      case Ok(byte) -> {
+        if byte == 13 or byte == 10 {
+          output.push(32)
+        } else if byte == 92 or byte == 34 {
+          output.push(92)
+          output.push(byte)
+        } else {
+          output.push(byte)
+        }
+
+        i = i + 1
+      }
+      case Error(_) -> i = i + 1
+    }
+  }
+
+  output.into_string
+}
+
+# Wrap base64 output at 76 columns (RFC 2045 section 6.8)
+fn wrap_base64(encoded: String) -> String {
+  let output = ByteArray.new
+  let mut column = 0
+  let mut i = 0
+
+  while i < encoded.size {
+    match encoded.get(i) {
+      case Ok(byte) -> {
+        if byte == 13 or byte == 10 {
+          # Existing line breaks are replaced by our own wrapping
+        } else {
+          output.push(byte)
+          column = column + 1
+
+          if column == 76 {
+            output.push(10)
+            column = 0
+          }
+        }
+
+        i = i + 1
+      }
+      case Error(_) -> i = i + 1
+    }
+  }
+
+  output.into_string
 }
 
 # Encode string as quoted-printable

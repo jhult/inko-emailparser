@@ -139,4 +139,74 @@ fn pub tests(t: mut Tests) {
     t.true(id1 < id2)
     t.true(id2 < id3)
   })
+
+  t.test('generated_subject_cannot_inject_headers', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_text_email('hi\nX-Injected: yes', 'body')
+
+    # The newline is neutralised, so no extra header is created
+    t.false(email.contains?('\nX-Injected'))
+
+    let parser = EmailParser.new
+    let result = match parser.parse(email) {
+      case Ok(m) -> m
+      case Error(e) -> {
+        t.equal('should parse', e.to_message)
+        return
+      }
+    }
+
+    t.equal(result.subject, 'hi X-Injected: yes')
+
+    for (key, _) in result.extra_headers.iter {
+      t.false(key.to_lower == 'x-injected')
+    }
+  })
+
+  t.test('generated_attachment_name_is_escaped', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_email_with_attachment(
+      'a"b.pdf',
+      'content',
+      'base64',
+    )
+
+    # The quote is backslash-escaped inside the quoted parameter
+    t.true(email.contains?('filename="a\\"b.pdf"'))
+    t.false(email.contains?('filename="a"b.pdf"'))
+  })
+
+  t.test('generated_base64_is_wrapped_at_76_columns', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let mut content = ''
+
+    while content.size < 400 { content = content + 'abcdefghij' }
+
+    let email = generator.generate_email_with_attachment(
+      'big.bin',
+      content,
+      'base64',
+    )
+
+    let lines = email.split('\n').into_iter.to_array
+
+    for line in lines.iter { t.true(line.size <= 76) }
+  })
+
+  t.test('generated_fixture_can_use_crlf', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = TestDataGenerator.to_crlf(
+      generator.generate_text_email('CRLF', 'body'),
+    )
+
+    t.true(email.contains?('\r\n'))
+    t.false(email.contains?('\n\n'))
+
+    let parser = EmailParser.new
+
+    match parser.parse(email) {
+      case Ok(m) -> t.equal(m.subject, 'CRLF')
+      case Error(e) -> t.equal('should parse', e.to_message)
+    }
+  })
 }
