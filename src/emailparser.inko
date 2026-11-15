@@ -420,10 +420,11 @@ impl EmailParser {
     # Check total email size limit before parsing
     if email_size > @config.max_email_size {
       return Result.Error(
-        Error.EmailSizeExceeded(
+        Error.EmailSizeTooLarge(
           Severity.Error,
-          @config.max_email_size,
           email_size,
+          @config.max_email_size,
+          Option.None,
           Option.None,
           Option.None,
         ),

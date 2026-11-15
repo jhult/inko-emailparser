@@ -8,6 +8,12 @@
 # for common failure cases when parsing RFC 5322 email messages.
 
 # Error severity levels for categorizing issues
+# Severity of a parse error
+#
+# The parser itself only produces `Error`: a parse either succeeds or returns
+# the error that stopped it. `Warning` and `Fatal` are available to callers
+# that wrap or reclassify errors (for example a handler that wants to report a
+# recovered issue as a warning); they are never emitted by this library.
 type pub enum Severity {
   case Warning
   case Error
@@ -158,9 +164,6 @@ type pub enum Error {
     Option[Int],
     Option[String],
   )
-
-  # Size limit errors
-  case EmailSizeExceeded(Severity, Int, Int, Option[Int], Option[Int])
 
   # Content-Type validation errors
   case InvalidContentType(
@@ -445,18 +448,6 @@ impl Error {
           fragment: frag.clone,
         )
       }
-      case EmailSizeExceeded(sev, max_size, actual_size, line, pos) -> {
-        ErrorContext(
-          severity: sev.copy,
-          message: 'Email size '
-            + actual_size.to_string
-            + ' exceeds maximum '
-            + max_size.to_string,
-          line: line.clone,
-          position: pos.clone,
-          fragment: Option.None,
-        )
-      }
       case InvalidContentType(sev, reason, line, pos, frag) -> {
         ErrorContext(
           severity: sev.copy,
@@ -503,7 +494,6 @@ impl Error {
       case DecodedSizeTooLarge(_, _, _, _, _, _, _) -> 'DecodedSizeTooLarge'
       case MissingRequiredHeader(_, _, _, _, _) -> 'MissingRequiredHeader'
       case EmptyRequiredHeader(_, _, _, _, _) -> 'EmptyRequiredHeader'
-      case EmailSizeExceeded(_, _, _, _, _) -> 'EmailSizeExceeded'
       case InvalidContentType(_, _, _, _, _) -> 'InvalidContentType'
     }
   }
@@ -524,14 +514,6 @@ impl Error {
       Option.None,
       Option.None,
     )
-  }
-
-  # Create a ParseError from a string message with severity
-  fn pub static from_string_with_severity(
-    message: String,
-    sev: Severity,
-  ) -> Error {
-    Error.ParseError(sev, message, Option.None, Option.None, Option.None)
   }
 }
 

@@ -123,6 +123,33 @@ fn pub tests(t: mut Tests) {
     t.true(message.contains?('Email size exceeds maximum'))
   })
 
+  t.test('size_errors_report_size_and_max_with_units', fn (t) {
+    # Both size variants use (size, max) order and report bytes
+    let email = Error.EmailSizeTooLarge(
+      Severity.Error,
+      60,
+      50,
+      Option.None,
+      Option.None,
+      Option.None,
+    )
+
+    t.true(email.to_message.contains?('60 bytes (max: 50 bytes)'))
+
+    let header = Error.HeaderSectionTooLarge(
+      Severity.Error,
+      70,
+      64,
+      Option.None,
+      Option.None,
+      Option.None,
+    )
+
+    t.true(header.to_message.contains?('70 bytes (max: 64 bytes)'))
+    t.true(header.to_message.contains?('Header section'))
+    t.equal(header.variant, 'HeaderSectionTooLarge')
+  })
+
   t.test('error_variant_access', fn (t) {
     let error = Error.HeaderWithoutColon(
       Severity.Error,

@@ -1479,15 +1479,15 @@ Body
     match parser.parse('From: a@b.com\nSubject: x\n\nBody') {
       case Ok(_) -> t.true(false)
       case Error(e) -> {
-        t.equal(e.variant, 'EmailSizeExceeded')
+        t.equal(e.variant, 'EmailSizeTooLarge')
         t.equal(e.severity.to_string, 'ERROR')
         t.true(e.to_message.contains?('Email size'))
 
         match e {
-          case EmailSizeExceeded(severity, max_size, actual_size, _, _) -> {
+          case EmailSizeTooLarge(severity, size, max_size, _, _, _) -> {
             t.equal(severity.to_string, 'ERROR')
             t.equal(max_size, 10)
-            t.true(actual_size > 10)
+            t.true(size > 10)
           }
           case _ -> t.true(false)
         }

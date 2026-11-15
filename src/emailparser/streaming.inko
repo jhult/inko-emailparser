@@ -236,10 +236,11 @@ impl StreamingParser {
 
     # Check email size limit
     if email_size > @config.max_email_size {
-      let failure = Error.EmailSizeExceeded(
+      let failure = Error.EmailSizeTooLarge(
         Severity.Error,
-        @config.max_email_size,
         email_size,
+        @config.max_email_size,
+        Option.None,
         Option.None,
         Option.None,
       )
@@ -474,10 +475,11 @@ impl StreamingParser {
           total_bytes = total_bytes + chunk.size
 
           if total_bytes > @config.max_email_size {
-            let failure = Error.EmailSizeExceeded(
+            let failure = Error.EmailSizeTooLarge(
               Severity.Error,
-              @config.max_email_size,
               total_bytes,
+              @config.max_email_size,
+              Option.None,
               Option.None,
               Option.None,
             )
@@ -1041,10 +1043,11 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
 
           if total_bytes > max_email_size {
             return Result.Error(
-              Error.EmailSizeExceeded(
+              Error.EmailSizeTooLarge(
                 Severity.Error,
-                max_email_size,
                 total_bytes,
+                max_email_size,
+                Option.None,
                 Option.None,
                 Option.None,
               ),
@@ -1123,10 +1126,11 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
 
           if total_bytes > max_email_size {
             return Result.Error(
-              Error.EmailSizeExceeded(
+              Error.EmailSizeTooLarge(
                 Severity.Error,
-                max_email_size,
                 total_bytes,
+                max_email_size,
+                Option.None,
                 Option.None,
                 Option.None,
               ),
@@ -1193,10 +1197,11 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
 
           if total_bytes > max_email_size {
             return Result.Error(
-              Error.EmailSizeExceeded(
+              Error.EmailSizeTooLarge(
                 Severity.Error,
-                max_email_size,
                 total_bytes,
+                max_email_size,
+                Option.None,
                 Option.None,
                 Option.None,
               ),
@@ -1555,10 +1560,11 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
 
           if total_bytes > max_email_size {
             return Result.Error(
-              Error.EmailSizeExceeded(
+              Error.EmailSizeTooLarge(
                 Severity.Error,
-                max_email_size,
                 total_bytes,
+                max_email_size,
+                Option.None,
                 Option.None,
                 Option.None,
               ),
@@ -1630,10 +1636,11 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
 
           if total_bytes > max_email_size {
             return Result.Error(
-              Error.EmailSizeExceeded(
+              Error.EmailSizeTooLarge(
                 Severity.Error,
-                max_email_size,
                 total_bytes,
+                max_email_size,
+                Option.None,
                 Option.None,
                 Option.None,
               ),
@@ -1697,10 +1704,11 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
 
           if total_bytes > max_email_size {
             return Result.Error(
-              Error.EmailSizeExceeded(
+              Error.EmailSizeTooLarge(
                 Severity.Error,
-                max_email_size,
                 total_bytes,
+                max_email_size,
+                Option.None,
                 Option.None,
                 Option.None,
               ),
@@ -1818,10 +1826,11 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
 
         if total_bytes > max_email_size {
           return Result.Error(
-            Error.EmailSizeExceeded(
+            Error.EmailSizeTooLarge(
               Severity.Error,
-              max_email_size,
               total_bytes,
+              max_email_size,
+              Option.None,
               Option.None,
               Option.None,
             ),
