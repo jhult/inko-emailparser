@@ -30,13 +30,21 @@ This library includes the following built-in protections:
 - **`max_attachment_size`**: Default 25 MB - Limits individual attachment size
 
 ```inko
+import emailparser (EmailParser)
+import emailparser.limits (Limits)
+
 let parser = EmailParser.new.with_limits(
-  max_email_size: 100_000_000,      # 100 MB
-  max_attachment_size: 50_000_000,  # 50 MB
-  max_multipart_depth: 10,
-  max_attachments: 100,
-  max_headers: 1000
+  Limits(
+    max_email_size: 100_000_000,     # 100 MB
+    max_attachment_size: 50_000_000, # 50 MB
+    max_multipart_depth: 10,
+    max_attachments: 100,
+    max_headers: 1000,
+  ),
 )
+
+# Or change a single limit:
+let parser = EmailParser.new.with_max_email_size(100_000_000)
 ```
 
 #### Depth and Iteration Limits
@@ -80,15 +88,15 @@ Never trust emails from untrusted sources without additional validation:
 
 ```inko
 match parser.parse(raw_email) {
-  case Ok(message) => {
+  case Ok(message) -> {
     # Validate sender and content before processing
-    if is_trusted_sender(message.from) {
+    if is_trusted_sender(message.addresses.from) {
       process_email(message)
     }
   }
-  case Error(e) => {
+  case Error(e) -> {
     # Log and reject malformed emails
-    log_error("Email parsing failed: " + e)
+    log_error('Email parsing failed: ' + e.to_message)
   }
 }
 ```
@@ -102,14 +110,19 @@ Adjust limits based on your use case:
 - For high-security contexts: Lowest possible limits
 
 ```inko
+import emailparser (EmailParser)
+import emailparser.limits (Limits)
+
 # Conservative limits for untrusted input
-let parser = EmailParser.new.with_limits(
-  max_email_size: 10_000_000,       # 10 MB
-  max_attachment_size: 5_000_000,   # 5 MB
+let limits = Limits(
+  max_email_size: 10_000_000,     # 10 MB
+  max_attachment_size: 5_000_000, # 5 MB
   max_multipart_depth: 5,
   max_attachments: 50,
-  max_headers: 500
+  max_headers: 500,
 )
+
+let parser = EmailParser.new.with_limits(limits)
 ```
 
 ### 3. Handle Attachments Safely
@@ -117,20 +130,20 @@ let parser = EmailParser.new.with_limits(
 Never execute attachments or open them in unsafe contexts:
 
 ```inko
-message.attachments.each(fn (attachment) {
+for attachment in message.attachments.iter {
   # Validate filename before saving
   match attachment.filename {
-    case Some(name) => {
+    case Some(name) -> {
       # Already sanitized, but verify before filesystem operations
       if is_safe_filename(name) {
         save_attachment(name, attachment.content)
       }
     }
-    case None => {
+    case None -> {
       # Handle unnamed attachments
     }
   }
-})
+}
 ```
 
 ### 4. Implement Timeouts
@@ -147,9 +160,9 @@ timeout_parse(parser, raw_email, seconds: 30)
 Log parsing failures and suspicious patterns:
 
 ```inko
-case Error(e) => {
-  if e.contains("exceeds maximum") {
-    log_security_event("Potential DoS attempt: " + e)
+case Error(e) -> {
+  if e.to_message.contains?('exceeds maximum') {
+    log_security_event('Potential DoS attempt: ' + e.to_message)
   }
 }
 ```
@@ -167,7 +180,7 @@ The library decodes content-transfer-encoding, but you should validate the resul
 Enable strict mode to fail on invalid headers:
 
 ```inko
-let parser = EmailParser.with_strict_mode(true)
+let parser = EmailParser.new.with_strict_mode(true)
 ```
 
 ## Vulnerability Reporting Process

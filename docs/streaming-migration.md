@@ -51,9 +51,13 @@ Email size < 10MB?
 | Email Size | Recommended API | Peak Memory |
 |------------|------------------|--------------|
 | < 1MB | EmailParser | ~3MB |
-| 1-10MB | Either | ~3-30MB (EmailParser) or ~70KB (Streaming) |
-| 10-50MB | StreamingParser | ~30-165MB (EmailParser) or ~70KB (Streaming) |
-| > 50MB | StreamingParser | Out of memory (EmailParser) or ~70KB (Streaming) |
+| 1-10MB | Either | ~3-30MB (EmailParser); input + one 64KB chunk (Streaming) |
+| 10-50MB | StreamingParser | ~30-165MB (EmailParser); input + one 64KB chunk (Streaming) |
+| > 50MB | StreamingParser, or `parse_async_reader` | Out of memory (EmailParser); input + chunk (Streaming); chunk only (async reader) |
+
+With `StreamingParser.parse_stream` the message is still passed as a `String`,
+so the input itself stays in memory. `parse_async_reader` reads chunk by chunk
+and avoids that too.
 
 **Note**: These are rough estimates. Actual memory depends on:
 - Number and size of attachments
@@ -73,15 +77,24 @@ Email size < 10MB?
 - Formula: ~1.5 × Raw size (with Base64 attachments)
 
 **StreamingParser**:
-- Processes in configurable chunks (default 64KB)
-- Decodes incrementally
-- Peak memory = Chunk size + Handler state
-- Formula: ~64KB + Handler state
+- `parse_stream` still receives the whole message as a `String`, so the raw
+  input is in memory
+- Headers are buffered until the header/body separator is found (bounded by
+  `MAX_HEADERS_SECTION_SIZE`, 64 KB)
+- Bodies are decoded in configurable chunks (default 64 KB) and delivered via
+  callbacks; the parser does not retain attachment bodies
+- Nested multipart bodies are accumulated to be parsed as a nested document,
+  so the largest nested payload is held in memory while it is parsed
+- Peak memory = Input size + largest nested body + chunk + handler state
 
 **Example** (50MB email with 3 × 15MB Base64 attachments):
-- EmailParser: ~165MB peak memory
-- StreamingParser: ~70KB peak memory
-- **Reduction: 99.96%**
+- EmailParser: ~165MB peak memory (raw input + decoded attachments)
+- StreamingParser: ~50MB peak memory (mostly the input string) plus one chunk
+  of decoding state, and no accumulated attachment bodies
+- Handlers that stream attachments to disk never hold an attachment in full
+
+The dramatic saving is in *attachment* memory, not in the input string: use
+`parse_async_reader` when the message itself should not be held in memory.
 
 ### Processing Time
 
@@ -156,7 +169,7 @@ match parser.parse(email_string) {
     
     # 4. Just need metadata?
     let subject = message.subject
-    let from = message.from
+    let from = message.addresses.from
   }
   case Error(e) -> handle_error(e)
 }
@@ -422,9 +435,11 @@ match parser.parse_stream(email_string, handler) {
 ```
 
 **Benefits**:
-- Peak memory: ~70KB instead of attachment size
-- Can handle arbitrarily large attachments
+- Each attachment is streamed to disk as its chunks arrive, so the handler
+  never holds a full attachment
 - Disk I/O happens during parsing (pipelined)
+- The input string (or, with `parse_async_reader`, each read chunk) is the
+  dominant memory cost
 
 ### Pattern 2: Insert Attachments to Database
 
@@ -436,7 +451,7 @@ match parser.parse(email_string) {
   case Ok(message) -> {
     let msg_id = db.insert_message(
       message.subject,
-      message.from.address,
+      message.addresses.from.address,
       message.text_body,
       message.html_body,
     )
@@ -608,7 +623,7 @@ match parser.parse(email_string) {
   case Ok(message) -> {
     let metadata = EmailMetadata(
       subject: message.subject,
-      from: message.from.address,
+      from: message.addresses.from.address,
       to: message.to.map(|addr| addr.address),
       date: message.date,
       attachment_count: message.attachments.size,
@@ -845,7 +860,7 @@ fn process_incoming_email(email_string: String) -> DeliveryDecision {
       DeliveryDecision.Accept(result)
     }
     case Error(e) -> {
-      if e.contains?("Malware detected") {
+      if e.to_message.contains?('Malware detected') {
         DeliveryDecision.Reject("Malware found")
       } else {
         DeliveryDecision.Quarantine("Scan error: ${e}")
