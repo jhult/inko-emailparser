@@ -472,11 +472,14 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
         'Content-Disposition',
       )
         .or('')
+      # RFC 2045 section 6: a part without Content-Transfer-Encoding is 7bit.
+      # The message-level encoding applies to the message body only, so parts
+      # never inherit it.
       let content_transfer_encoding = get_header_value_impl(
         ref headers,
         'Content-Transfer-Encoding',
       )
-        .or(default_encoding)
+        .or('7bit')
       let content_id = get_header_value_impl(ref headers, 'Content-ID')
 
       # Determine if attachment (RFC 2183 values are case-insensitive)

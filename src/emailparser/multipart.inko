@@ -576,13 +576,15 @@ fn extract_part_metadata(
         .or('')
 
       # A missing Content-Disposition stays empty so the classifier can tell
-      # it apart from an explicit "inline"
+      # it apart from an explicit "inline".
+      # RFC 2045 section 6: a part without Content-Transfer-Encoding is 7bit;
+      # the message-level encoding applies to the message body only.
       if content_disposition.empty? {
         let transfer_encoding = get_header_value_impl(
           part_headers,
           'Content-Transfer-Encoding',
         )
-          .or(default_encoding)
+          .or('7bit')
 
         Result.Ok((ct_main, ct_params, '', [], transfer_encoding))
       } else {
@@ -592,7 +594,7 @@ fn extract_part_metadata(
               part_headers,
               'Content-Transfer-Encoding',
             )
-              .or(default_encoding)
+              .or('7bit')
 
             Result.Ok(
               (ct_main, ct_params, disp_main, disp_params, transfer_encoding),
@@ -716,11 +718,7 @@ fn parse_single_multipart_part(
       # RFC 2046 allows a part with an empty header section: everything after
       # the delimiter is body, and the default content type is text/plain.
       let decoded_body = match
-        process_multipart_part_body(
-          trimmed,
-          default_encoding,
-          max_attachment_size,
-        )
+        process_multipart_part_body(trimmed, '7bit', max_attachment_size)
       {
         case Ok(b) -> b
         case Error(e) -> return Result.Error(e)

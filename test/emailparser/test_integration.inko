@@ -787,6 +787,32 @@ second
     }
   })
 
+  t.test('parts_do_not_inherit_message_transfer_encoding', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Message level encoding
+Content-Type: multipart/mixed; boundary=b
+Content-Transfer-Encoding: quoted-printable
+
+--b
+Content-Type: text/plain
+
+a=20b
+--b--'
+
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        # The part has no CTE of its own, so its body is 7bit and stays literal
+        match msg.text_body {
+          case Some(body) -> t.equal(body.trim, 'a=20b')
+          case None -> t.equal('should have text body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
   t.test('email_with_many_received_headers', fn (t) {
     let parser = EmailParser.new
     let raw_email = 'Received: from mail1.example.com (mail1.example.com [192.0.2.1])
