@@ -939,7 +939,7 @@ fn stream_body_impl[H: mut + StreamHandler](
           case Error(e) -> return Result.Error(e)
         }
       }
-      case Error(_) -> {}
+      case Error(e) -> return Result.Error(e)
     }
   }
 
@@ -1181,7 +1181,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
             case Error(e) -> return Result.Error(e)
           }
         }
-        case Error(_) -> {}
+        case Error(e) -> return Result.Error(e)
       }
     }
 

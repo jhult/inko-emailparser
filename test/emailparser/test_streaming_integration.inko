@@ -340,6 +340,27 @@ SGVsbG8
     }
   })
 
+  t.test('text_passthrough_decode_error_is_reported', fn (t) {
+    let mut config = StreamingConfig.new
+
+    config.max_attachment_size = 10
+
+    let parser = StreamingParser.with_config(config)
+    let handler = MemoryBufferingHandler.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Big
+Content-Type: text/plain
+
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+
+    # The 7bit passthrough used to drop the error and deliver no text
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.true(false)
+      case Error(e) -> t.equal(e.variant, 'DecodedSizeTooLarge')
+    }
+  })
+
   t.test('email_with_multiple_attachments_streaming', fn (t) {
     let mut generator = TestDataGenerator.new
     let attachments = [
