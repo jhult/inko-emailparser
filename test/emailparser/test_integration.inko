@@ -691,6 +691,51 @@ JVBERi0=
     }
   })
 
+  t.test('attached_multipart_part_is_not_inlined', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Forwarded message
+Content-Type: multipart/mixed; boundary=outer
+
+--outer
+Content-Type: text/plain
+
+visible body
+--outer
+Content-Type: multipart/mixed; boundary=inner
+Content-Disposition: attachment; filename="fwd.eml"
+
+--inner
+Content-Type: text/plain
+
+forwarded body
+--inner--
+--outer--'
+
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        # The forwarded message is an attachment, not part of the body
+        t.equal(msg.attachments.size, 1)
+
+        match msg.text_body {
+          case Some(body) -> t.false(body.contains?('forwarded body'))
+          case None -> t.equal('should have text body', 'got none')
+        }
+
+        match msg.attachments.get(0) {
+          case Ok(att) -> {
+            t.equal(att.filename, Option.Some('fwd.eml'))
+            t.equal(att.content_type, 'multipart/mixed')
+            t.true(att.content.clone.into_string.contains?('forwarded body'))
+          }
+          case Error(_) -> t.equal('should have attachment', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
   t.test('email_with_many_received_headers', fn (t) {
     let parser = EmailParser.new
     let raw_email = 'Received: from mail1.example.com (mail1.example.com [192.0.2.1])

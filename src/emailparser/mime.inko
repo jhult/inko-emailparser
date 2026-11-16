@@ -17,6 +17,7 @@
 # - `is_text_html`: Check for a `text/html` Content-Type
 # - `main_type`: Extract the lower-cased `type/subtype` from a header value
 # - `classify_part`: Classify a part as text, HTML, multipart or attachment
+# - `is_attachment_disposition`: Check for an attachment/file/inline filename
 # - `extract_boundary`: Get the `boundary` parameter from Content-Type params
 #
 # ## RFC Compliance
@@ -55,14 +56,30 @@ fn pub main_type(content_type: String) -> String {
   }
 }
 
+# Whether a Content-Disposition marks the part as an attachment
+#
+# RFC 2183 disposition values are case-insensitive. An inline part with a
+# filename also counts, which covers images referenced from multipart/related.
+fn pub is_attachment_disposition(
+  content_disposition: String,
+  filename: ref Option[String],
+) -> Bool {
+  let disposition = content_disposition.trim.to_lower
+
+  disposition.starts_with?('attachment')
+    or disposition.starts_with?('file')
+    or (disposition.starts_with?('inline') and filename.some?)
+}
+
 # Classify a MIME part
 #
 # This is the single part classifier used by both the buffered and streaming
 # multipart parsers, so they cannot disagree about whether a part is a body or
 # an attachment:
-# - multipart/* is returned as `Multipart` for recursive parsing
 # - an attachment/file disposition, or an inline part with a filename, is an
-#   attachment (this covers inline images in multipart/related)
+#   attachment (this covers inline images in multipart/related, and forwarded
+#   messages, which can be multipart/* attachments)
+# - multipart/* is returned as `Multipart` for recursive parsing
 # - text/plain and text/html are bodies
 # - everything else is an attachment
 fn pub classify_part(
@@ -71,17 +88,14 @@ fn pub classify_part(
   filename: ref Option[String],
 ) -> PartKind {
   let ct = main_type(content_type)
-  let disposition = content_disposition.trim.to_lower
 
-  if is_multipart(ct.clone) { return PartKind.Multipart }
-
-  if
-    disposition.starts_with?('attachment')
-      or disposition.starts_with?('file')
-      or (disposition.starts_with?('inline') and filename.some?)
-  {
+  # The disposition wins over the content type: an attached message may itself
+  # be multipart/*, and must not be inlined into the body.
+  if is_attachment_disposition(content_disposition.clone, ref filename) {
     return PartKind.Attachment
   }
+
+  if is_multipart(ct.clone) { return PartKind.Multipart }
 
   if ct == 'text/plain' { return PartKind.TextBody }
 
