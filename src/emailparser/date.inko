@@ -21,7 +21,7 @@
 # The module centers on the EmailDateFormatter type which:
 # - Stores timezone configuration
 # - Provides formatting methods for current time and arbitrary DateTime values
-# - Validates timezone format (±HHMM or HHMM)
+# - Validates timezone format (±HHMM, HHMM or ±HH:MM)
 # - Formats individual date components (weekday, month, timezone offset)
 #
 # Helper functions provide convenient access to common formatting scenarios:
@@ -35,10 +35,12 @@
 #
 # RFC 5322 specifies timezone as ±HHMM (4 digits with sign). The module:
 # - Accepts both "+0000" and "0000" formats (adds + if missing)
+# - Accepts the ISO 8601 "±HH:MM" shape as a convenience
 # - Validates that hours and minutes are valid digits
 # - Defaults to "+0000" (UTC) for invalid inputs
 #
-# Note: The format does NOT include a colon (±HH:MM), which differs from ISO 8601.
+# `new` and `with_timezone` fall back to UTC rather than failing;
+# `try_with_timezone` reports an unparsable offset as `None` instead.
 #
 # ### Component Formatting
 #
@@ -53,7 +55,7 @@
 # ### Validation Strategy
 #
 # Timezone validation is defensive:
-# - Checks for correct length (4 or 5 characters)
+# - Checks for correct length (4 or 5 characters, plus an optional colon)
 # - Verifies first character is + or -
 # - Ensures remaining characters are digits
 # - Falls back to UTC (+0000) on any error
@@ -76,6 +78,7 @@
 # - `EmailDateFormatter`: Main formatter type
 # - `EmailDateFormatter.new`: Create formatter with UTC timezone
 # - `EmailDateFormatter.with_timezone`: Create formatter with custom timezone
+# - `EmailDateFormatter.try_with_timezone`: Custom timezone, or None if unparsable
 # - `EmailDateFormatter.format_now`: Format current time
 # - `EmailDateFormatter.format_datetime`: Format specific DateTime
 # - Helper functions: format_email_date, format_email_date_datetime, format_email_date_with_tz
@@ -133,7 +136,7 @@
 # ```
 
 import emailparser.ascii (
-  ASCII_DIGIT_0, ASCII_DIGIT_9, ASCII_HYPHEN, ASCII_PLUS,
+  ASCII_COLON, ASCII_DIGIT_0, ASCII_DIGIT_9, ASCII_HYPHEN, ASCII_PLUS,
 )
 import std.time (DateTime)
 
@@ -145,11 +148,24 @@ type pub EmailDateFormatter {
 
 impl EmailDateFormatter {
   fn pub static new -> EmailDateFormatter {
-    EmailDateFormatter(timezone: '0000', use_local_offset: true)
+    EmailDateFormatter(timezone: '0000', use_local_offset: false)
   }
 
   fn pub static with_timezone(tz: String) -> EmailDateFormatter {
     EmailDateFormatter(timezone: tz, use_local_offset: false)
+  }
+
+  # Create a formatter for `tz`, or None when the offset can't be parsed
+  #
+  # Unlike `with_timezone`, which falls back to +0000, this reports a
+  # mistyped offset instead of silently emitting a wrong Date header.
+  fn pub static try_with_timezone(tz: String) -> Option[EmailDateFormatter] {
+    match parse_timezone_seconds(tz) {
+      case Some(_) -> {
+        Option.Some(EmailDateFormatter(timezone: tz, use_local_offset: false))
+      }
+      case None -> Option.None
+    }
   }
 
   # Format current time as RFC 5322 date
@@ -264,27 +280,40 @@ fn pub format_email_date_with_tz(date: DateTime, timezone: String) -> String {
   formatter.format_datetime(date)
 }
 
-# Parse a "+HHMM"/"-HHMM"/"HHMM" offset into seconds
+# Parse a "+HHMM"/"-HHMM"/"HH:MM" offset into seconds
+#
+# Accepts an optional sign and either the RFC 5322 form (HHMM) or the ISO 8601
+# form (HH:MM). Returns None for a malformed or out-of-range offset.
 fn parse_timezone_seconds(timezone: String) -> Option[Int] {
-  if timezone.size != 5 and timezone.size != 4 { return Option.None }
-
-  let has_sign = timezone.size == 5
   let mut sign = 1
   let mut start = 0
 
-  if has_sign {
-    match timezone.get(0) {
-      case Ok(byte) -> {
-        if byte == ASCII_HYPHEN {
-          sign = -1
-        } else if byte != ASCII_PLUS {
-          return Option.None
-        }
-
+  match timezone.get(0) {
+    case Ok(byte) -> {
+      if byte == ASCII_HYPHEN {
+        sign = -1
         start = 1
+      } else if byte == ASCII_PLUS {
+        start = 1
+      } else if byte < ASCII_DIGIT_0 or byte > ASCII_DIGIT_9 {
+        return Option.None
       }
+    }
+    case Error(_) -> return Option.None
+  }
+
+  let digits = timezone.size - start
+  let mut minute_start = start + 2
+
+  if digits == 5 {
+    match timezone.get(minute_start) {
+      case Ok(byte) -> if byte != ASCII_COLON { return Option.None }
       case Error(_) -> return Option.None
     }
+
+    minute_start = minute_start + 1
+  } else if digits != 4 {
+    return Option.None
   }
 
   let h1 = match digit_at(timezone, start) {
@@ -295,11 +324,11 @@ fn parse_timezone_seconds(timezone: String) -> Option[Int] {
     case Some(v) -> v
     case None -> return Option.None
   }
-  let m1 = match digit_at(timezone, start + 2) {
+  let m1 = match digit_at(timezone, minute_start) {
     case Some(v) -> v
     case None -> return Option.None
   }
-  let m2 = match digit_at(timezone, start + 3) {
+  let m2 = match digit_at(timezone, minute_start + 1) {
     case Some(v) -> v
     case None -> return Option.None
   }
