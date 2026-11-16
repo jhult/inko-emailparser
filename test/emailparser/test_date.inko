@@ -206,6 +206,18 @@ fn pub tests(t: mut Tests) {
     t.equal(formatter.format_datetime(date), 'Wed, 31 Dec 1969 18:00:00 -0600')
   })
 
+  t.test('format_datetime_pads_year_to_four_digits', fn (t) {
+    let formatter = EmailDateFormatter.new
+    let date = match
+      DateTime.from_timestamp(time: -30627504000.0, utc_offset: 0)
+    {
+      case Some(d) -> d
+      case None -> panic('Failed to build DateTime')
+    }
+
+    t.equal(formatter.format_datetime(date), 'Sat, 15 Jun 0999 00:00:00 +0000')
+  })
+
   t.test('invalid_timezone_hours_fall_back_to_utc', fn (t) {
     # Out-of-range offsets are rejected and rendered as UTC
     t.true(

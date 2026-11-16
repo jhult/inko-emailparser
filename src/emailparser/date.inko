@@ -186,7 +186,7 @@ impl EmailDateFormatter {
     } else {
       local_date.day.to_string
     }
-    let year = local_date.year.to_string
+    let year = pad_number(local_date.year, 4)
     let hour = if local_date.hour < 10 {
       '0${local_date.hour}'
     } else {
@@ -338,4 +338,13 @@ fn format_offset_seconds(offset: Int) -> String {
   let minutes_str = if minutes < 10 { '0${minutes}' } else { minutes.to_string }
 
   '${sign}${hours_str}${minutes_str}'
+}
+
+# Left-pad a number with zeros to at least `width` digits
+fn pad_number(value: Int, width: Int) -> String {
+  let mut text = value.to_string
+
+  while text.size < width { text = '0' + text }
+
+  text
 }
