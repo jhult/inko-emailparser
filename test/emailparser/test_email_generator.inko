@@ -87,6 +87,13 @@ fn pub tests(t: mut Tests) {
     t.equal(attachment.size, 1000)
   })
 
+  t.test('generate_large_attachment_empty_pattern', fn (t) {
+    let mut generator = TestDataGenerator.new
+
+    t.equal(generator.generate_large_attachment(1000, '').size, 0)
+    t.equal(generator.generate_large_attachment(0, 'PATTERN').size, 0)
+  })
+
   t.test('generate_nested_multipart_email', fn (t) {
     let mut generator = TestDataGenerator.new
     let email = generator.generate_nested_multipart_email(2, 1, 100)

@@ -169,6 +169,10 @@ Content-Transfer-Encoding: '
     let mut bytes_written = 0
     let pattern_bytes = pattern.to_byte_array
 
+    # An empty pattern can produce no bytes, so bail out instead of spinning
+    # with a chunk_size of zero.
+    if pattern_bytes.size == 0 or size <= 0 { return '' }
+
     while bytes_written < size {
       let remaining = size - bytes_written
       let chunk_size = if remaining > pattern_bytes.size {
