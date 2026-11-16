@@ -155,6 +155,13 @@ impl MultipartStreamParser {
     handler: mut H,
     default_encoding: String,
   ) -> Result[Int, Error] {
+    # Once the closing boundary has been seen, the epilogue is not part of the
+    # message. Drop it instead of accumulating it in the buffer.
+    match @state {
+      case AtEndBoundary -> return Result.Ok(0)
+      case _ -> {}
+    }
+
     # Append new data to buffer
     let mut i = 0
 
