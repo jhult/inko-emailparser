@@ -736,6 +736,34 @@ forwarded body
     }
   })
 
+  t.test('consecutive_text_parts_are_separated', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Two text parts
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+first
+--b
+Content-Type: text/plain
+
+second
+--b--'
+
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        match msg.text_body {
+          case Some(body) -> t.equal(body.trim, 'first\nsecond')
+          case None -> t.equal('should have text body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
   t.test('email_with_many_received_headers', fn (t) {
     let parser = EmailParser.new
     let raw_email = 'Received: from mail1.example.com (mail1.example.com [192.0.2.1])

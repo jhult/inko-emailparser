@@ -99,7 +99,7 @@ fn merge_multipart_part(
       if text_body.some? {
         let existing: String = text_body.clone.get
 
-        new_text_body = Option.Some(existing + segment)
+        new_text_body = Option.Some(existing + '\n' + segment)
       } else {
         new_text_body = Option.Some(segment)
       }
@@ -112,7 +112,7 @@ fn merge_multipart_part(
       if html_body.some? {
         let existing: String = html_body.clone.get
 
-        new_html_body = Option.Some(existing + segment)
+        new_html_body = Option.Some(existing + '\n' + segment)
       } else {
         new_html_body = Option.Some(segment)
       }
@@ -376,7 +376,7 @@ fn parse_multipart_impl(
                       if text_body.some? {
                         let existing: String = text_body.clone.get
 
-                        text_body = Option.Some(existing + txt)
+                        text_body = Option.Some(existing + '\n' + txt)
                       } else {
                         text_body = Option.Some(txt)
                       }
@@ -389,7 +389,7 @@ fn parse_multipart_impl(
                       if html_body.some? {
                         let existing: String = html_body.clone.get
 
-                        html_body = Option.Some(existing + html)
+                        html_body = Option.Some(existing + '\n' + html)
                       } else {
                         html_body = Option.Some(html)
                       }
