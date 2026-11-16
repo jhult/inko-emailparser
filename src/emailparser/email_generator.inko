@@ -129,6 +129,10 @@ Please find attached files.
 
 '
 
+    let output = ByteArray.new
+
+    output.append(email)
+
     for att in attachments.iter {
       let encoding = normalize_encoding(att.encoding)
       let content_type = sanitize_header_value(att.content_type)
@@ -137,33 +141,43 @@ Please find attached files.
         encoding,
       )
 
-      email = email
-        + '--'
-        + boundary
-        + '
-Content-Type: '
-        + content_type
-        + '; name="'
-        + escape_quoted_param(att.name.clone)
-        + '"
-Content-Disposition: attachment; filename="'
-        + escape_quoted_param(att.name.clone)
-        + '"
-Content-Transfer-Encoding: '
-        + encoding
-        + '
+      output.append('--')
+      output.append(boundary)
+      output.append(
+        '
+Content-Type: ',
+      )
+      output.append(content_type)
+      output.append('; name="')
+      output.append(escape_quoted_param(att.name.clone))
+      output.append(
+        '"
+Content-Disposition: attachment; filename="',
+      )
+      output.append(escape_quoted_param(att.name.clone))
+      output.append(
+        '"
+Content-Transfer-Encoding: ',
+      )
+      output.append(encoding)
+      output.append(
+        '
 
-'
-        + encoded_content
-        + '
-'
+',
+      )
+      output.append(encoded_content)
+      output.append(
+        '
+',
+      )
 
       @attachment_counter = @attachment_counter + 1
     }
 
-    email = email + '--' + boundary + '--'
-
-    email
+    output.append('--')
+    output.append(boundary)
+    output.append('--')
+    output.into_string
   }
 
   # Generate a large attachment with configurable size
@@ -285,6 +299,10 @@ Content-Type: text/html; charset=UTF-8
     }
 
     # Add attachments at this level
+    let output = ByteArray.new
+
+    output.append(email)
+
     let mut i = 0
 
     while i < attachments_per_level {
@@ -295,31 +313,38 @@ Content-Type: text/html; charset=UTF-8
         + '.bin'
       let att_content = generate_large_attachment(attachment_size, 'PATTERN')
 
-      email = email
-        + '--'
-        + outer_boundary
-        + '
-Content-Type: application/octet-stream; name="'
-        + escape_quoted_param(att_name.clone)
-        + '"
-Content-Disposition: attachment; filename="'
-        + escape_quoted_param(att_name.clone)
-        + '"
+      output.append('--')
+      output.append(outer_boundary)
+      output.append(
+        '
+Content-Type: application/octet-stream; name="',
+      )
+      output.append(escape_quoted_param(att_name.clone))
+      output.append(
+        '"
+Content-Disposition: attachment; filename="',
+      )
+      output.append(escape_quoted_param(att_name.clone))
+      output.append(
+        '"
 Content-Transfer-Encoding: base64
 
-'
-        + TestDataGenerator.encode_bytes(att_content, 'base64')
-        + '
-
-'
+',
+      )
+      output.append(TestDataGenerator.encode_bytes(att_content, 'base64'))
+      output.append(
+        '
+',
+      )
 
       i = i + 1
       @attachment_counter = @attachment_counter + 1
     }
 
-    email = email + '--' + outer_boundary + '--'
-
-    email
+    output.append('--')
+    output.append(outer_boundary)
+    output.append('--')
+    output.into_string
   }
 
   # Generate a multipart/alternative email (text + HTML)
