@@ -260,6 +260,32 @@ fn pub extract_display_name(input: String) -> (Option[String], String) {
   }
 }
 
+# Find the '@' separating the local part from the domain
+#
+# A quoted local part may itself contain '@' (`"a@b"@example.com`), so the
+# separator is the first '@' outside a quoted string, comment or angle bracket
+# pair.
+fn find_at_separator(email: String) -> Option[Int] {
+  let mut scanner = AddressScanner.new
+  let mut i = 0
+
+  while i < email.size {
+    if scanner.top_level? {
+      match email.get(i) {
+        case Ok(byte) -> if byte == ASCII_AT { return Option.Some(i) }
+        case Error(_) -> {}
+      }
+    }
+
+    match scanner.next(email, i) {
+      case Escaped(_) -> i = i + 2
+      case _ -> i = i + 1
+    }
+  }
+
+  Option.None
+}
+
 # Validate the form of an email address (RFC 5321/5322)
 #
 # Accepts dot-atom local parts, quoted-string local parts ("a b"@example.com)
@@ -269,7 +295,7 @@ fn pub extract_display_name(input: String) -> (Option[String], String) {
 fn pub is_valid_email_format(email: String) -> Bool {
   if email.empty? or email.size > MAX_EMAIL_ADDRESS_SIZE { return false }
 
-  let at_pos = match email.index_of('@', 0) {
+  let at_pos = match find_at_separator(email) {
     case Some(pos) -> pos
     case None -> return false
   }

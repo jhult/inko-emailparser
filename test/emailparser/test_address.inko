@@ -260,6 +260,7 @@ fn pub tests(t: mut Tests) {
   t.test('is_valid_email_format_quoted_local_part', fn (t) {
     t.true(is_valid_email_format('"a b"@example.com'))
     t.true(is_valid_email_format('"john.doe"@example.com'))
+    t.true(is_valid_email_format('"a@b"@example.com'))
     t.false(is_valid_email_format('"a"b"@example.com'))
     t.false(is_valid_email_format('"a\\"@example.com'))
   })
