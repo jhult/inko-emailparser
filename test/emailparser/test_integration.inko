@@ -11,7 +11,7 @@
 # - Mobile clients
 # - Internationalized emails
 
-import emailparser (EmailParser)
+import emailparser (EmailParser, ParserConfig)
 import std.test (Tests)
 
 fn pub tests(t: mut Tests) {
@@ -836,6 +836,38 @@ body'
         }
       }
       case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
+  t.test('buffered_respects_multipart_depth_limit', fn (t) {
+    let config = ParserConfig(
+      strict_mode: false,
+      max_email_size: 25_000_000,
+      max_attachment_size: 25_000_000,
+      max_multipart_depth: 1,
+      max_attachments: 100,
+      max_headers: 100,
+    )
+    let parser = EmailParser.with_config(config)
+    let raw_email = 'From: a@example.com
+To: b@example.com
+Subject: Deep
+Content-Type: multipart/mixed; boundary=outer
+
+--outer
+Content-Type: multipart/mixed; boundary=inner
+
+--inner
+Content-Type: text/plain
+
+hello
+--inner--
+--outer--'
+
+    # max_multipart_depth counts the root level, so one nested level is too much
+    match parser.parse(raw_email) {
+      case Ok(_) -> t.true(false)
+      case Error(e) -> t.equal(e.variant, 'MultipartDepthExceeded')
     }
   })
 

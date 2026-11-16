@@ -71,6 +71,7 @@ import emailparser.header (
 )
 import emailparser.limits (MAX_HEADERS_SECTION_SIZE)
 import emailparser.mime (classify_part, is_attachment_disposition)
+import emailparser.validation (is_valid_boundary)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
@@ -173,10 +174,8 @@ fn merge_multipart_part(
   (final_text, final_html, new_attachment)
 }
 
-import emailparser.validation (is_valid_boundary)
-
 # Handle nested multipart messages
-fn pub handle_nested_multipart(
+fn handle_nested_multipart(
   decoded_bytes: ByteArray,
   ct_params: Array[(String, String)],
   transfer_encoding: String,
@@ -242,7 +241,9 @@ fn parse_multipart_impl(
   max_headers: Int,
   strict_mode: Bool,
 ) -> Result[(Option[String], Option[String], Array[EmailAttachment]), Error] {
-  if depth > max_depth {
+  # `depth` is the nesting level of this multipart (0 for the root), so the
+  # limit is inclusive of the root: reject before parsing level `max_depth`.
+  if depth >= max_depth {
     return Result.Error(
       Error.MultipartDepthExceeded(
         Severity.Error,
@@ -414,7 +415,13 @@ fn parse_multipart_impl(
                     attachments.push(att)
                   }
                 }
-                case Error(e) -> if strict_mode { return Result.Error(e) }
+                case Error(e) -> {
+                  # Structural limits (depth, size) must surface even in
+                  # permissive mode; only malformed parts are skipped.
+                  if strict_mode or !is_recoverable_part_error(ref e) {
+                    return Result.Error(e)
+                  }
+                }
               }
             } else {
               let (new_text, new_html, new_att) = merge_multipart_part(
@@ -476,7 +483,11 @@ fn split_multipart_body(
   let boundary_delim = '--' + boundary.trim
 
   if raw.contains?(boundary_delim) == false {
-    let fragment = if raw.size > 50 { raw.substring(0, 50) } else { raw.clone }
+    let fragment = if raw.size > 50 {
+      raw.slice(0, 50).to_string
+    } else {
+      raw.clone
+    }
 
     return Result.Error(
       Error.BoundaryNotFound(
@@ -636,7 +647,7 @@ fn extract_content_id(part_headers: Array[(String, String)]) -> Option[String] {
         and trimmed.starts_with?('<')
         and trimmed.ends_with?('>')
     {
-      trimmed.substring(1, trimmed.size - 1)
+      trimmed.slice(1, trimmed.size - 1).to_string
     } else {
       trimmed
     }

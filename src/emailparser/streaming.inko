@@ -1897,7 +1897,9 @@ if
     if main_type.starts_with?('multipart/') {
       match get_param_value_impl(ref ct_params, 'boundary') {
         case Some(nested_boundary) -> {
-          if @depth + 1 > @max_depth {
+          # Match the buffered parser: level `max_depth` itself is rejected,
+          # so a multipart message never exceeds max_depth nesting levels.
+          if @depth + 1 >= @max_depth {
             return Result.Error(
               Error.MultipartDepthExceeded(
                 Severity.Error,

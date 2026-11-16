@@ -290,8 +290,8 @@ fn parse_headers_impl(
 
       match colon_pos {
         case Some(pos) -> {
-          current_key = line_str.substring(0, pos).trim
-          current_value = line_str.substring(pos + 1, line_str.size).trim
+          current_key = line_str.slice(0, pos).to_string.trim
+          current_value = line_str.slice(pos + 1, line_str.size).to_string.trim
 
           # RFC 5322 requires non-empty header names - reject even in non-strict mode
           if current_key.empty? {
@@ -328,10 +328,9 @@ fn parse_headers_impl(
                   ),
                 )
               } else {
-                current_value = current_value.substring(
-                  0,
-                  MAX_HEADER_VALUE_LENGTH,
-                )
+                current_value = current_value
+                  .slice(0, MAX_HEADER_VALUE_LENGTH)
+                  .to_string
               }
             }
           }
@@ -824,7 +823,7 @@ fn pub sanitize_filename(filename: String) -> Option[String] {
   ]
 
   let base_name = match name.index_of('.', 0) {
-    case Some(dot_pos) -> name.substring(0, dot_pos)
+    case Some(dot_pos) -> name.slice(0, dot_pos).to_string
     case None -> name.clone
   }
 
