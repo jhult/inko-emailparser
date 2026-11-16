@@ -5,7 +5,7 @@
 import emailparser.ascii (
   ASCII_CR, ASCII_EQUALS, ASCII_HT, ASCII_LF, ASCII_SPACE,
 )
-import emailparser.decoder (decode_qp_bytes)
+import emailparser.decoder (decode_qp_bytes_range)
 import emailparser.hex (hex_char_to_value)
 import emailparser.size_tracker (SizeTracker)
 import std.base64 (Decoder)
@@ -30,6 +30,13 @@ impl Base64StreamingDecoder {
   }
 
   fn pub mut feed(chunk: String) -> Result[ByteArray, String] {
+    let bytes = chunk.to_byte_array
+
+    feed_bytes(ref bytes)
+  }
+
+  # Feed raw bytes. The byte path preserves non-UTF-8 attachment content.
+  fn pub mut feed_bytes(chunk: ref ByteArray) -> Result[ByteArray, String] {
     # Add chunk to buffer, filtering out whitespace and invalid characters.
     # Incomplete groups are kept in the buffer until they can be decoded.
     let mut i = 0
@@ -264,6 +271,13 @@ impl QuotedPrintableStreamingDecoder {
   }
 
   fn pub mut feed(chunk: String) -> Result[ByteArray, String] {
+    let bytes = chunk.to_byte_array
+
+    feed_bytes(ref bytes)
+  }
+
+  # Feed raw bytes. The byte path preserves non-UTF-8 attachment content.
+  fn pub mut feed_bytes(chunk: ref ByteArray) -> Result[ByteArray, String] {
     # Combine pending data with new chunk
     let combined = ByteArray.new
     let mut p = 0
@@ -308,10 +322,11 @@ impl QuotedPrintableStreamingDecoder {
 
     @pending = pending
 
-    # Decode the complete prefix with the shared QP state machine
-    let text = combined.slice(0, process_end).to_string
-    let output = decode_qp_bytes(
-      text,
+    # Decode the complete prefix with the shared QP state machine. The byte
+    # range API keeps raw 8-bit content intact.
+    let output = decode_qp_bytes_range(
+      ref combined,
+      process_end,
       @underscore_is_space,
       @preserve_equals_on_error,
     )
@@ -335,7 +350,7 @@ impl QuotedPrintableStreamingDecoder {
       # The pending bytes are an incomplete escape sequence at EOF. Decode
       # them as malformed input instead of emitting them verbatim (or
       # dropping them entirely).
-      let pending = @pending.clone.into_string
+      let pending = @pending.clone
       let mut i = 0
 
       while i < pending.size {

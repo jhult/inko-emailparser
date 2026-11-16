@@ -1015,7 +1015,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
 
     # Feed initial body data
     if initial_body.size > 0 {
-      match decoder.feed(initial_body.into_string) {
+      match decoder.feed_bytes(ref initial_body) {
         case Ok(decoded) -> {
           if decoded.size > 0 {
             match
@@ -1056,7 +1056,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
             )
           }
 
-          match decoder.feed(chunk.into_string) {
+          match decoder.feed_bytes(ref chunk) {
             case Ok(decoded) -> {
               if decoded.size > 0 {
                 match
@@ -1098,7 +1098,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
 
     # Feed initial body data
     if initial_body.size > 0 {
-      match decoder.feed(initial_body.into_string) {
+      match decoder.feed_bytes(ref initial_body) {
         case Ok(decoded) -> {
           if decoded.size > 0 {
             match
@@ -1139,7 +1139,7 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
             )
           }
 
-          match decoder.feed(chunk.into_string) {
+          match decoder.feed_bytes(ref chunk) {
             case Ok(decoded) -> {
               if decoded.size > 0 {
                 match
@@ -1531,7 +1531,7 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
     let mut decoder = Base64StreamingDecoder.new(max_size, strict_mode)
 
     if initial_body.size > 0 {
-      match decoder.feed(initial_body.into_string) {
+      match decoder.feed_bytes(ref initial_body) {
         case Ok(decoded) -> {
           match
             push_attachment_bytes(
@@ -1570,7 +1570,7 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
             )
           }
 
-          match decoder.feed(chunk.into_string) {
+          match decoder.feed_bytes(ref chunk) {
             case Ok(decoded) -> {
               match
                 push_attachment_bytes(
@@ -1607,7 +1607,7 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
     let mut decoder = QuotedPrintableStreamingDecoder.new(max_size, true, false)
 
     if initial_body.size > 0 {
-      match decoder.feed(initial_body.into_string) {
+      match decoder.feed_bytes(ref initial_body) {
         case Ok(decoded) -> {
           match
             push_attachment_bytes(
@@ -1646,7 +1646,7 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
             )
           }
 
-          match decoder.feed(chunk.into_string) {
+          match decoder.feed_bytes(ref chunk) {
             case Ok(decoded) -> {
               match
                 push_attachment_bytes(
@@ -2050,7 +2050,7 @@ if
 
           match @base64_decoder {
             case Some(mut d) -> {
-              match d.feed(data_str.into_string) {
+              match d.feed_bytes(data) {
                 case Ok(decoded) -> {
                   if decoded.size > 0 {
                     @current_attachment_size = @current_attachment_size
@@ -2098,7 +2098,7 @@ if
 
           match @qp_decoder {
             case Some(mut d) -> {
-              match d.feed(data_str.into_string) {
+              match d.feed_bytes(data) {
                 case Ok(decoded) -> {
                   if decoded.size > 0 {
                     @current_attachment_size = @current_attachment_size
@@ -2178,7 +2178,7 @@ if
 
             match @base64_decoder {
               case Some(mut d) -> {
-                match d.feed(data_str.into_string) {
+                match d.feed_bytes(data) {
                   case Ok(decoded) -> {
                     if decoded.size > 0 {
                       match
@@ -2211,7 +2211,7 @@ if
 
             match @qp_decoder {
               case Some(mut d) -> {
-                match d.feed(data_str.into_string) {
+                match d.feed_bytes(data) {
                   case Ok(decoded) -> {
                     if decoded.size > 0 {
                       match

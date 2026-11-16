@@ -315,6 +315,40 @@ JVBERi0='
     }
   })
 
+  t.test('parse_async_reader_keeps_non_utf8_qp_attachment_bytes', fn (t) {
+    let mut parser = StreamingParser.new
+    let mut handler = CollectingHandler.new
+    let headers = 'From: a@example.com
+To: b@example.com
+Subject: Binary
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="raw.bin"
+Content-Transfer-Encoding: quoted-printable
+
+'
+
+    let mut data = headers.to_byte_array
+
+    # A raw 8-bit byte (0xE9) followed by LF. Converting the chunk to String
+    # would replace 0xE9 with the UTF-8 encoding of U+FFFD.
+    data.push(233)
+    data.push(10)
+
+    let mut reader = ByteArrayReader.new(data)
+
+    match parser.parse_async_reader(mut reader, mut handler) {
+      case Ok(_) -> {
+        t.equal(handler.attachment_data.size, 2)
+
+        match handler.attachment_data.get(0) {
+          case Ok(b) -> t.equal(b, 233)
+          case Error(_) -> t.false(true)
+        }
+      }
+      case Error(e) -> panic('parse_async_reader failed: ${e.to_message}')
+    }
+  })
+
   t.test('single_part_stream_attachment_filename_is_sanitized', fn (t) {
     let mut parser = StreamingParser.new
     let mut handler = CollectingHandler.new
