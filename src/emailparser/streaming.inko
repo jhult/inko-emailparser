@@ -1501,6 +1501,38 @@ fn push_attachment_bytes[H: mut + StreamHandler](
   Result.Ok(0)
 }
 
+# Emit bytes left in a partial attachment chunk
+fn flush_attachment_bytes[H: mut + StreamHandler](
+  pending: mut ByteArray,
+  info: ref AttachmentInfo,
+  handler: mut H,
+) -> Result[Int, Error] {
+  if pending.size == 0 { return Result.Ok(0) }
+
+  let chunk = ByteArray.new
+  let mut i = 0
+
+  while i < pending.size {
+    match pending.get(i) {
+      case Ok(byte) -> chunk.push(byte)
+      case Error(_) -> {}
+    }
+
+    i = i + 1
+  }
+
+  pending.clear
+
+  match handler.on_attachment_chunk(chunk, info) {
+    case Ok(_) -> Result.Ok(0)
+    case Error(e) -> {
+      Result.Error(
+        Error.from_string('Handler on_attachment_chunk failed: ${e}'),
+      )
+    }
+  }
+}
+
 # Stream a single non-text body from an async reader as an attachment
 fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
   reader: mut R,
@@ -1789,6 +1821,7 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
     strict_mode: strict_mode,
     max_attachments: max_attachments,
     current_attachment_size: 0,
+    pending_attachment: recover ByteArray.new,
     depth: 0,
     max_depth: max_depth,
     nested_buffer: Option.None,
@@ -1871,6 +1904,7 @@ type MultipartHandlerWrapper[H: mut + StreamHandler] {
   let @strict_mode: Bool
   let @max_attachments: Int
   let mut @current_attachment_size: Int
+  let mut @pending_attachment: ByteArray
   let @depth: Int
   let @max_depth: Int
   let mut @nested_buffer: Option[ByteArray]
@@ -1888,6 +1922,8 @@ if
     content_type: String,
     is_attachment: Bool,
   ) -> Result[Int, Error] {
+    @pending_attachment = ByteArray.new
+
     let (ct_main, ct_params) = match
       parse_content_type_impl(content_type, @strict_mode)
     {
@@ -2071,15 +2107,17 @@ if
                       )
                     }
 
-                    match @handler.on_attachment_chunk(decoded, info) {
+                    match
+                      push_attachment_bytes(
+                        @pending_attachment,
+                        ref decoded,
+                        @chunk_size,
+                        info,
+                        @handler,
+                      )
+                    {
                       case Ok(_) -> {}
-                      case Error(e) -> {
-                        return Result.Error(
-                          Error.from_string(
-                            'Handler on_attachment_chunk failed: ${e}',
-                          ),
-                        )
-                      }
+                      case Error(e) -> return Result.Error(e)
                     }
                   }
                 }
@@ -2119,15 +2157,17 @@ if
                       )
                     }
 
-                    match @handler.on_attachment_chunk(decoded, info) {
+                    match
+                      push_attachment_bytes(
+                        @pending_attachment,
+                        ref decoded,
+                        @chunk_size,
+                        info,
+                        @handler,
+                      )
+                    {
                       case Ok(_) -> {}
-                      case Error(e) -> {
-                        return Result.Error(
-                          Error.from_string(
-                            'Handler on_attachment_chunk failed: ${e}',
-                          ),
-                        )
-                      }
+                      case Error(e) -> return Result.Error(e)
                     }
                   }
                 }
@@ -2152,13 +2192,17 @@ if
             )
           }
 
-          match @handler.on_attachment_chunk(data_str, info) {
+          match
+            push_attachment_bytes(
+              @pending_attachment,
+              ref data_str,
+              @chunk_size,
+              info,
+              @handler,
+            )
+          {
             case Ok(_) -> {}
-            case Error(e) -> {
-              return Result.Error(
-                Error.from_string('Handler on_attachment_chunk failed: ${e}'),
-              )
-            }
+            case Error(e) -> return Result.Error(e)
           }
         }
       }
@@ -2396,16 +2440,28 @@ if
 
         match tail {
           case Some(data) -> {
-            match @handler.on_attachment_chunk(data, final_info) {
+            match
+              push_attachment_bytes(
+                @pending_attachment,
+                ref data,
+                @chunk_size,
+                final_info,
+                @handler,
+              )
+            {
               case Ok(_) -> {}
-              case Error(e) -> {
-                return Result.Error(
-                  Error.from_string('Handler on_attachment_chunk failed: ${e}'),
-                )
-              }
+              case Error(e) -> return Result.Error(e)
             }
           }
           case None -> {}
+        }
+
+        # Emit any bytes left over from partial chunks.
+        match
+          flush_attachment_bytes(@pending_attachment, final_info, @handler)
+        {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
         }
 
         match @handler.on_attachment_end(final_info) {
@@ -2519,6 +2575,7 @@ fn finish_nested[H: mut + StreamHandler](
     strict_mode: strict_mode,
     max_attachments: max_attachments,
     current_attachment_size: 0,
+    pending_attachment: recover ByteArray.new,
     depth: depth + 1,
     max_depth: max_depth,
     nested_buffer: Option.None,
@@ -2602,6 +2659,7 @@ fn parse_multipart_stream[H: mut + StreamHandler](
     strict_mode: strict_mode,
     max_attachments: max_attachments,
     current_attachment_size: 0,
+    pending_attachment: recover ByteArray.new,
     depth: 0,
     max_depth: max_depth,
     nested_buffer: Option.None,
