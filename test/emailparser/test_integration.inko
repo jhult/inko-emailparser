@@ -736,6 +736,29 @@ forwarded body
     }
   })
 
+  t.test('multipart_part_without_headers_is_kept', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: recipient@example.com
+Subject: Headerless part
+Content-Type: multipart/mixed; boundary=b
+
+--b
+
+only body
+--b--'
+
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        match msg.text_body {
+          case Some(body) -> t.equal(body.trim, 'only body')
+          case None -> t.equal('should have text body', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
   t.test('consecutive_text_parts_are_separated', fn (t) {
     let parser = EmailParser.new
     let raw_email = 'From: sender@example.com

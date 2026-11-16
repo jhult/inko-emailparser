@@ -713,18 +713,27 @@ fn parse_single_multipart_part(
       )
     }
     case None -> {
-      let fragment = if trimmed.size > 50 {
-        trimmed.substring(0, 50)
-      } else {
-        trimmed.clone
+      # RFC 2046 allows a part with an empty header section: everything after
+      # the delimiter is body, and the default content type is text/plain.
+      let decoded_body = match
+        process_multipart_part_body(
+          trimmed,
+          default_encoding,
+          max_attachment_size,
+        )
+      {
+        case Ok(b) -> b
+        case Error(e) -> return Result.Error(e)
       }
 
-      Result.Error(
-        Error.NoBodyInPart(
-          Severity.Error,
+      Result.Ok(
+        (
+          'text/plain',
+          [] as Array[(String, String)],
+          '',
           Option.None,
           Option.None,
-          Option.Some(fragment),
+          decoded_body,
         ),
       )
     }
