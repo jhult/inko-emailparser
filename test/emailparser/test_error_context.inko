@@ -3,7 +3,7 @@
 # You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import emailparser.error (Error)
-import emailparser.error (Severity)
+import emailparser.error (Severity, is_recoverable_part_error)
 import std.test (Tests)
 
 fn pub tests(t: mut Tests) {
@@ -262,5 +262,50 @@ fn pub tests(t: mut Tests) {
       case Some(_) -> t.true(false)
       case None -> {}
     }
+  })
+
+  t.test('part_error_recoverability', fn (t) {
+    let malformed = Error.MalformedHeader(
+      Severity.Error,
+      'bad',
+      Option.None,
+      Option.None,
+      Option.None,
+    )
+
+    t.true(is_recoverable_part_error(ref malformed))
+
+    let header_too_large = Error.HeaderValueTooLarge(
+      Severity.Error,
+      100,
+      10,
+      Option.None,
+      Option.None,
+      Option.None,
+    )
+
+    t.false(is_recoverable_part_error(ref header_too_large))
+
+    let section_too_large = Error.HeaderSectionTooLarge(
+      Severity.Error,
+      100,
+      10,
+      Option.None,
+      Option.None,
+      Option.None,
+    )
+
+    t.false(is_recoverable_part_error(ref section_too_large))
+
+    let depth = Error.MultipartDepthExceeded(
+      Severity.Error,
+      11,
+      10,
+      Option.None,
+      Option.None,
+      Option.None,
+    )
+
+    t.false(is_recoverable_part_error(ref depth))
   })
 }

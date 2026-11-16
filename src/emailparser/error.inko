@@ -544,18 +544,32 @@ impl Severity {
 #
 # The buffered and streaming multipart parsers share this classification so a
 # malformed part is skipped consistently while size and structural limits still
-# abort the parse.
+# abort the parse. Keep this match exhaustive: adding a variant then forces a
+# deliberate decision instead of silently defaulting to recoverable.
 fn pub is_recoverable_part_error(error: ref Error) -> Bool {
-  let variant = error.variant
-
-  variant == 'MalformedHeader'
-    or variant == 'HeaderWithoutColon'
-    or variant == 'InvalidHeaderFieldName'
-    or variant == 'DuplicateHeader'
-    or variant == 'HeaderValueTooLarge'
-    or variant == 'HeaderSectionTooLarge'
-    or variant == 'DecodingFailed'
-    or variant == 'InvalidContentType'
-    or variant == 'NoBodyInPart'
-    or variant == 'MultipartWithoutParts'
+  match error {
+    case MalformedHeader(_, _, _, _, _) -> true
+    case HeaderWithoutColon(_, _, _, _) -> true
+    case InvalidHeaderFieldName(_, _, _, _, _) -> true
+    case DuplicateHeader(_, _, _, _, _) -> true
+    case DecodingFailed(_, _, _, _, _, _) -> true
+    case InvalidContentType(_, _, _, _, _) -> true
+    case NoBodyInPart(_, _, _, _) -> true
+    case MultipartWithoutParts(_, _, _, _) -> true
+    # Size and structural limits abort the parse.
+    case EmailSizeTooLarge(_, _, _, _, _, _) -> false
+    case AttachmentSizeTooLarge(_, _, _, _, _, _) -> false
+    case TooManyAttachments(_, _, _, _, _, _) -> false
+    case TooManyHeaders(_, _, _, _, _, _) -> false
+    case MultipartDepthExceeded(_, _, _, _, _, _) -> false
+    case InvalidEmailFormat(_, _, _, _, _) -> false
+    case HeaderValueTooLarge(_, _, _, _, _, _) -> false
+    case HeaderSectionTooLarge(_, _, _, _, _, _) -> false
+    case BoundaryNotFound(_, _, _, _) -> false
+    case InvalidBoundary(_, _, _, _, _) -> false
+    case ParseError(_, _, _, _, _) -> false
+    case DecodedSizeTooLarge(_, _, _, _, _, _, _) -> false
+    case MissingRequiredHeader(_, _, _, _, _) -> false
+    case EmptyRequiredHeader(_, _, _, _, _) -> false
+  }
 }
