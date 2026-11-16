@@ -11,7 +11,8 @@
 # See docs/streaming-api.md for complete design documentation.
 
 import emailparser (
-  normalize_line_endings, validate_addresses, validate_required_headers,
+  normalize_line_endings, normalized_line_endings_size, validate_addresses,
+  validate_required_headers,
 )
 import emailparser.address (EmailAddress)
 import emailparser.decoder (decode_body_bytes_impl, decode_body_impl)
@@ -232,11 +233,11 @@ impl StreamingParser {
       }
     }
 
-    # Normalize line endings
-    let normalized = normalize_line_endings(raw)
-    let email_size = normalized.size
+    # Enforce the size limit before normalizing: `normalize_line_endings`
+    # allocates a full copy of the input, and the limit is meant to bound
+    # memory use for untrusted input.
+    let email_size = normalized_line_endings_size(raw)
 
-    # Check email size limit
     if email_size > @config.max_email_size {
       let failure = Error.EmailSizeTooLarge(
         Severity.Error,
@@ -258,6 +259,9 @@ impl StreamingParser {
 
       return Result.Error(failure)
     }
+
+    # Normalize line endings
+    let normalized = normalize_line_endings(raw)
 
     # Split headers and body (byte-offset safe for non-ASCII headers)
     let (headers_raw, body_raw) = split_header_body(normalized)

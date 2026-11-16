@@ -1495,6 +1495,35 @@ Body
     }
   })
 
+  t.test('size_limit_uses_normalized_size', fn (t) {
+    let raw = 'From: a@b.com\r\n\r\nBody'
+    let normalized_size = 'From: a@b.com\n\nBody'.size
+
+    # Raw is larger than normalized; the limit must be compared against the
+    # normalized size so CRLF input is not rejected spuriously.
+    let parser = EmailParser.new.with_max_email_size(normalized_size)
+
+    match parser.parse(raw) {
+      case Ok(_) -> t.true(true)
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+
+    # The reported size is the normalized size, not the raw input size.
+    let small = EmailParser.new.with_max_email_size(10)
+
+    match small.parse(raw) {
+      case Ok(_) -> t.true(false)
+      case Error(e) -> {
+        match e {
+          case EmailSizeTooLarge(_, size, _, _, _, _) -> {
+            t.equal(size, normalized_size)
+          }
+          case _ -> t.true(false)
+        }
+      }
+    }
+  })
+
   t.test('parse_headers_returns_typed_error', fn (t) {
     let parser = EmailParser.new
 

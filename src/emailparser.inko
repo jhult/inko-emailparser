@@ -145,6 +145,26 @@ fn pub normalize_line_endings(text: String) -> String {
   text.replace('\r\n', '\n')
 }
 
+# Return the size of `text` after CRLF -> LF normalization without allocating
+# the normalized copy. Used to enforce `max_email_size` before paying for the
+# copy, which would otherwise let an oversized input allocate freely.
+fn pub normalized_line_endings_size(text: String) -> Int {
+  let mut size = text.size
+  let mut offset = 0
+
+  loop {
+    match text.index_of('\r\n', offset) {
+      case Some(pos) -> {
+        size -= 1
+        offset = pos + 2
+      }
+      case None -> break
+    }
+  }
+
+  size
+}
+
 # Email parser
 type pub EmailParser {
   let pub @config: ParserConfig
@@ -412,12 +432,11 @@ impl EmailParser {
   # variant (and its severity) instead of parsing an error string. Use
   # `Error.to_message` when a human-readable representation is needed.
   fn pub parse(raw: String) -> Result[ParsedEmailMessage, Error] {
-    # Normalize line endings for consistent parsing
-    # RFC 5322 specifies CRLF, but we also accept LF-only for compatibility
-    let normalized = normalize_line_endings(raw)
-    let email_size = normalized.size
+    # Enforce the size limit before normalizing. `normalize_line_endings`
+    # allocates a full copy of the input, so checking afterwards would let an
+    # oversized message allocate before the guard fires.
+    let email_size = normalized_line_endings_size(raw)
 
-    # Check total email size limit before parsing
     if email_size > @config.max_email_size {
       return Result.Error(
         Error.EmailSizeTooLarge(
@@ -430,6 +449,10 @@ impl EmailParser {
         ),
       )
     }
+
+    # Normalize line endings for consistent parsing
+    # RFC 5322 specifies CRLF, but we also accept LF-only for compatibility
+    let normalized = normalize_line_endings(raw)
 
     # Split headers and body. RFC 5322 specifies CRLF, but we also accept
     # LF-only for compatibility. Body is optional - if no blank line is found,
