@@ -139,7 +139,8 @@ Hello World
     t.equal(handler.parts_begun, 1)
     t.equal(handler.parts_ended, 1)
     t.equal(handler.data_chunks.size, 1)
-    t.equal(handler.data_chunks.get(0).or(''), 'Hello World\n')
+    # The LF before the delimiter belongs to the delimiter, not the body
+    t.equal(handler.data_chunks.get(0).or(''), 'Hello World')
   })
 
   t.test('multipart_multiple_parts', fn (t) {
@@ -232,7 +233,7 @@ Part Two
       total_data = total_data + chunk.clone
     }
 
-    t.equal(total_data, 'Hello World\n')
+    t.equal(total_data, 'Hello World')
   })
 
   t.test('multipart_boundary_split_across_chunks', fn (t) {
@@ -459,7 +460,7 @@ Content-Type: text/html
     }
 
     t.equal(handler.parts_begun, 1)
-    t.equal(handler.data_chunks.get(0).or(''), 'before --b after\n')
+    t.equal(handler.data_chunks.get(0).or(''), 'before --b after')
   })
 
   t.test('multipart_preamble_handling', fn (t) {

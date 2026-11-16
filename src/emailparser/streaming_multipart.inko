@@ -619,34 +619,29 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
       let mut i = 0
 
       # Copy body data up to boundary.
-      # Per RFC 2046 the CRLF before the boundary belongs to the delimiter.
-      # A bare LF is only treated as delimiter padding at EOF, matching the
-      # existing behaviour for well-formed LF-only messages.
-      let body_end = if pos >= 2 {
+      #
+      # Per RFC 2046 the line break before the delimiter belongs to the
+      # delimiter, so it is not body data. parse_stream normalises the message
+      # to LF-only, so a bare LF must be stripped everywhere and not just at
+      # EOF; strip the CR too when the line break is a CRLF.
+      let mut body_end = pos
+
+      if pos >= 1 {
         match parser.buffer.get(pos - 1) {
           case Ok(b1) -> {
-            match parser.buffer.get(pos - 2) {
-              case Ok(b2) -> {
-                if b1 == 10 and b2 == 13 {
-                  pos - 2
-                } else if at_eof and b1 == 10 {
-                  pos - 1
-                } else {
-                  pos
+            if b1 == 10 {
+              body_end = pos - 1
+
+              if body_end >= 1 {
+                match parser.buffer.get(body_end - 1) {
+                  case Ok(b2) -> if b2 == 13 { body_end = body_end - 1 }
+                  case Error(_) -> {}
                 }
               }
-              case Error(_) -> pos
             }
           }
-          case Error(_) -> pos
+          case Error(_) -> {}
         }
-      } else if pos >= 1 {
-        match parser.buffer.get(pos - 1) {
-          case Ok(b1) -> if at_eof and b1 == 10 { pos - 1 } else { pos }
-          case Error(_) -> pos
-        }
-      } else {
-        pos
       }
 
       while i < body_end {
