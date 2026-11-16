@@ -147,6 +147,64 @@ fn pub split_header_body(input: String) -> (String, String) {
   }
 }
 
+# Find the first header/body separator in a byte buffer
+#
+# Recognizes both LF LF and CR LF CR LF and reports the separator's size, so
+# callers can locate the body without converting the buffer to a String first.
+# `start` lets incremental readers resume scanning after the bytes they have
+# already checked; overlap it by three bytes so a separator split across reads
+# is still found.
+fn pub find_header_separator_bytes(
+  buffer: ref ByteArray,
+  start: Int,
+) -> Option[(Int, Int)] {
+  let size = buffer.size
+  let mut i = start
+
+  while i < size {
+    match buffer.get(i) {
+      case Ok(byte) -> {
+        if byte == 10 {
+          if i + 1 < size {
+            match buffer.get(i + 1) {
+              case Ok(following) -> {
+                if following == 10 { return Option.Some((i, 2)) }
+              }
+              case Error(_) -> {}
+            }
+          }
+        } else if byte == 13 {
+          if i + 3 < size {
+            match buffer.get(i + 1) {
+              case Ok(b1) -> {
+                match buffer.get(i + 2) {
+                  case Ok(b2) -> {
+                    match buffer.get(i + 3) {
+                      case Ok(b3) -> {
+                        if b1 == 10 and b2 == 13 and b3 == 10 {
+                          return Option.Some((i, 4))
+                        }
+                      }
+                      case Error(_) -> {}
+                    }
+                  }
+                  case Error(_) -> {}
+                }
+              }
+              case Error(_) -> {}
+            }
+          }
+        }
+      }
+      case Error(_) -> {}
+    }
+
+    i = i + 1
+  }
+
+  Option.None
+}
+
 # Performance optimizations:
 # - Lowercase header names cached to avoid O(n²) conversions
 # - Case-insensitive comparison without repeated string copies

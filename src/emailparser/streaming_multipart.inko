@@ -12,7 +12,8 @@ import emailparser.boundary (find_boundary, is_line_start)
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.header (
-  extract_filename_param, get_header_value_impl, parse_headers_impl,
+  extract_filename_param, find_header_separator_bytes, get_header_value_impl,
+  parse_headers_impl,
 )
 import emailparser.limits (MAX_HEADERS_SECTION_SIZE)
 import emailparser.mime (classify_part)
@@ -424,11 +425,11 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
   handler: mut H,
   default_encoding: String,
 ) -> Result[Int, Error] {
-  # Look for double newline indicating end of headers
-  let header_end = find_double_newline(ref parser.buffer)
+  # Look for the header/body separator (LF LF or CR LF CR LF)
+  let separator = find_header_separator_bytes(ref parser.buffer, 0)
 
-  match header_end {
-    case Some(end_pos) -> {
+  match separator {
+    case Some((end_pos, separator_size)) -> {
       # Extract header bytes
       # The buffer may start with the CRLF/LF that terminated the boundary.
       # Skip the full line break (2 bytes for CRLF, 1 for LF); skipping only
@@ -436,20 +437,12 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
       # an empty line, which drops every header.
       let header_start = leading_line_break_size(ref parser.buffer)
 
-      let mut header_bytes = ByteArray.new
-      let mut i = header_start
-
-      while i < end_pos {
-        match parser.buffer.get(i) {
-          case Ok(byte) -> header_bytes.push(byte)
-          case Error(_) -> {}
-        }
-
-        i = i + 1
-      }
-
       # Parse headers
-      let headers_string = header_bytes.into_string
+      let headers_string = if end_pos > header_start {
+        parser.buffer.slice(header_start, end_pos).to_string
+      } else {
+        ''
+      }
       let headers = match
         parse_part_headers(
           headers_string,
@@ -530,37 +523,8 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
 
       parser.current_context = Option.Some(context)
 
-      # Remove headers from buffer (including leading newline and double newline)
-      # Determine skip length based on what we found (\n\n or \r\n\r\n)
-      let mut skip_len = 2
-
-      if parser.buffer.size >= (end_pos + 4) {
-        match parser.buffer.get(end_pos) {
-          case Ok(b1) -> {
-            match parser.buffer.get(end_pos + 1) {
-              case Ok(b2) -> {
-                match parser.buffer.get(end_pos + 2) {
-                  case Ok(b3) -> {
-                    match parser.buffer.get(end_pos + 3) {
-                      case Ok(b4) -> {
-                        if b1 == 13 and b2 == 10 and b3 == 13 and b4 == 10 {
-                          skip_len = 4
-                        }
-                      }
-                      case Error(_) -> {}
-                    }
-                  }
-                  case Error(_) -> {}
-                }
-              }
-              case Error(_) -> {}
-            }
-          }
-          case Error(_) -> {}
-        }
-      }
-
-      let skip_to = end_pos + skip_len
+      # Remove headers from buffer (including leading newline and separator)
+      let skip_to = end_pos + separator_size
 
       parser.head_line_start = is_line_start(ref parser.buffer, skip_to)
 
@@ -764,51 +728,6 @@ fn leading_line_break_size(buffer: ref ByteArray) -> Int {
   }
 
   size
-}
-
-# Find double newline in buffer (header/body separator)
-# Handles both \n\n and \r\n\r\n line endings
-fn find_double_newline(buffer: ref ByteArray) -> Option[Int] {
-  if buffer.size < 2 { return Option.None }
-
-  let mut i = 0
-  let max_i = buffer.size - 1
-
-  while i < max_i {
-    match buffer.get(i) {
-      case Ok(b1) -> {
-        match buffer.get(i + 1) {
-          case Ok(b2) -> {
-            # Look for \n\n
-            if b1 == 10 and b2 == 10 { return Option.Some(i) }
-
-            # Look for \r\n\r\n - need at least 4 bytes
-            if buffer.size >= (i + 4) {
-              match buffer.get(i + 2) {
-                case Ok(b3) -> {
-                  match buffer.get(i + 3) {
-                    case Ok(b4) -> {
-                      if b1 == 13 and b2 == 10 and b3 == 13 and b4 == 10 {
-                        return Option.Some(i)
-                      }
-                    }
-                    case Error(_) -> {}
-                  }
-                }
-                case Error(_) -> {}
-              }
-            }
-          }
-          case Error(_) -> {}
-        }
-      }
-      case Error(_) -> {}
-    }
-
-    i = i + 1
-  }
-
-  Option.None
 }
 
 # Parse part headers

@@ -9,8 +9,9 @@
 
 import emailparser (EmailParser)
 import emailparser.header (
-  extract_extra_headers, extract_filename_param, get_header_value_impl,
-  is_valid_field_name, parse_content_type_impl, sanitize_filename,
+  extract_extra_headers, extract_filename_param, find_header_separator_bytes,
+  get_header_value_impl, is_valid_field_name, parse_content_type_impl,
+  sanitize_filename,
 )
 import std.test (Tests)
 
@@ -550,6 +551,28 @@ Body'
     match parser.parse_headers(raw) {
       case Ok(headers) -> t.equal(headers.size, 3)
       case Error(e) -> panic('parse_headers failed: ${e.to_message}')
+    }
+  })
+
+  t.test('find_header_separator_bytes_handles_lf_and_crlf', fn (t) {
+    let lf = 'A: b\n\nbody'.to_byte_array
+
+    match find_header_separator_bytes(ref lf, 0) {
+      case Some((pos, size)) -> {
+        t.equal(pos, 4)
+        t.equal(size, 2)
+      }
+      case None -> t.false(true)
+    }
+
+    let crlf = 'A: b\r\n\r\nbody'.to_byte_array
+
+    match find_header_separator_bytes(ref crlf, 0) {
+      case Some((pos, size)) -> {
+        t.equal(pos, 4)
+        t.equal(size, 4)
+      }
+      case None -> t.false(true)
     }
   })
 }

@@ -18,9 +18,9 @@ import emailparser.address (EmailAddress)
 import emailparser.decoder (decode_body_bytes_impl, decode_body_impl)
 import emailparser.error (Error, Severity, is_recoverable_part_error)
 import emailparser.header (
-  extract_extra_headers, extract_filename_param, get_header_value_impl,
-  get_param_value_impl, parse_content_disposition_impl, parse_content_type_impl,
-  parse_headers_impl, split_header_body,
+  extract_extra_headers, extract_filename_param, find_header_separator_bytes,
+  get_header_value_impl, get_param_value_impl, parse_content_disposition_impl,
+  parse_content_type_impl, parse_headers_impl, split_header_body,
 )
 import emailparser.header_extraction (
   parse_address_headers, parse_basic_headers, parse_mime_metadata,
@@ -758,92 +758,6 @@ impl StreamingParser {
 }
 
 # Helper functions for streaming parser
-
-# Find the end of the header section
-#
-# Returns the position of the separator and its length (2 for "\n\n", 4 for
-# "\r\n\r\n"), or None when the headers are not complete yet.
-# Find the header/body separator on the raw bytes.
-#
-# Working on the raw ByteArray keeps offsets exact: `ByteArray.into_string` is
-# lossy, so a separator located in the converted String would not address the
-# same byte in the buffer when headers contain invalid UTF-8.
-fn find_header_separator_bytes(
-  buffer: ref ByteArray,
-  start: Int,
-) -> Option[(Int, Int)] {
-  let size = buffer.size
-  let mut i = start
-
-  while i < size {
-    match buffer.get(i) {
-      case Ok(byte) -> {
-        if byte == 10 {
-          if i + 1 < size {
-            match buffer.get(i + 1) {
-              case Ok(following) -> {
-                if following == 10 { return Option.Some((i, 2)) }
-              }
-              case Error(_) -> {}
-            }
-          }
-        } else if byte == 13 {
-          if i + 3 < size {
-            match buffer.get(i + 1) {
-              case Ok(b1) -> {
-                match buffer.get(i + 2) {
-                  case Ok(b2) -> {
-                    match buffer.get(i + 3) {
-                      case Ok(b3) -> {
-                        if b1 == 10 and b2 == 13 and b3 == 10 {
-                          return Option.Some((i, 4))
-                        }
-                      }
-                      case Error(_) -> {}
-                    }
-                  }
-                  case Error(_) -> {}
-                }
-              }
-              case Error(_) -> {}
-            }
-          }
-        }
-      }
-      case Error(_) -> {}
-    }
-
-    i = i + 1
-  }
-
-  Option.None
-}
-
-fn find_header_separator(text: String) -> Option[(Int, Int)] {
-  let lf = text.index_of('\n\n', 0)
-  let crlf = text.index_of('\r\n\r\n', 0)
-
-  match lf {
-    case Some(lf_pos) -> {
-      match crlf {
-        case Some(crlf_pos) -> {
-          if crlf_pos < lf_pos {
-            Option.Some((crlf_pos, 4))
-          } else {
-            Option.Some((lf_pos, 2))
-          }
-        }
-        case None -> Option.Some((lf_pos, 2))
-      }
-    }
-    case None -> {
-      match crlf {
-        case Some(crlf_pos) -> Option.Some((crlf_pos, 4))
-        case None -> Option.None
-      }
-    }
-  }
-}
 
 # Parse body with streaming callbacks
 fn parse_body_stream[H: mut + StreamHandler](
