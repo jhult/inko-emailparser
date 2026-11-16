@@ -536,19 +536,9 @@ fn split_on_boundary(raw: String, marker: String) -> Array[String] {
 
 # Convert the byte range [start, end) of `bytes` to a String
 fn bytes_range_to_string(bytes: ref ByteArray, start: Int, end: Int) -> String {
-  let mut result = ByteArray.new
-  let mut i = start
+  if start >= end { return '' }
 
-  while i < end {
-    match bytes.get(i) {
-      case Ok(b) -> result.push(b)
-      case Error(_) -> {}
-    }
-
-    i = i + 1
-  }
-
-  result.into_string
+  bytes.slice(start, end).to_string
 }
 
 # Parse headers from a single multipart part

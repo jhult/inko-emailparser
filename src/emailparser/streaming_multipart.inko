@@ -162,17 +162,9 @@ impl MultipartStreamParser {
       case _ -> {}
     }
 
-    # Append new data to buffer
-    let mut i = 0
-
-    while i < data.size {
-      match data.get(i) {
-        case Ok(byte) -> @buffer.push(byte)
-        case Error(_) -> {}
-      }
-
-      i = i + 1
-    }
+    # Append new data to buffer. `append` copies the whole chunk at once; a
+    # per-byte get/push loop is much slower on the hot path.
+    @buffer.append(data)
 
     @default_encoding = default_encoding
 
@@ -351,24 +343,16 @@ fn process_preamble[H: mut + MultipartStreamHandler](
     case Some(pos) -> {
       # Found boundary - advance to AtBoundary state
       # Remove everything up to and including the boundary
-      let new_buffer = ByteArray.new
       let skip_to = pos + boundary_bytes.size
 
-      # Skip past boundary (but keep all newlines - they are part of headers)
-      let mut i = skip_to
-
-      # Copy remaining data to new buffer
-      while i < parser.buffer.size {
-        match parser.buffer.get(i) {
-          case Ok(byte) -> new_buffer.push(byte)
-          case Error(_) -> {}
-        }
-
-        i = i + 1
-      }
-
       parser.head_line_start = is_line_start(ref parser.buffer, skip_to)
-      parser.buffer = new_buffer
+
+      let next_buffer = parser
+        .buffer
+        .slice(skip_to, parser.buffer.size)
+        .to_byte_array
+
+      parser.buffer = next_buffer
       parser.state = MultipartState.AtBoundary
       Result.Ok(0)
     }
@@ -380,21 +364,15 @@ fn process_preamble[H: mut + MultipartStreamHandler](
       if parser.buffer.size > max_preamble {
         let keep_size = boundary_marker.size
         let skip_size = parser.buffer.size - keep_size
-        let new_buffer = ByteArray.new
-
-        let mut i = skip_size
-
-        while i < parser.buffer.size {
-          match parser.buffer.get(i) {
-            case Ok(byte) -> new_buffer.push(byte)
-            case Error(_) -> {}
-          }
-
-          i = i + 1
-        }
 
         parser.head_line_start = is_line_start(ref parser.buffer, skip_size)
-        parser.buffer = new_buffer
+
+        let next_buffer = parser
+          .buffer
+          .slice(skip_size, parser.buffer.size)
+          .to_byte_array
+
+        parser.buffer = next_buffer
       }
 
       Result.Ok(0)
@@ -582,22 +560,16 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
         }
       }
 
-      let new_buffer = ByteArray.new
       let skip_to = end_pos + skip_len
 
-      let mut j = skip_to
-
-      while j < parser.buffer.size {
-        match parser.buffer.get(j) {
-          case Ok(byte) -> new_buffer.push(byte)
-          case Error(_) -> {}
-        }
-
-        j = j + 1
-      }
-
       parser.head_line_start = is_line_start(ref parser.buffer, skip_to)
-      parser.buffer = new_buffer
+
+      let next_buffer = parser
+        .buffer
+        .slice(skip_to, parser.buffer.size)
+        .to_byte_array
+
+      parser.buffer = next_buffer
       parser.state = MultipartState.ReadingBody
       Result.Ok(0)
     }
@@ -705,7 +677,6 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
       }
 
       # Remove body and boundary from buffer
-      let new_buffer = ByteArray.new
       let skip_to = pos + boundary_bytes.size
 
       # Skip past boundary and trailing CRLF
@@ -722,16 +693,9 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
 
       parser.head_line_start = is_line_start(ref parser.buffer, j)
 
-      while j < parser.buffer.size {
-        match parser.buffer.get(j) {
-          case Ok(byte) -> new_buffer.push(byte)
-          case Error(_) -> {}
-        }
+      let next_buffer = parser.buffer.slice(j, parser.buffer.size).to_byte_array
 
-        j = j + 1
-      }
-
-      parser.buffer = new_buffer
+      parser.buffer = next_buffer
       parser.current_context = Option.None
       parser.state = MultipartState.AtBoundary
       Result.Ok(0)
@@ -744,18 +708,7 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
 
       if parser.buffer.size > safety_buffer {
         let emit_size = parser.buffer.size - safety_buffer
-        let mut body_data = ByteArray.new
-
-        let mut i = 0
-
-        while i < emit_size {
-          match parser.buffer.get(i) {
-            case Ok(byte) -> body_data.push(byte)
-            case Error(_) -> {}
-          }
-
-          i = i + 1
-        }
+        let body_data = parser.buffer.slice(0, emit_size).to_byte_array
 
         # Emit body data
         match parser.current_context {
@@ -771,20 +724,14 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
         }
 
         # Remove emitted data from buffer
-        let new_buffer = ByteArray.new
-        let mut j = emit_size
-
-        while j < parser.buffer.size {
-          match parser.buffer.get(j) {
-            case Ok(byte) -> new_buffer.push(byte)
-            case Error(_) -> {}
-          }
-
-          j = j + 1
-        }
-
         parser.head_line_start = is_line_start(ref parser.buffer, emit_size)
-        parser.buffer = new_buffer
+
+        let next_buffer = parser
+          .buffer
+          .slice(emit_size, parser.buffer.size)
+          .to_byte_array
+
+        parser.buffer = next_buffer
       }
 
       Result.Ok(0)

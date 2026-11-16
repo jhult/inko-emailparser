@@ -496,16 +496,7 @@ impl StreamingParser {
             return Result.Error(notify_error(handler, failure))
           }
 
-          let mut i = 0
-
-          while i < chunk.size {
-            match chunk.get(i) {
-              case Ok(byte) -> buffer.push(byte)
-              case Error(_) -> {}
-            }
-
-            i = i + 1
-          }
+          buffer.append(ref chunk)
 
           let separator = find_header_separator_bytes(ref buffer, scan_from)
 
@@ -1421,17 +1412,7 @@ fn send_attachment_chunks[H: mut + StreamHandler](
       pos + chunk_size
     }
 
-    let chunk = ByteArray.new
-    let mut i = pos
-
-    while i < end {
-      match decoded.get(i) {
-        case Ok(byte) -> chunk.push(byte)
-        case Error(_) -> {}
-      }
-
-      i = i + 1
-    }
+    let chunk = decoded.slice(pos, end).to_byte_array
 
     match handler.on_attachment_chunk(chunk, info) {
       case Ok(_) -> {}
@@ -1504,27 +1485,15 @@ fn push_attachment_bytes[H: mut + StreamHandler](
 
   # Top up a partial chunk buffered by a previous call
   if pending.size > 0 {
-    while pending.size < chunk_size and offset < data.size {
-      match data.get(offset) {
-        case Ok(byte) -> pending.push(byte)
-        case Error(_) -> {}
-      }
+    let wanted = chunk_size - pending.size
+    let available = data.size - offset
+    let take = if available > wanted { wanted } else { available }
 
-      offset = offset + 1
-    }
+    pending.append(data.slice(offset, offset + take))
+    offset = offset + take
 
     if pending.size == chunk_size {
-      let chunk = ByteArray.new
-      let mut i = 0
-
-      while i < pending.size {
-        match pending.get(i) {
-          case Ok(byte) -> chunk.push(byte)
-          case Error(_) -> {}
-        }
-
-        i = i + 1
-      }
+      let chunk = pending.clone
 
       pending.clear
 
@@ -1541,17 +1510,7 @@ fn push_attachment_bytes[H: mut + StreamHandler](
 
   # Emit complete chunks straight from the incoming data
   while (offset + chunk_size) <= data.size {
-    let chunk = ByteArray.new
-    let mut i = offset
-
-    while i < (offset + chunk_size) {
-      match data.get(i) {
-        case Ok(byte) -> chunk.push(byte)
-        case Error(_) -> {}
-      }
-
-      i = i + 1
-    }
+    let chunk = data.slice(offset, offset + chunk_size).to_byte_array
 
     match handler.on_attachment_chunk(chunk, info) {
       case Ok(_) -> {}
@@ -1566,14 +1525,7 @@ fn push_attachment_bytes[H: mut + StreamHandler](
   }
 
   # Buffer what's left for the next call or the final flush
-  while offset < data.size {
-    match data.get(offset) {
-      case Ok(byte) -> pending.push(byte)
-      case Error(_) -> {}
-    }
-
-    offset = offset + 1
-  }
+  if offset < data.size { pending.append(data.slice(offset, data.size)) }
 
   Result.Ok(0)
 }
@@ -1586,17 +1538,7 @@ fn flush_attachment_bytes[H: mut + StreamHandler](
 ) -> Result[Int, Error] {
   if pending.size == 0 { return Result.Ok(0) }
 
-  let chunk = ByteArray.new
-  let mut i = 0
-
-  while i < pending.size {
-    match pending.get(i) {
-      case Ok(byte) -> chunk.push(byte)
-      case Error(_) -> {}
-    }
-
-    i = i + 1
-  }
+  let chunk = pending.clone
 
   pending.clear
 
