@@ -470,6 +470,43 @@ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
     }
   })
 
+  t.test('nested_buffering_is_bounded_by_email_size', fn (t) {
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Nested
+Content-Type: multipart/mixed; boundary=outer
+
+--outer
+Content-Type: multipart/mixed; boundary=middle
+
+--middle
+Content-Type: multipart/mixed; boundary=inner
+
+--inner
+Content-Type: text/plain
+
+hellohellohellohellohellohellohellohello
+${'a'.repeat(1000)}
+--inner--
+--middle--
+--outer--'
+
+    # The message itself fits, but buffering the middle part and then its inner
+    # part would duplicate more than the whole email. The shared budget must
+    # reject the second copy instead of allocating depth * size.
+    let mut config = StreamingConfig.new
+
+    config.max_email_size = email.size
+
+    let parser = StreamingParser.with_config(config)
+    let handler = MemoryBufferingHandler.new
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.equal(e.variant, 'EmailSizeTooLarge')
+    }
+  })
+
   t.test('nested_depth_limit_fails_before_buffering_body', fn (t) {
     let mut config = StreamingConfig.new
 

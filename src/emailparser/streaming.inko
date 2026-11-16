@@ -818,6 +818,7 @@ fn parse_body_stream[H: mut + StreamHandler](
           config.strict_mode,
           config.max_attachments,
           config.stream_chunk_size,
+          config.max_email_size,
           handler,
         )
       }
@@ -1792,6 +1793,8 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
     max_depth: max_depth,
     nested_buffer: Option.None,
     nested_boundary: Option.None,
+    nested_budget: max_email_size,
+    nested_size: 0,
   )
 
   # Feed initial body data
@@ -1872,6 +1875,8 @@ type MultipartHandlerWrapper[H: mut + StreamHandler] {
   let @max_depth: Int
   let mut @nested_buffer: Option[ByteArray]
   let mut @nested_boundary: Option[String]
+  let @nested_budget: Int
+  let mut @nested_size: Int
 }
 
 impl MultipartStreamHandler for MultipartHandlerWrapper
@@ -1915,6 +1920,7 @@ if
 
           @nested_buffer = Option.Some(ByteArray.new)
           @nested_boundary = Option.Some(nested_boundary)
+          @nested_size = 0
           return Result.Ok(0)
         }
         case None -> {}
@@ -2001,6 +2007,24 @@ if
   ) -> Result[Int, Error] {
     match @nested_buffer {
       case Some(mut buffer) -> {
+        # Nested payloads are buffered in full, so bound them by the shared
+        # email-size budget. Without this a depth bomb could allocate one
+        # nested copy per level.
+        @nested_size = @nested_size + data.size
+
+        if @nested_size > @nested_budget {
+          return Result.Error(
+            Error.EmailSizeTooLarge(
+              Severity.Error,
+              @nested_size,
+              @nested_budget,
+              Option.None,
+              Option.None,
+              Option.None,
+            ),
+          )
+        }
+
         # `append` takes its argument by reference, so no copy is needed here
         buffer.append(data)
         return Result.Ok(0)
@@ -2255,6 +2279,7 @@ if
                 @max_attachments,
                 @depth,
                 @max_depth,
+                @nested_budget - b.size,
               )
             {
               case Ok(count) -> @attachment_count = count
@@ -2457,6 +2482,7 @@ fn finish_nested[H: mut + StreamHandler](
   max_attachments: Int,
   depth: Int,
   max_depth: Int,
+  nested_budget: Int,
 ) -> Result[Int, Error] {
   if depth + 1 > max_depth {
     return Result.Error(
@@ -2495,6 +2521,8 @@ fn finish_nested[H: mut + StreamHandler](
     max_depth: max_depth,
     nested_buffer: Option.None,
     nested_boundary: Option.None,
+    nested_budget: nested_budget,
+    nested_size: 0,
   )
 
   match nested_parser.feed(ref nested_buffer, nested_wrapper, '7bit') {
@@ -2530,6 +2558,7 @@ fn parse_multipart_stream[H: mut + StreamHandler](
   strict_mode: Bool,
   max_attachments: Int,
   chunk_size: Int,
+  max_email_size: Int,
   handler: mut H,
 ) -> Result[Int, Error] {
   if current_depth >= max_depth {
@@ -2575,6 +2604,8 @@ fn parse_multipart_stream[H: mut + StreamHandler](
     max_depth: max_depth,
     nested_buffer: Option.None,
     nested_boundary: Option.None,
+    nested_budget: max_email_size,
+    nested_size: 0,
   )
 
   let data = raw.to_byte_array
