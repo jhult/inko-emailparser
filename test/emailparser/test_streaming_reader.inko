@@ -349,6 +349,26 @@ Content-Transfer-Encoding: quoted-printable
     }
   })
 
+  t.test('parse_async_reader_keeps_body_offset_after_non_utf8_header', fn (t) {
+    let mut parser = StreamingParser.new
+    let mut handler = CollectingHandler.new
+    let mut data = 'From: a@example.com\nSubject: caf'.to_byte_array
+
+    data.push(233)
+    data.push(10)
+
+    let tail = '\nhello'.to_byte_array
+
+    for byte in tail.iter { data.push(byte) }
+
+    let mut reader = ByteArrayReader.new(data)
+
+    match parser.parse_async_reader(mut reader, mut handler) {
+      case Ok(_) -> t.equal(handler.text, 'hello')
+      case Error(e) -> panic('parse_async_reader failed: ${e.to_message}')
+    }
+  })
+
   t.test('single_part_stream_attachment_filename_is_sanitized', fn (t) {
     let mut parser = StreamingParser.new
     let mut handler = CollectingHandler.new
