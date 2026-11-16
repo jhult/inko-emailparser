@@ -1,0 +1,113 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Tests for PartSink, the shared decoder lifecycle used by every parser
+
+import emailparser.part_sink (PartPurpose, PartSink)
+import std.bytes (ByteArray)
+import std.test (Tests)
+
+fn pub tests(t: mut Tests) {
+  t.test('part_sink_base64_buffers_incomplete_group', fn (t) {
+    let mut sink = PartSink.new('base64', 100, false, PartPurpose.Attachment)
+    let mut output = ByteArray.new
+
+    match sink.feed_string('SGVs') {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e.to_message}')
+    }
+
+    t.equal(output.clone.into_string, 'Hel')
+
+    # The trailing group is incomplete, so it is not decoded yet.
+    match sink.feed_string('bG8') {
+      case Ok(decoded) -> t.equal(decoded.size, 0)
+      case Error(e) -> panic('Failed: ${e.to_message}')
+    }
+
+    match sink.finish {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e.to_message}')
+    }
+
+    t.equal(output.into_string, 'Hello')
+    t.equal(sink.decoded_size, 5)
+  })
+
+  t.test('part_sink_quoted_printable_soft_break_across_chunks', fn (t) {
+    let mut sink = PartSink.new(
+      'quoted-printable',
+      100,
+      false,
+      PartPurpose.Text,
+    )
+    let mut output = ByteArray.new
+
+    match sink.feed_string('hello=') {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e.to_message}')
+    }
+
+    match sink.feed_string('\nworld') {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e.to_message}')
+    }
+
+    match sink.finish {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e.to_message}')
+    }
+
+    t.equal(output.into_string, 'helloworld')
+  })
+
+  t.test('part_sink_passes_other_encodings_through', fn (t) {
+    let mut sink = PartSink.new('7bit', 5, false, PartPurpose.Text)
+
+    match sink.feed_string('abc') {
+      case Ok(decoded) -> t.equal(decoded.into_string, 'abc')
+      case Error(_) -> t.false(true)
+    }
+
+    # Exactly at the limit is still accepted.
+    match sink.feed_string('de') {
+      case Ok(decoded) -> t.equal(decoded.into_string, 'de')
+      case Error(_) -> t.false(true)
+    }
+
+    match sink.finish {
+      case Ok(decoded) -> t.equal(decoded.size, 0)
+      case Error(_) -> t.false(true)
+    }
+
+    match sink.feed_string('f') {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.equal(e.variant, 'DecodedSizeTooLarge')
+    }
+  })
+
+  t.test('part_sink_passthrough_reports_attachment_size_error', fn (t) {
+    let mut sink = PartSink.new('binary', 3, false, PartPurpose.Attachment)
+
+    match sink.feed_string('abcd') {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.equal(e.variant, 'AttachmentSizeTooLarge')
+    }
+  })
+
+  t.test('part_sink_decoder_size_error_is_typed', fn (t) {
+    let mut sink = PartSink.new('base64', 3, false, PartPurpose.Attachment)
+
+    # "AAAA" decodes to three bytes, exactly the limit.
+    match sink.feed_string('AAAA') {
+      case Ok(decoded) -> t.equal(decoded.size, 3)
+      case Error(_) -> t.false(true)
+    }
+
+    match sink.feed_string('AAAA') {
+      case Ok(_) -> t.false(true)
+      case Error(e) -> t.equal(e.variant, 'AttachmentSizeTooLarge')
+    }
+  })
+}

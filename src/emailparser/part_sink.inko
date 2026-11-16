@@ -1,0 +1,203 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# ==============================================================================
+# Part Sink
+# ==============================================================================
+#
+# Owns the decoder lifecycle and decoded-size accounting for a single MIME part
+# body.
+#
+# Before this type existed every parsing path - buffered bodies, streamed
+# bodies, async readers and multipart parts - created its own base64 or
+# quoted-printable streaming decoder and repeated the
+# "feed -> flush on finish -> check the size" sequence. The copies drifted in
+# their size accounting and error reporting.
+#
+# `PartSink` performs that sequence once for every encoding:
+#
+# - base64 and quoted-printable are decoded by the shared streaming decoders,
+#   which reject input that expands past `max_size`
+# - every other encoding is passed through unchanged, with the accumulated
+#   decoded size checked against `max_size`
+#
+# Callers only decide what to do with the decoded bytes: send them as text or
+# push them into an attachment.
+
+import emailparser.error (Error, Severity)
+import emailparser.streaming_decoder (
+  Base64StreamingDecoder, QuotedPrintableStreamingDecoder,
+)
+import std.bytes (ByteArray)
+import std.option (Option)
+import std.result (Result)
+
+# What the decoded bytes are used for
+#
+# The purpose selects the error reported when the decoded data outgrows
+# `max_size`: text bodies report `DecodedSizeTooLarge` while attachments report
+# `AttachmentSizeTooLarge`. Both variants were already produced by the
+# passthrough paths, so the sink keeps their error contracts intact.
+type pub enum PartPurpose {
+  case Text
+  case Attachment
+}
+
+# The decoder backing a sink
+type enum PartDecoder {
+  case Base64(Base64StreamingDecoder)
+  case QuotedPrintable(QuotedPrintableStreamingDecoder)
+  case Passthrough
+}
+
+type pub PartSink {
+  let mut @decoder: PartDecoder
+  let @encoding: String
+  let @max_size: Int
+  let @purpose: PartPurpose
+  let mut @decoded_size: Int
+}
+
+impl PartSink {
+  fn pub static new(
+    encoding: String,
+    max_size: Int,
+    strict_mode: Bool,
+    purpose: PartPurpose,
+  ) -> PartSink {
+    let lower = encoding.to_lower
+
+    let decoder = if lower == 'base64' {
+      PartDecoder.Base64(Base64StreamingDecoder.new(max_size, strict_mode))
+    } else if lower == 'quoted-printable' {
+      # Quoted-printable has no strict decoder: malformed escapes are kept or
+      # dropped according to the decoder's flags, never rejected, so the
+      # strictness of the message does not apply here.
+      PartDecoder.QuotedPrintable(
+        QuotedPrintableStreamingDecoder.new(max_size, true, false),
+      )
+    } else {
+      PartDecoder.Passthrough
+    }
+
+    PartSink(
+      decoder: decoder,
+      encoding: encoding,
+      max_size: max_size,
+      purpose: purpose,
+      decoded_size: 0,
+    )
+  }
+
+  # Decode the next chunk of a part body
+  #
+  # Only complete sequences are returned; decoders buffer an incomplete
+  # trailing sequence and emit it from `finish`.
+  fn pub mut feed_bytes(data: ref ByteArray) -> Result[ByteArray, Error] {
+    match @decoder {
+      case Base64(mut decoder) -> {
+        match decoder.feed_bytes(data) {
+          case Ok(decoded) -> record(decoded)
+          case Error(e) -> Result.Error(decoder_failure(e))
+        }
+      }
+      case QuotedPrintable(mut decoder) -> {
+        match decoder.feed_bytes(data) {
+          case Ok(decoded) -> record(decoded)
+          case Error(e) -> Result.Error(decoder_failure(e))
+        }
+      }
+      case Passthrough -> {
+        let total = @decoded_size + data.size
+
+        if total > @max_size { return Result.Error(size_error(total)) }
+
+        @decoded_size = total
+
+        Result.Ok(data.clone)
+      }
+    }
+  }
+
+  # Decode a chunk provided as a String
+  #
+  # The buffered parsers already hold the body as a String. The byte-based
+  # form is used internally so non-UTF-8 attachment bytes survive.
+  fn pub mut feed_string(data: String) -> Result[ByteArray, Error] {
+    let bytes = data.to_byte_array
+
+    feed_bytes(ref bytes)
+  }
+
+  # Flush the bytes buffered by the decoder at the end of the part
+  fn pub mut finish -> Result[ByteArray, Error] {
+    match @decoder {
+      case Base64(mut decoder) -> {
+        match decoder.finish {
+          case Ok(decoded) -> record(decoded)
+          case Error(e) -> Result.Error(decoder_failure(e))
+        }
+      }
+      case QuotedPrintable(mut decoder) -> {
+        match decoder.finish {
+          case Ok(decoded) -> record(decoded)
+          case Error(e) -> Result.Error(decoder_failure(e))
+        }
+      }
+      case Passthrough -> Result.Ok(ByteArray.new)
+    }
+  }
+
+  # Total number of decoded bytes produced so far, including the flushed tail
+  fn pub decoded_size -> Int {
+    @decoded_size
+  }
+
+  fn mut record(decoded: ByteArray) -> Result[ByteArray, Error] {
+    @decoded_size = @decoded_size + decoded.size
+
+    Result.Ok(decoded)
+  }
+
+  # Convert a decoder failure into the parser's error type
+  #
+  # The streaming decoders only report a size overflow as a string, so it is
+  # turned back into the typed variant the parsers return elsewhere. Other
+  # decoder failures stay generic, matching the previous behaviour.
+  fn decoder_failure(message: String) -> Error {
+    if message == 'Decoded size exceeds maximum' {
+      # The exact decoded size is unknown because the decoder discards the
+      # output it refused; report the smallest size that exceeds the limit.
+      return size_error(@max_size + 1)
+    }
+
+    Error.from_string(message)
+  }
+
+  fn size_error(size: Int) -> Error {
+    match @purpose {
+      case Text -> {
+        Error.DecodedSizeTooLarge(
+          Severity.Error,
+          size,
+          @max_size,
+          @encoding.clone,
+          Option.None,
+          Option.None,
+          Option.None,
+        )
+      }
+      case Attachment -> {
+        Error.AttachmentSizeTooLarge(
+          Severity.Error,
+          size,
+          @max_size,
+          Option.None,
+          Option.None,
+          Option.None,
+        )
+      }
+    }
+  }
+}

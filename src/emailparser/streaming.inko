@@ -15,7 +15,6 @@ import emailparser (
   validate_required_headers,
 )
 import emailparser.address (EmailAddress)
-import emailparser.decoder (decode_body_bytes_impl, decode_body_impl)
 import emailparser.error (Error, Severity, is_recoverable_part_error)
 import emailparser.header (
   extract_extra_headers, extract_filename_param, find_header_separator_bytes,
@@ -33,9 +32,7 @@ import emailparser.limits (
 import emailparser.mime (
   extract_boundary, is_multipart, is_text_html, is_text_plain, main_type,
 )
-import emailparser.streaming_decoder (
-  Base64StreamingDecoder, QuotedPrintableStreamingDecoder,
-)
+import emailparser.part_sink (PartPurpose, PartSink)
 import emailparser.streaming_multipart (
   MultipartStreamHandler, MultipartStreamParser,
 )
@@ -814,6 +811,7 @@ fn parse_body_stream[H: mut + StreamHandler](
       content_transfer_encoding,
       config.stream_chunk_size,
       config.max_attachment_size,
+      config.strict_mode,
       handler,
     )
   }
@@ -829,88 +827,34 @@ fn stream_body_impl[H: mut + StreamHandler](
   strict_mode: Bool,
   handler: mut H,
 ) -> Result[Int, Error] {
-  let encoding_lower = encoding.to_lower
+  let mut sink = PartSink.new(encoding, max_size, strict_mode, PartPurpose.Text)
 
-  if encoding_lower == 'base64' {
-    let mut d = Base64StreamingDecoder.new(max_size, strict_mode)
-
-    match d.feed(body_raw) {
-      case Ok(decoded) -> {
-        if decoded.size > 0 {
-          match
-            send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
-          {
-            case Ok(_) -> {}
-            case Error(e) -> return Result.Error(e)
-          }
-        }
-
-        match d.finish {
-          case Ok(decoded) -> {
-            if decoded.size > 0 {
-              match
-                send_text_chunks(
-                  decoded.into_string,
-                  chunk_size,
-                  is_html,
-                  handler,
-                )
-              {
-                case Ok(_) -> {}
-                case Error(e) -> return Result.Error(e)
-              }
-            }
-          }
-          case Error(e) -> return Result.Error(Error.from_string(e))
-        }
-      }
-      case Error(e) -> return Result.Error(Error.from_string(e))
-    }
-  } else if encoding_lower == 'quoted-printable' {
-    let mut d = QuotedPrintableStreamingDecoder.new(max_size, true, false)
-
-    match d.feed(body_raw) {
-      case Ok(decoded) -> {
-        if decoded.size > 0 {
-          match
-            send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
-          {
-            case Ok(_) -> {}
-            case Error(e) -> return Result.Error(e)
-          }
-        }
-
-        match d.finish {
-          case Ok(decoded) -> {
-            if decoded.size > 0 {
-              match
-                send_text_chunks(
-                  decoded.into_string,
-                  chunk_size,
-                  is_html,
-                  handler,
-                )
-              {
-                case Ok(_) -> {}
-                case Error(e) -> return Result.Error(e)
-              }
-            }
-          }
-          case Error(e) -> return Result.Error(Error.from_string(e))
-        }
-      }
-      case Error(e) -> return Result.Error(Error.from_string(e))
-    }
-  } else {
-    match decode_body_impl(body_raw, encoding, max_size) {
-      case Ok(decoded) -> {
-        match send_text_chunks(decoded, chunk_size, is_html, handler) {
+  match sink.feed_string(body_raw) {
+    case Ok(decoded) -> {
+      if decoded.size > 0 {
+        match
+          send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+        {
           case Ok(_) -> {}
           case Error(e) -> return Result.Error(e)
         }
       }
-      case Error(e) -> return Result.Error(e)
     }
+    case Error(e) -> return Result.Error(e)
+  }
+
+  match sink.finish {
+    case Ok(decoded) -> {
+      if decoded.size > 0 {
+        match
+          send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+        {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
+        }
+      }
+    }
+    case Error(e) -> return Result.Error(e)
   }
 
   Result.Ok(0)
@@ -958,8 +902,8 @@ fn stream_html_body[H: mut + StreamHandler](
 
 # Process text/html body incrementally from an async reader
 #
-# Creates the appropriate decoder and feeds initial body data plus subsequent
-# chunks from the reader through it, streaming decoded text/html to the handler.
+# Feeds the initial body data plus subsequent chunks from the reader through a
+# `PartSink`, streaming decoded text/html to the handler.
 fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
   reader: mut R,
   initial_body: ByteArray,
@@ -973,79 +917,10 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
   handler: mut H,
 ) -> Result[Int, Error] {
   let mut total_bytes = start_total_bytes
-  let encoding_lower = encoding.to_lower
+  let mut sink = PartSink.new(encoding, max_size, strict_mode, PartPurpose.Text)
 
-  if encoding_lower == 'base64' {
-    let mut decoder = Base64StreamingDecoder.new(max_size, strict_mode)
-
-    # Feed initial body data
-    if initial_body.size > 0 {
-      match decoder.feed_bytes(ref initial_body) {
-        case Ok(decoded) -> {
-          if decoded.size > 0 {
-            match
-              send_text_chunks(
-                decoded.into_string,
-                chunk_size,
-                is_html,
-                handler,
-              )
-            {
-              case Ok(_) -> {}
-              case Error(e) -> return Result.Error(e)
-            }
-          }
-        }
-        case Error(e) -> return Result.Error(Error.from_string(e))
-      }
-    }
-
-    # Read and feed remaining chunks from reader
-    loop {
-      match reader.read(chunk_size) {
-        case Ok(chunk) -> {
-          if chunk.size == 0 { break }
-
-          total_bytes = total_bytes + chunk.size
-
-          if total_bytes > max_email_size {
-            return Result.Error(
-              Error.EmailSizeTooLarge(
-                Severity.Error,
-                total_bytes,
-                max_email_size,
-                Option.None,
-                Option.None,
-                Option.None,
-              ),
-            )
-          }
-
-          match decoder.feed_bytes(ref chunk) {
-            case Ok(decoded) -> {
-              if decoded.size > 0 {
-                match
-                  send_text_chunks(
-                    decoded.into_string,
-                    chunk_size,
-                    is_html,
-                    handler,
-                  )
-                {
-                  case Ok(_) -> {}
-                  case Error(e) -> return Result.Error(e)
-                }
-              }
-            }
-            case Error(e) -> return Result.Error(Error.from_string(e))
-          }
-        }
-        case Error(e) -> return Result.Error(Error.from_string(e))
-      }
-    }
-
-    # Finish decoder
-    match decoder.finish {
+  if initial_body.size > 0 {
+    match sink.feed_bytes(ref initial_body) {
       case Ok(decoded) -> {
         if decoded.size > 0 {
           match
@@ -1056,138 +931,65 @@ fn process_body_reader_text[H: mut + StreamHandler, R: mut + AsyncReader](
           }
         }
       }
-      case Error(e) -> return Result.Error(Error.from_string(e))
+      case Error(e) -> return Result.Error(e)
     }
-  } else if encoding_lower == 'quoted-printable' {
-    let mut decoder = QuotedPrintableStreamingDecoder.new(max_size, true, false)
+  }
 
-    # Feed initial body data
-    if initial_body.size > 0 {
-      match decoder.feed_bytes(ref initial_body) {
-        case Ok(decoded) -> {
-          if decoded.size > 0 {
-            match
-              send_text_chunks(
-                decoded.into_string,
-                chunk_size,
-                is_html,
-                handler,
-              )
-            {
-              case Ok(_) -> {}
-              case Error(e) -> return Result.Error(e)
-            }
-          }
+  loop {
+    match reader.read(chunk_size) {
+      case Ok(chunk) -> {
+        if chunk.size == 0 { break }
+
+        total_bytes = total_bytes + chunk.size
+
+        if total_bytes > max_email_size {
+          return Result.Error(
+            Error.EmailSizeTooLarge(
+              Severity.Error,
+              total_bytes,
+              max_email_size,
+              Option.None,
+              Option.None,
+              Option.None,
+            ),
+          )
         }
-        case Error(e) -> return Result.Error(Error.from_string(e))
-      }
-    }
 
-    # Read and feed remaining chunks from reader
-    loop {
-      match reader.read(chunk_size) {
-        case Ok(chunk) -> {
-          if chunk.size == 0 { break }
-
-          total_bytes = total_bytes + chunk.size
-
-          if total_bytes > max_email_size {
-            return Result.Error(
-              Error.EmailSizeTooLarge(
-                Severity.Error,
-                total_bytes,
-                max_email_size,
-                Option.None,
-                Option.None,
-                Option.None,
-              ),
-            )
-          }
-
-          match decoder.feed_bytes(ref chunk) {
-            case Ok(decoded) -> {
-              if decoded.size > 0 {
-                match
-                  send_text_chunks(
-                    decoded.into_string,
-                    chunk_size,
-                    is_html,
-                    handler,
-                  )
-                {
-                  case Ok(_) -> {}
-                  case Error(e) -> return Result.Error(e)
-                }
-              }
-            }
-            case Error(e) -> return Result.Error(Error.from_string(e))
-          }
-        }
-        case Error(e) -> return Result.Error(Error.from_string(e))
-      }
-    }
-
-    # Finish decoder
-    match decoder.finish {
-      case Ok(decoded) -> {
-        if decoded.size > 0 {
-          match
-            send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
-          {
-            case Ok(_) -> {}
-            case Error(e) -> return Result.Error(e)
-          }
-        }
-      }
-      case Error(e) -> return Result.Error(Error.from_string(e))
-    }
-  } else {
-    # Passthrough encoding (7bit, 8bit, binary)
-    if initial_body.size > 0 {
-      match decode_body_impl(initial_body.into_string, encoding, max_size) {
-        case Ok(decoded) -> {
-          match send_text_chunks(decoded, chunk_size, is_html, handler) {
-            case Ok(_) -> {}
-            case Error(e) -> return Result.Error(e)
-          }
-        }
-        case Error(e) -> return Result.Error(e)
-      }
-    }
-
-    loop {
-      match reader.read(chunk_size) {
-        case Ok(chunk) -> {
-          if chunk.size == 0 { break }
-
-          total_bytes = total_bytes + chunk.size
-
-          if total_bytes > max_email_size {
-            return Result.Error(
-              Error.EmailSizeTooLarge(
-                Severity.Error,
-                total_bytes,
-                max_email_size,
-                Option.None,
-                Option.None,
-                Option.None,
-              ),
-            )
-          }
-
-          match decode_body_impl(chunk.into_string, encoding, max_size) {
-            case Ok(decoded) -> {
-              match send_text_chunks(decoded, chunk_size, is_html, handler) {
+        match sink.feed_bytes(ref chunk) {
+          case Ok(decoded) -> {
+            if decoded.size > 0 {
+              match
+                send_text_chunks(
+                  decoded.into_string,
+                  chunk_size,
+                  is_html,
+                  handler,
+                )
+              {
                 case Ok(_) -> {}
                 case Error(e) -> return Result.Error(e)
               }
             }
-            case Error(e) -> return Result.Error(e)
           }
+          case Error(e) -> return Result.Error(e)
         }
-        case Error(e) -> return Result.Error(Error.from_string(e))
+      }
+      case Error(e) -> return Result.Error(Error.from_string(e))
+    }
+  }
+
+  match sink.finish {
+    case Ok(decoded) -> {
+      if decoded.size > 0 {
+        match
+          send_text_chunks(decoded.into_string, chunk_size, is_html, handler)
+        {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
+        }
       }
     }
+    case Error(e) -> return Result.Error(e)
   }
 
   Result.Ok(0)
@@ -1350,6 +1152,7 @@ fn stream_single_attachment[H: mut + StreamHandler](
   encoding: String,
   chunk_size: Int,
   max_size: Int,
+  strict_mode: Bool,
   handler: mut H,
 ) -> Result[Int, Error] {
   match handler.on_attachment_begin(info) {
@@ -1361,13 +1164,34 @@ fn stream_single_attachment[H: mut + StreamHandler](
     }
   }
 
-  let decoded = match decode_body_bytes_impl(body_raw, encoding, max_size) {
-    case Ok(d) -> d
+  let mut sink = PartSink.new(
+    encoding,
+    max_size,
+    strict_mode,
+    PartPurpose.Attachment,
+  )
+
+  match sink.feed_string(body_raw) {
+    case Ok(decoded) -> {
+      if decoded.size > 0 {
+        match send_attachment_chunks(ref decoded, chunk_size, info, handler) {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
+        }
+      }
+    }
     case Error(e) -> return Result.Error(e)
   }
 
-  match send_attachment_chunks(ref decoded, chunk_size, info, handler) {
-    case Ok(_) -> {}
+  match sink.finish {
+    case Ok(decoded) -> {
+      if decoded.size > 0 {
+        match send_attachment_chunks(ref decoded, chunk_size, info, handler) {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
+        }
+      }
+    }
     case Error(e) -> return Result.Error(e)
   }
 
@@ -1490,74 +1314,15 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
 
   let mut total_bytes = start_total_bytes
   let mut pending = ByteArray.new
-  let encoding_lower = encoding.to_lower
+  let mut sink = PartSink.new(
+    encoding,
+    max_size,
+    strict_mode,
+    PartPurpose.Attachment,
+  )
 
-  if encoding_lower == 'base64' {
-    let mut decoder = Base64StreamingDecoder.new(max_size, strict_mode)
-
-    if initial_body.size > 0 {
-      match decoder.feed_bytes(ref initial_body) {
-        case Ok(decoded) -> {
-          match
-            push_attachment_bytes(
-              pending,
-              ref decoded,
-              chunk_size,
-              info,
-              handler,
-            )
-          {
-            case Ok(_) -> {}
-            case Error(e) -> return Result.Error(e)
-          }
-        }
-        case Error(e) -> return Result.Error(Error.from_string(e))
-      }
-    }
-
-    loop {
-      match reader.read(chunk_size) {
-        case Ok(chunk) -> {
-          if chunk.size == 0 { break }
-
-          total_bytes = total_bytes + chunk.size
-
-          if total_bytes > max_email_size {
-            return Result.Error(
-              Error.EmailSizeTooLarge(
-                Severity.Error,
-                total_bytes,
-                max_email_size,
-                Option.None,
-                Option.None,
-                Option.None,
-              ),
-            )
-          }
-
-          match decoder.feed_bytes(ref chunk) {
-            case Ok(decoded) -> {
-              match
-                push_attachment_bytes(
-                  pending,
-                  ref decoded,
-                  chunk_size,
-                  info,
-                  handler,
-                )
-              {
-                case Ok(_) -> {}
-                case Error(e) -> return Result.Error(e)
-              }
-            }
-            case Error(e) -> return Result.Error(Error.from_string(e))
-          }
-        }
-        case Error(e) -> return Result.Error(Error.from_string(e))
-      }
-    }
-
-    match decoder.finish {
+  if initial_body.size > 0 {
+    match sink.feed_bytes(ref initial_body) {
       case Ok(decoded) -> {
         match
           push_attachment_bytes(pending, ref decoded, chunk_size, info, handler)
@@ -1566,140 +1331,67 @@ fn process_attachment_reader[H: mut + StreamHandler, R: mut + AsyncReader](
           case Error(e) -> return Result.Error(e)
         }
       }
-      case Error(e) -> return Result.Error(Error.from_string(e))
-    }
-  } else if encoding_lower == 'quoted-printable' {
-    let mut decoder = QuotedPrintableStreamingDecoder.new(max_size, true, false)
-
-    if initial_body.size > 0 {
-      match decoder.feed_bytes(ref initial_body) {
-        case Ok(decoded) -> {
-          match
-            push_attachment_bytes(
-              pending,
-              ref decoded,
-              chunk_size,
-              info,
-              handler,
-            )
-          {
-            case Ok(_) -> {}
-            case Error(e) -> return Result.Error(e)
-          }
-        }
-        case Error(e) -> return Result.Error(Error.from_string(e))
-      }
-    }
-
-    loop {
-      match reader.read(chunk_size) {
-        case Ok(chunk) -> {
-          if chunk.size == 0 { break }
-
-          total_bytes = total_bytes + chunk.size
-
-          if total_bytes > max_email_size {
-            return Result.Error(
-              Error.EmailSizeTooLarge(
-                Severity.Error,
-                total_bytes,
-                max_email_size,
-                Option.None,
-                Option.None,
-                Option.None,
-              ),
-            )
-          }
-
-          match decoder.feed_bytes(ref chunk) {
-            case Ok(decoded) -> {
-              match
-                push_attachment_bytes(
-                  pending,
-                  ref decoded,
-                  chunk_size,
-                  info,
-                  handler,
-                )
-              {
-                case Ok(_) -> {}
-                case Error(e) -> return Result.Error(e)
-              }
-            }
-            case Error(e) -> return Result.Error(Error.from_string(e))
-          }
-        }
-        case Error(e) -> return Result.Error(Error.from_string(e))
-      }
-    }
-
-    match decoder.finish {
-      case Ok(decoded) -> {
-        match
-          push_attachment_bytes(pending, ref decoded, chunk_size, info, handler)
-        {
-          case Ok(_) -> {}
-          case Error(e) -> return Result.Error(e)
-        }
-      }
-      case Error(e) -> return Result.Error(Error.from_string(e))
-    }
-  } else {
-    # 7bit/8bit/binary: deliver the raw bytes
-    match
-      push_attachment_bytes(
-        pending,
-        ref initial_body,
-        chunk_size,
-        info,
-        handler,
-      )
-    {
-      case Ok(_) -> {}
       case Error(e) -> return Result.Error(e)
-    }
-
-    loop {
-      match reader.read(chunk_size) {
-        case Ok(chunk) -> {
-          if chunk.size == 0 { break }
-
-          total_bytes = total_bytes + chunk.size
-
-          if total_bytes > max_email_size {
-            return Result.Error(
-              Error.EmailSizeTooLarge(
-                Severity.Error,
-                total_bytes,
-                max_email_size,
-                Option.None,
-                Option.None,
-                Option.None,
-              ),
-            )
-          }
-
-          match
-            push_attachment_bytes(pending, ref chunk, chunk_size, info, handler)
-          {
-            case Ok(_) -> {}
-            case Error(e) -> return Result.Error(e)
-          }
-        }
-        case Error(e) -> return Result.Error(Error.from_string(e))
-      }
     }
   }
 
-  if pending.size > 0 {
-    match handler.on_attachment_chunk(pending, info) {
-      case Ok(_) -> {}
-      case Error(e) -> {
-        return Result.Error(
-          Error.from_string('Handler on_attachment_chunk failed: ${e}'),
-        )
+  loop {
+    match reader.read(chunk_size) {
+      case Ok(chunk) -> {
+        if chunk.size == 0 { break }
+
+        total_bytes = total_bytes + chunk.size
+
+        if total_bytes > max_email_size {
+          return Result.Error(
+            Error.EmailSizeTooLarge(
+              Severity.Error,
+              total_bytes,
+              max_email_size,
+              Option.None,
+              Option.None,
+              Option.None,
+            ),
+          )
+        }
+
+        match sink.feed_bytes(ref chunk) {
+          case Ok(decoded) -> {
+            match
+              push_attachment_bytes(
+                pending,
+                ref decoded,
+                chunk_size,
+                info,
+                handler,
+              )
+            {
+              case Ok(_) -> {}
+              case Error(e) -> return Result.Error(e)
+            }
+          }
+          case Error(e) -> return Result.Error(e)
+        }
+      }
+      case Error(e) -> return Result.Error(Error.from_string(e))
+    }
+  }
+
+  match sink.finish {
+    case Ok(decoded) -> {
+      match
+        push_attachment_bytes(pending, ref decoded, chunk_size, info, handler)
+      {
+        case Ok(_) -> {}
+        case Error(e) -> return Result.Error(e)
       }
     }
+    case Error(e) -> return Result.Error(e)
+  }
+
+  match flush_attachment_bytes(pending, info, handler) {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
   }
 
   match handler.on_attachment_end(info) {
@@ -1745,15 +1437,13 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
     handler: handler,
     attachment_count: 0,
     current_info: Option.None,
-    base64_decoder: Option.None,
-    qp_decoder: Option.None,
+    sink: Option.None,
     current_content_type: 'text/plain',
     max_size: max_size,
     chunk_size: chunk_size,
     max_headers: max_headers,
     strict_mode: strict_mode,
     max_attachments: max_attachments,
-    current_attachment_size: 0,
     pending_attachment: recover ByteArray.new,
     depth: 0,
     max_depth: max_depth,
@@ -1828,15 +1518,13 @@ type MultipartHandlerWrapper[H: mut + StreamHandler] {
   let @handler: mut H
   let mut @attachment_count: Int
   let mut @current_info: Option[AttachmentInfo]
-  let mut @base64_decoder: Option[Base64StreamingDecoder]
-  let mut @qp_decoder: Option[QuotedPrintableStreamingDecoder]
+  let mut @sink: Option[PartSink]
   let mut @current_content_type: String
   let @max_size: Int
   let @chunk_size: Int
   let @max_headers: Int
   let @strict_mode: Bool
   let @max_attachments: Int
-  let mut @current_attachment_size: Int
   let mut @pending_attachment: ByteArray
   let @depth: Int
   let @max_depth: Int
@@ -1931,6 +1619,22 @@ if
       Option.None
     }
 
+    # One sink per part owns the decoder and size accounting for the body.
+    let purpose = if is_actual_attachment {
+      PartPurpose.Attachment
+    } else {
+      PartPurpose.Text
+    }
+
+    @sink = Option.Some(
+      PartSink.new(
+        content_transfer_encoding.clone,
+        @max_size,
+        @strict_mode,
+        purpose,
+      ),
+    )
+
     if is_actual_attachment {
       if @attachment_count >= @max_attachments {
         return Result.Error(
@@ -1944,8 +1648,6 @@ if
           ),
         )
       }
-
-      @current_attachment_size = 0
 
       let info = AttachmentInfo(
         index: @attachment_count,
@@ -2003,226 +1705,49 @@ if
       case None -> {}
     }
 
-    let data_str = data.clone
+    let mut decoded = ByteArray.new
+
+    match @sink {
+      case Some(mut sink) -> {
+        match sink.feed_bytes(data) {
+          case Ok(bytes) -> decoded = bytes
+          case Error(e) -> return Result.Error(e)
+        }
+      }
+      case None -> {}
+    }
+
+    if decoded.size == 0 { return Result.Ok(0) }
 
     match @current_info {
       case Some(info) -> {
-        let encoding_lower = content_transfer_encoding.to_lower
-
-        if encoding_lower == 'base64' {
-          match @base64_decoder {
-            case None -> {
-              @base64_decoder = Option.Some(
-                Base64StreamingDecoder.new(@max_size, @strict_mode),
-              )
-            }
-            case Some(_) -> {}
-          }
-
-          match @base64_decoder {
-            case Some(mut d) -> {
-              match d.feed_bytes(data) {
-                case Ok(decoded) -> {
-                  if decoded.size > 0 {
-                    @current_attachment_size = @current_attachment_size
-                      + decoded.size
-
-                    if @current_attachment_size > @max_size {
-                      return Result.Error(
-                        Error.AttachmentSizeTooLarge(
-                          Severity.Error,
-                          @current_attachment_size,
-                          @max_size,
-                          Option.None,
-                          Option.None,
-                          Option.None,
-                        ),
-                      )
-                    }
-
-                    match
-                      push_attachment_bytes(
-                        @pending_attachment,
-                        ref decoded,
-                        @chunk_size,
-                        info,
-                        @handler,
-                      )
-                    {
-                      case Ok(_) -> {}
-                      case Error(e) -> return Result.Error(e)
-                    }
-                  }
-                }
-                case Error(e) -> return Result.Error(Error.from_string(e))
-              }
-            }
-            case None -> {}
-          }
-        } else if encoding_lower == 'quoted-printable' {
-          match @qp_decoder {
-            case None -> {
-              @qp_decoder = Option.Some(
-                QuotedPrintableStreamingDecoder.new(@max_size, true, false),
-              )
-            }
-            case Some(_) -> {}
-          }
-
-          match @qp_decoder {
-            case Some(mut d) -> {
-              match d.feed_bytes(data) {
-                case Ok(decoded) -> {
-                  if decoded.size > 0 {
-                    @current_attachment_size = @current_attachment_size
-                      + decoded.size
-
-                    if @current_attachment_size > @max_size {
-                      return Result.Error(
-                        Error.AttachmentSizeTooLarge(
-                          Severity.Error,
-                          @current_attachment_size,
-                          @max_size,
-                          Option.None,
-                          Option.None,
-                          Option.None,
-                        ),
-                      )
-                    }
-
-                    match
-                      push_attachment_bytes(
-                        @pending_attachment,
-                        ref decoded,
-                        @chunk_size,
-                        info,
-                        @handler,
-                      )
-                    {
-                      case Ok(_) -> {}
-                      case Error(e) -> return Result.Error(e)
-                    }
-                  }
-                }
-                case Error(e) -> return Result.Error(Error.from_string(e))
-              }
-            }
-            case None -> {}
-          }
-        } else {
-          @current_attachment_size = @current_attachment_size + data_str.size
-
-          if @current_attachment_size > @max_size {
-            return Result.Error(
-              Error.AttachmentSizeTooLarge(
-                Severity.Error,
-                @current_attachment_size,
-                @max_size,
-                Option.None,
-                Option.None,
-                Option.None,
-              ),
-            )
-          }
-
-          match
-            push_attachment_bytes(
-              @pending_attachment,
-              ref data_str,
-              @chunk_size,
-              info,
-              @handler,
-            )
-          {
-            case Ok(_) -> {}
-            case Error(e) -> return Result.Error(e)
-          }
+        match
+          push_attachment_bytes(
+            @pending_attachment,
+            ref decoded,
+            @chunk_size,
+            info,
+            @handler,
+          )
+        {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
         }
       }
       case None -> {
         let is_html = is_text_html(@current_content_type)
 
         if is_text_plain(@current_content_type) or is_html {
-          let encoding_lower = content_transfer_encoding.to_lower
-
-          if encoding_lower == 'base64' {
-            match @base64_decoder {
-              case None -> {
-                @base64_decoder = Option.Some(
-                  Base64StreamingDecoder.new(@max_size, @strict_mode),
-                )
-              }
-              case Some(_) -> {}
-            }
-
-            match @base64_decoder {
-              case Some(mut d) -> {
-                match d.feed_bytes(data) {
-                  case Ok(decoded) -> {
-                    if decoded.size > 0 {
-                      match
-                        send_text_chunks(
-                          decoded.into_string,
-                          @chunk_size,
-                          is_html,
-                          @handler,
-                        )
-                      {
-                        case Ok(_) -> {}
-                        case Error(e) -> return Result.Error(e)
-                      }
-                    }
-                  }
-                  case Error(e) -> return Result.Error(Error.from_string(e))
-                }
-              }
-              case None -> {}
-            }
-          } else if encoding_lower == 'quoted-printable' {
-            match @qp_decoder {
-              case None -> {
-                @qp_decoder = Option.Some(
-                  QuotedPrintableStreamingDecoder.new(@max_size, true, false),
-                )
-              }
-              case Some(_) -> {}
-            }
-
-            match @qp_decoder {
-              case Some(mut d) -> {
-                match d.feed_bytes(data) {
-                  case Ok(decoded) -> {
-                    if decoded.size > 0 {
-                      match
-                        send_text_chunks(
-                          decoded.into_string,
-                          @chunk_size,
-                          is_html,
-                          @handler,
-                        )
-                      {
-                        case Ok(_) -> {}
-                        case Error(e) -> return Result.Error(e)
-                      }
-                    }
-                  }
-                  case Error(e) -> return Result.Error(Error.from_string(e))
-                }
-              }
-              case None -> {}
-            }
-          } else {
-            match
-              send_text_chunks(
-                data_str.into_string,
-                @chunk_size,
-                is_html,
-                @handler,
-              )
-            {
-              case Ok(_) -> {}
-              case Error(e) -> return Result.Error(e)
-            }
+          match
+            send_text_chunks(
+              decoded.into_string,
+              @chunk_size,
+              is_html,
+              @handler,
+            )
+          {
+            case Ok(_) -> {}
+            case Error(e) -> return Result.Error(e)
           }
         }
       }
@@ -2275,118 +1800,49 @@ if
       return Result.Ok(0)
     }
 
-    # Collect decoded data before calling handler methods
-    let mut base64_decoded: Option[ByteArray] = Option.None
-    let mut qp_decoded: Option[ByteArray] = Option.None
+    # Flush the decoder before reporting the final attachment.
+    let mut tail = ByteArray.new
+    let mut decoded_total = 0
 
-    # Finish base64 decoder if present
-    match @base64_decoder {
-      case Some(mut d) -> {
-        match d.finish {
-          case Ok(decoded) -> {
-            if decoded.size > 0 { base64_decoded = Option.Some(decoded) }
-          }
-          case Error(e) -> return Result.Error(Error.from_string(e))
+    match @sink {
+      case Some(mut sink) -> {
+        match sink.finish {
+          case Ok(decoded) -> tail = decoded
+          case Error(e) -> return Result.Error(e)
         }
+
+        decoded_total = sink.decoded_size
       }
       case None -> {}
     }
 
-    @base64_decoder = Option.None
+    @sink = Option.None
 
-    # Finish quoted-printable decoder if present
-    match @qp_decoder {
-      case Some(mut d) -> {
-        match d.finish {
-          case Ok(decoded) -> {
-            if decoded.size > 0 { qp_decoded = Option.Some(decoded) }
-          }
-          case Error(e) -> return Result.Error(Error.from_string(e))
-        }
-      }
-      case None -> {}
-    }
-
-    @qp_decoder = Option.None
-
-    # Now pass decoded data to handler
     match @current_info {
       case Some(info) -> {
-        # Account for the flushed tail before building the metadata below, so
-        # the chunk and the end report the same, final size.
-        let mut tail: Option[ByteArray] = Option.None
-
-        match base64_decoded {
-          case Some(data) -> {
-            @current_attachment_size = @current_attachment_size + data.size
-
-            if @current_attachment_size > @max_size {
-              return Result.Error(
-                Error.AttachmentSizeTooLarge(
-                  Severity.Error,
-                  @current_attachment_size,
-                  @max_size,
-                  Option.None,
-                  Option.None,
-                  Option.None,
-                ),
-              )
-            }
-
-            tail = Option.Some(data)
-          }
-          case None -> {}
-        }
-
-        match qp_decoded {
-          case Some(data) -> {
-            @current_attachment_size = @current_attachment_size + data.size
-
-            if @current_attachment_size > @max_size {
-              return Result.Error(
-                Error.AttachmentSizeTooLarge(
-                  Severity.Error,
-                  @current_attachment_size,
-                  @max_size,
-                  Option.None,
-                  Option.None,
-                  Option.None,
-                ),
-              )
-            }
-
-            tail = Option.Some(data)
-          }
-          case None -> {}
-        }
-
-        let final_size = @current_attachment_size
+        # The sink's total includes the tail, so the flushed chunk and the
+        # end callback report the same, final size.
         let final_info = AttachmentInfo(
           index: info.index,
           content_type: info.content_type,
           filename: info.filename.clone,
           content_disposition: info.content_disposition,
           content_id: info.content_id.clone,
-          size: final_size,
+          size: decoded_total,
           transfer_encoding: info.transfer_encoding,
         )
 
-        match tail {
-          case Some(data) -> {
-            match
-              push_attachment_bytes(
-                @pending_attachment,
-                ref data,
-                @chunk_size,
-                final_info,
-                @handler,
-              )
-            {
-              case Ok(_) -> {}
-              case Error(e) -> return Result.Error(e)
-            }
-          }
-          case None -> {}
+        match
+          push_attachment_bytes(
+            @pending_attachment,
+            ref tail,
+            @chunk_size,
+            final_info,
+            @handler,
+          )
+        {
+          case Ok(_) -> {}
+          case Error(e) -> return Result.Error(e)
         }
 
         # Emit any bytes left over from partial chunks.
@@ -2413,38 +1869,11 @@ if
         let is_html = is_text_html(@current_content_type)
 
         if is_text_plain(@current_content_type) or is_html {
-          match base64_decoded {
-            case Some(data) -> {
-              match
-                send_text_chunks(
-                  data.into_string,
-                  @chunk_size,
-                  is_html,
-                  @handler,
-                )
-              {
-                case Ok(_) -> {}
-                case Error(e) -> return Result.Error(e)
-              }
-            }
-            case None -> {}
-          }
-
-          match qp_decoded {
-            case Some(data) -> {
-              match
-                send_text_chunks(
-                  data.into_string,
-                  @chunk_size,
-                  is_html,
-                  @handler,
-                )
-              {
-                case Ok(_) -> {}
-                case Error(e) -> return Result.Error(e)
-              }
-            }
-            case None -> {}
+          match
+            send_text_chunks(tail.into_string, @chunk_size, is_html, @handler)
+          {
+            case Ok(_) -> {}
+            case Error(e) -> return Result.Error(e)
           }
         }
       }
@@ -2499,15 +1928,13 @@ fn finish_nested[H: mut + StreamHandler](
     handler: handler,
     attachment_count: attachment_count,
     current_info: Option.None,
-    base64_decoder: Option.None,
-    qp_decoder: Option.None,
+    sink: Option.None,
     current_content_type: 'text/plain',
     max_size: max_size,
     chunk_size: chunk_size,
     max_headers: max_headers,
     strict_mode: strict_mode,
     max_attachments: max_attachments,
-    current_attachment_size: 0,
     pending_attachment: recover ByteArray.new,
     depth: depth + 1,
     max_depth: max_depth,
@@ -2566,12 +1993,6 @@ fn parse_multipart_stream[H: mut + StreamHandler](
     )
   }
 
-  let mut attachment_count = 0
-  let mut current_info: Option[AttachmentInfo] = Option.None
-  let mut base64_decoder: Option[Base64StreamingDecoder] = Option.None
-  let mut qp_decoder: Option[QuotedPrintableStreamingDecoder] = Option.None
-  let mut current_content_type: String = 'text/plain'
-
   let mut parser = match
     MultipartStreamParser.new(boundary, strict_mode, max_headers)
   {
@@ -2581,17 +2002,15 @@ fn parse_multipart_stream[H: mut + StreamHandler](
 
   let mut wrapper = MultipartHandlerWrapper(
     handler: handler,
-    attachment_count: attachment_count,
-    current_info: current_info,
-    base64_decoder: base64_decoder,
-    qp_decoder: qp_decoder,
-    current_content_type: current_content_type,
+    attachment_count: 0,
+    current_info: Option.None,
+    sink: Option.None,
+    current_content_type: 'text/plain',
     max_size: max_size,
     chunk_size: chunk_size,
     max_headers: max_headers,
     strict_mode: strict_mode,
     max_attachments: max_attachments,
-    current_attachment_size: 0,
     pending_attachment: recover ByteArray.new,
     depth: 0,
     max_depth: max_depth,
