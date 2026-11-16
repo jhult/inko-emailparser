@@ -160,6 +160,15 @@ fn pub tests(t: mut Tests) {
     )
   })
 
+  t.test('extract_filename_param_invalid_extended_falls_back', fn (t) {
+    t.equal(
+      extract_filename_param(
+        "attachment; filename*=bogus-charset''%ff; filename=\"real.txt\"",
+      ),
+      Option.Some('real.txt'),
+    )
+  })
+
   t.test('extract_filename_param_rfc2231_continuation', fn (t) {
     t.equal(
       extract_filename_param(

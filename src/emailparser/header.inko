@@ -899,9 +899,19 @@ fn pub extract_filename_param(disposition: String) -> Option[String] {
   match parse_content_disposition_impl(disposition, false) {
     case Error(_) -> Option.None
     case Ok((_, params)) -> {
+      # An unusable extended value (unknown charset, invalid octets) must not
+      # mask a valid plain filename, so fall through when it fails to decode or
+      # sanitizes to nothing.
       match get_param_value_impl(ref params, 'filename*') {
         case Some(value) -> {
-          return sanitize_filename(decode_rfc2231_value(value, true))
+          let decoded = decode_rfc2231_value(value, true)
+
+          if !decoded.contains?('\u{FFFD}') {
+            match sanitize_filename(decoded) {
+              case Some(name) -> return Option.Some(name)
+              case None -> {}
+            }
+          }
         }
         case None -> {}
       }
@@ -910,7 +920,12 @@ fn pub extract_filename_param(disposition: String) -> Option[String] {
       # percent-decoding each segment separately destroys multi-byte
       # sequences (and escaped octets) split across segments.
       match assemble_rfc2231_continuation(ref params, 'filename') {
-        case Some(value) -> return sanitize_filename(value)
+        case Some(value) -> {
+          match sanitize_filename(value) {
+            case Some(name) -> return Option.Some(name)
+            case None -> {}
+          }
+        }
         case None -> {}
       }
 
