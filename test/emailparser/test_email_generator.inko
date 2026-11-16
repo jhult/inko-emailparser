@@ -170,6 +170,33 @@ fn pub tests(t: mut Tests) {
     }
   })
 
+  t.test('generated_encoding_cannot_inject_headers', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let email = generator.generate_email_with_attachment(
+      'f.txt',
+      'data',
+      '7bit\r\nX-Injected: yes',
+    )
+
+    t.false(email.contains?('X-Injected'))
+    t.true(email.contains?('Content-Transfer-Encoding: 7bit'))
+  })
+
+  t.test('generated_content_type_cannot_inject_headers', fn (t) {
+    let mut generator = TestDataGenerator.new
+    let attachments = [
+      TestAttachment(
+        name: 'f.txt',
+        content_type: 'text/plain\r\nX-Injected: yes',
+        content: 'data',
+        encoding: 'base64',
+      ),
+    ]
+    let email = generator.generate_email_with_attachments(attachments)
+
+    t.false(email.contains?('\nX-Injected'))
+  })
+
   t.test('generated_attachment_name_is_escaped', fn (t) {
     let mut generator = TestDataGenerator.new
     let email = generator.generate_email_with_attachment(

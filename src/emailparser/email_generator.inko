@@ -58,6 +58,7 @@ Content-Type: text/plain; charset=UTF-8
     encoding: String,
   ) -> String {
     let boundary = generate_boundary
+    let encoding = normalize_encoding(encoding)
     let encoded_content = TestDataGenerator.encode_bytes(content, encoding)
 
     let email = 'From: sender@example.com
@@ -129,9 +130,11 @@ Please find attached files.
 '
 
     for att in attachments.iter {
+      let encoding = normalize_encoding(att.encoding)
+      let content_type = sanitize_header_value(att.content_type)
       let encoded_content = TestDataGenerator.encode_bytes(
         att.content,
-        att.encoding,
+        encoding,
       )
 
       email = email
@@ -139,7 +142,7 @@ Please find attached files.
         + boundary
         + '
 Content-Type: '
-        + att.content_type
+        + content_type
         + '; name="'
         + escape_quoted_param(att.name.clone)
         + '"
@@ -147,7 +150,7 @@ Content-Disposition: attachment; filename="'
         + escape_quoted_param(att.name.clone)
         + '"
 Content-Transfer-Encoding: '
-        + att.encoding
+        + encoding
         + '
 
 '
@@ -489,6 +492,26 @@ Content-Type: text/plain; charset=UTF-8
   fn pub mut generate_id -> Int {
     @attachment_counter = @attachment_counter + 1
     @attachment_counter
+  }
+}
+
+# Normalise a Content-Transfer-Encoding label
+#
+# Only the encodings this generator implements are accepted. Anything else is
+# treated as 7bit so the declared encoding always matches the encoded body.
+fn normalize_encoding(encoding: String) -> String {
+  let enc = encoding.trim.to_lower
+
+  if
+    enc == 'base64'
+      or enc == 'quoted-printable'
+      or enc == '7bit'
+      or enc == '8bit'
+      or enc == 'binary'
+  {
+    enc
+  } else {
+    '7bit'
   }
 }
 
