@@ -369,6 +369,25 @@ Content-Transfer-Encoding: quoted-printable
     }
   })
 
+  t.test('parse_async_reader_finds_separator_split_across_chunks', fn (t) {
+    let mut config = StreamingConfig.new
+
+    config.stream_chunk_size = 1
+
+    let mut parser = StreamingParser.with_config(config)
+    let mut handler = CollectingHandler.new
+    let raw = 'From: a@example.com\r\nSubject: Split\r\n\r\nhello'
+    let mut reader = ByteArrayReader.from_string(raw)
+
+    match parser.parse_async_reader(mut reader, mut handler) {
+      case Ok(result) -> {
+        t.equal(result.subject, 'Split')
+        t.equal(handler.text, 'hello')
+      }
+      case Error(e) -> panic('parse_async_reader failed: ${e.to_message}')
+    }
+  })
+
   t.test('single_part_stream_attachment_filename_is_sanitized', fn (t) {
     let mut parser = StreamingParser.new
     let mut handler = CollectingHandler.new
