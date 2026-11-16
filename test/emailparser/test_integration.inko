@@ -813,6 +813,32 @@ a=20b
     }
   })
 
+  t.test('repeated_recipient_headers_are_merged', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: sender@example.com
+To: first@example.com
+To: second@example.com
+Cc: cc1@example.com
+Cc: cc2@example.com
+Subject: Repeated recipients
+Content-Type: text/plain
+
+body'
+
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        t.equal(msg.addresses.to.size, 2)
+        t.equal(msg.addresses.cc.size, 2)
+
+        match msg.addresses.to.get(1) {
+          case Ok(addr) -> t.equal(addr.address, 'second@example.com')
+          case Error(_) -> t.equal('should have second recipient', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
   t.test('email_with_many_received_headers', fn (t) {
     let parser = EmailParser.new
     let raw_email = 'Received: from mail1.example.com (mail1.example.com [192.0.2.1])

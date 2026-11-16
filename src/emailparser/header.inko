@@ -425,6 +425,23 @@ fn get_header_value_impl(
   Option.None
 }
 
+# Get every value for a header name, in order (case-insensitive)
+#
+# RFC 5322 allows a field to appear more than once (To, Cc, Bcc, Received, ...).
+# Use get_header_value_impl when only the first occurrence matters.
+fn get_header_values_impl(
+  headers: ref Array[(String, String)],
+  name: String,
+) -> Array[String] {
+  let values = []
+
+  for (key, value) in headers.iter {
+    if eq_ignore_case(key, name) { values.push(value.clone) }
+  }
+
+  values
+}
+
 # Case-insensitive string comparison helper
 # Compares two strings ignoring ASCII case differences
 # Convert byte to lowercase if it's uppercase

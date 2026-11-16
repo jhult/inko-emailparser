@@ -47,7 +47,8 @@ import emailparser.decoder (decode_header_value_impl)
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.header (
-  get_header_value_impl, get_param_value_impl, parse_content_type_impl,
+  get_header_value_impl, get_header_values_impl, get_param_value_impl,
+  parse_content_type_impl,
 )
 import emailparser.message_id (normalize_message_id, parse_message_ids_impl)
 import emailparser.mime (is_multipart)
@@ -59,11 +60,24 @@ fn parse_address_header(
   headers: ref Array[(String, String)],
   name: String,
 ) -> Array[EmailAddress] {
-  let raw = get_header_value_impl(headers, name)
-  let decoded = match raw.clone {
-    case Some(v) -> decode_header_value_impl(v)
-    case None -> ''
+  # A field may legitimately appear more than once (MTAs and proxies re-emit
+  # To:/Cc:/Bcc:), so parse every occurrence instead of dropping the rest.
+  let values = get_header_values_impl(headers, name)
+
+  if values.empty? { return [] }
+
+  let mut combined = ''
+
+  for value in values.iter {
+    if combined.empty? {
+      combined = value.clone
+    } else {
+      combined = combined + ', ' + value.clone
+    }
   }
+
+  let raw = Option.Some(combined.clone)
+  let decoded = decode_header_value_impl(combined)
 
   parse_address_list_impl(ref raw, decoded)
 }
