@@ -110,13 +110,18 @@ fn pub is_multipart(content_type: String) -> Bool {
 }
 
 # Check if content is text/plain
+#
+# Parameters are ignored, so this agrees with `classify_part` for a value such
+# as "text/plain; charset=utf-8".
 fn pub is_text_plain(content_type: String) -> Bool {
-  content_type.to_lower == 'text/plain'
+  main_type(content_type) == 'text/plain'
 }
 
 # Check if content is text/html
+#
+# Parameters are ignored, matching `classify_part`.
 fn pub is_text_html(content_type: String) -> Bool {
-  content_type.to_lower == 'text/html'
+  main_type(content_type) == 'text/html'
 }
 
 # Extract the boundary parameter from Content-Type params

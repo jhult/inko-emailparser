@@ -6,9 +6,17 @@
 
 import emailparser (EmailParser)
 import emailparser.decoder (decode_quoted_printable)
+import emailparser.mime (is_text_html, is_text_plain)
 import std.test (Tests)
 
 fn pub tests(t: mut Tests) {
+  t.test('text_type_helpers_ignore_parameters', fn (t) {
+    t.true(is_text_plain('text/plain; charset=utf-8'))
+    t.true(is_text_html('Text/HTML; charset=UTF-8'))
+    t.false(is_text_plain('text/html'))
+    t.false(is_text_html('text/plain'))
+  })
+
   t.test('decode_quoted_printable_simple', fn (t) {
     let decoded = decode_quoted_printable('Hello=20World')
 
