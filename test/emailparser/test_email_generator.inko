@@ -5,6 +5,7 @@
 # Unit tests for the email_generator module
 
 import emailparser (EmailParser)
+import emailparser.decoder (decode_qp_bytes)
 import emailparser.email_generator (TestAttachment, TestDataGenerator)
 import std.test (Tests)
 
@@ -208,6 +209,35 @@ fn pub tests(t: mut Tests) {
     # The quote is backslash-escaped inside the quoted parameter
     t.true(email.contains?('filename="a\\"b.pdf"'))
     t.false(email.contains?('filename="a"b.pdf"'))
+  })
+
+  t.test('generated_quoted_printable_encodes_trailing_whitespace', fn (t) {
+    let encoded = TestDataGenerator.encode_bytes(
+      'abc   \nx',
+      'quoted-printable',
+    )
+
+    t.true(encoded.contains?('abc=20=20=20\nx'))
+  })
+
+  t.test('generated_quoted_printable_keeps_lines_short', fn (t) {
+    let mut content = ''
+
+    while content.size < 300 { content = content + 'abcdefghij' }
+
+    let encoded = TestDataGenerator.encode_bytes(content, 'quoted-printable')
+
+    t.true(encoded.contains?('=\n'))
+
+    for line in encoded.split('\n').into_iter { t.true(line.size <= 76) }
+  })
+
+  t.test('generated_quoted_printable_round_trips', fn (t) {
+    let content = 'trailing   \n=equals\ndata \t\n'
+    let encoded = TestDataGenerator.encode_bytes(content, 'quoted-printable')
+    let decoded = decode_qp_bytes(encoded, false, true).into_string
+
+    t.equal(decoded, content)
   })
 
   t.test('generated_base64_is_wrapped_at_76_columns', fn (t) {
