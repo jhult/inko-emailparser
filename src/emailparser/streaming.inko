@@ -1289,15 +1289,12 @@ fn single_part_attachment_info(
 
   match get_header_value_impl(headers, 'Content-Disposition') {
     case Some(raw) -> {
-      match parse_content_disposition_impl(raw, strict_mode) {
-        case Ok((disp, params)) -> {
-          if !disp.empty? { disposition = disp }
+      # Same extraction as the multipart path: filename* and RFC 2231
+      # continuations are supported and the result is sanitized.
+      filename = extract_filename_param(raw.clone)
 
-          match get_param_value_impl(ref params, 'filename') {
-            case Some(f) -> filename = Option.Some(f)
-            case None -> {}
-          }
-        }
+      match parse_content_disposition_impl(raw, strict_mode) {
+        case Ok((disp, _)) -> if !disp.empty? { disposition = disp }
         case Error(_) -> {}
       }
     }
