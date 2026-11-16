@@ -197,9 +197,11 @@ fn parse_headers_impl(
     # Convert Slice to String for processing
     let mut line_str = line.to_string
 
-    # Strip trailing carriage return (for CRLF line endings)
+    # Strip trailing carriage return (for CRLF line endings). Slice by byte:
+    # `substring` counts characters and would miss the CR in a line containing
+    # multi-byte text.
     if line_str.ends_with?('\r') {
-      line_str = line_str.substring(0, line_str.size - 1)
+      line_str = line_str.slice(0, line_str.size - 1).to_string
     }
 
     # A CR that is not part of a CRLF line ending is a header-injection

@@ -15,6 +15,23 @@ import emailparser.header (
 import std.test (Tests)
 
 fn pub tests(t: mut Tests) {
+  t.test('parse_headers_strict_accepts_non_ascii_crlf', fn (t) {
+    let parser = EmailParser.new.with_strict_mode(true)
+    let result = parser.parse_headers('Subject: Héllo\r\nFrom: a@b.com\r\n')
+
+    match result {
+      case Ok(headers) -> {
+        t.equal(headers.size, 2)
+
+        match headers.get(0) {
+          case Ok((_, value)) -> t.equal(value, 'Héllo')
+          case Error(_) -> t.equal('should have header', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
   # ============================================================
   # is_valid_field_name tests
   # ============================================================
