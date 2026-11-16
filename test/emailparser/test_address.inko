@@ -358,6 +358,21 @@ fn pub tests(t: mut Tests) {
     t.equal(addrs.size, 1)
   })
 
+  t.test('parse_comma_separated_comma_in_angle', fn (t) {
+    let addrs = parse_comma_separated_addresses('John <a,b@example.com>')
+
+    t.equal(addrs.size, 1)
+    t.equal(addrs.get(0).or_panic.address, 'a,b@example.com')
+  })
+
+  t.test('parse_comma_separated_colon_in_comment', fn (t) {
+    let addrs = parse_comma_separated_addresses(
+      'user@example.com (note: work), other@example.com',
+    )
+
+    t.equal(addrs.size, 2)
+  })
+
   t.test('parse_comma_separated_group', fn (t) {
     let addrs = parse_comma_separated_addresses(
       'team: alice@example.com, bob@example.com;',

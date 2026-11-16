@@ -41,6 +41,8 @@
 #
 # ### Private Functions
 # - `parse_address_list_impl`: Core parsing logic (used by main parser)
+# - `AddressScanner`: Shared state machine behind comment removal, top-level
+#   separator detection and list splitting
 #
 # ## RFC Compliance
 #
@@ -49,9 +51,10 @@
 #   - 3.4.2: Angle Bracket and Comment Syntax
 #
 import emailparser.ascii (
-  ASCII_BACKSLASH, ASCII_COLON, ASCII_CR, ASCII_DOT, ASCII_DQUOTE, ASCII_HYPHEN,
-  ASCII_LF, ASCII_SPACE, UNICODE_REPLACEMENT_CHAR_UTF8, is_alnum,
-  is_email_local_special,
+  ASCII_BACKSLASH, ASCII_COLON, ASCII_COMMA, ASCII_CR, ASCII_DOT, ASCII_DQUOTE,
+  ASCII_GREATER_THAN, ASCII_HYPHEN, ASCII_LESS_THAN, ASCII_LF, ASCII_LPAREN,
+  ASCII_RPAREN, ASCII_SEMICOLON, ASCII_SPACE, UNICODE_REPLACEMENT_CHAR_UTF8,
+  is_alnum, is_email_local_special,
 )
 import emailparser.limits (
   MAX_DOMAIN_SIZE, MAX_EMAIL_ADDRESS_SIZE, MAX_LOCAL_PART_SIZE,
@@ -59,6 +62,97 @@ import emailparser.limits (
 import emailparser.validation (is_quoted_string, is_valid_domain)
 import std.bytes (ByteArray)
 import std.option (Option)
+
+# A byte classified by `AddressScanner`
+type inline enum AddressStep {
+  # A literal byte: quoted text, angle brackets or plain text
+  case Content(Int)
+
+  # A byte escaped by a backslash in a quoted string. The caller skips both
+  # the backslash and this byte.
+  case Escaped(Int)
+
+  # A comma outside quotes, comments and angle brackets
+  case Separator
+
+  # A byte inside a comment, including the parentheses delimiting it
+  case Comment
+
+  # A byte that isn't valid UTF-8
+  case Invalid
+}
+
+# Shared state machine for scanning RFC 5322 address text
+#
+# Comment removal, top-level separator detection and list splitting all need
+# to know whether a byte is quoted, inside a nested comment or inside angle
+# brackets. This type tracks that state so all three scanners agree on the
+# transitions.
+type AddressScanner {
+  let mut @in_quote: Bool
+  let mut @paren_depth: Int
+  let mut @angle_depth: Int
+}
+
+impl AddressScanner {
+  fn static new -> AddressScanner {
+    AddressScanner(in_quote: false, paren_depth: 0, angle_depth: 0)
+  }
+
+  # Classify the byte at `pos` and advance the state
+  #
+  # A backslash inside a quoted string escapes the following byte, which is
+  # reported with `Escaped` so the caller can skip both bytes.
+  fn mut next(input: String, pos: Int) -> AddressStep {
+    match input.get(pos) {
+      case Ok(byte) -> {
+        if byte == ASCII_BACKSLASH and @in_quote and (pos + 1) < input.size {
+          match input.get(pos + 1) {
+            case Ok(escaped) -> AddressStep.Escaped(escaped)
+            case Error(_) -> AddressStep.Content(byte)
+          }
+        } else if byte == ASCII_DQUOTE and @paren_depth == 0 {
+          @in_quote = !@in_quote
+          AddressStep.Content(byte)
+        } else if byte == ASCII_LPAREN and @in_quote == false {
+          @paren_depth = @paren_depth + 1
+          AddressStep.Comment
+        } else if byte == ASCII_RPAREN and @in_quote == false {
+          if @paren_depth > 0 { @paren_depth = @paren_depth - 1 }
+
+          AddressStep.Comment
+        } else if
+          byte == ASCII_LESS_THAN and @in_quote == false and @paren_depth == 0
+        {
+          @angle_depth = @angle_depth + 1
+          AddressStep.Content(byte)
+        } else if
+          byte == ASCII_GREATER_THAN
+            and @in_quote == false
+            and @paren_depth == 0
+        {
+          if @angle_depth > 0 { @angle_depth = @angle_depth - 1 }
+
+          AddressStep.Content(byte)
+        } else if @paren_depth > 0 {
+          AddressStep.Comment
+        } else if
+          byte == ASCII_COMMA and @in_quote == false and @angle_depth == 0
+        {
+          AddressStep.Separator
+        } else {
+          AddressStep.Content(byte)
+        }
+      }
+      case Error(_) -> AddressStep.Invalid
+    }
+  }
+
+  # Whether the scanner is outside quotes, comments and angle brackets
+  fn top_level? -> Bool {
+    @in_quote == false and @paren_depth == 0 and @angle_depth == 0
+  }
+}
 
 type pub EmailAddress {
   let pub @name: Option[String]
@@ -68,42 +162,32 @@ type pub EmailAddress {
 
 fn pub remove_comments(input: String) -> String {
   let result = ByteArray.new
+  let mut scanner = AddressScanner.new
   let mut i = 0
-  let mut depth = 0
-  let mut in_quote = false
 
   while i < input.size {
-    let mut step = 1
-
-    match input.get(i) {
-      case Ok(byte) -> {
-        if byte == 92 and in_quote and i + 1 < input.size {
-          result.push(byte)
-
-          match input.get(i + 1) {
-            case Ok(escaped) -> result.push(escaped)
-            case Error(_) -> {}
-          }
-
-          step = 2
-        } else if byte == 34 and depth == 0 {
-          in_quote = if in_quote { false } else { true }
-          result.push(byte)
-        } else if byte == 40 and in_quote == false {
-          depth = depth + 1
-        } else if byte == 41 and in_quote == false {
-          if depth > 0 { depth = depth - 1 }
-        } else if depth == 0 {
-          result.push(byte)
-        }
+    match scanner.next(input, i) {
+      case Escaped(escaped) -> {
+        result.push(ASCII_BACKSLASH)
+        result.push(escaped)
+        i = i + 2
       }
-      case Error(_) -> {
+      case Content(byte) -> {
+        result.push(byte)
+        i = i + 1
+      }
+      case Separator -> {
+        result.push(ASCII_COMMA)
+        i = i + 1
+      }
+      case Comment -> i = i + 1
+      case Invalid -> {
         # Push Unicode replacement character U+FFFD (UTF-8: 239, 191, 189)
         for byte in UNICODE_REPLACEMENT_CHAR_UTF8.iter { result.push(byte) }
+
+        i = i + 1
       }
     }
-
-    i = i + step
   }
 
   result.into_string
@@ -387,38 +471,27 @@ fn extract_addr_spec(input: String) -> Option[String] {
   }
 }
 
-fn is_colon_outside_delimiters(input: String, pos: Int) -> Bool {
-  let mut in_quote = false
-  let mut paren_depth = 0
-  let mut angle_depth = 0
+# Find the first occurrence of `byte` at or after `from` that is outside
+# quotes, comments and angle brackets
+fn find_top_level_byte(input: String, byte: Int, from: Int) -> Option[Int] {
+  let mut scanner = AddressScanner.new
   let mut i = 0
 
-  while i < input.size and i < pos {
-    let mut step = 1
-
-    match input.get(i) {
-      case Ok(byte) -> {
-        if byte == 92 and in_quote and i + 1 < input.size {
-          step = 2
-        } else if byte == 34 and paren_depth == 0 {
-          in_quote = if in_quote { false } else { true }
-        } else if byte == 40 and in_quote == false {
-          paren_depth = paren_depth + 1
-        } else if byte == 41 and in_quote == false {
-          if paren_depth > 0 { paren_depth = paren_depth - 1 }
-        } else if byte == 60 and in_quote == false and paren_depth == 0 {
-          angle_depth = angle_depth + 1
-        } else if byte == 62 and in_quote == false and paren_depth == 0 {
-          if angle_depth > 0 { angle_depth = angle_depth - 1 }
-        }
+  while i < input.size {
+    if i >= from and scanner.top_level? {
+      match input.get(i) {
+        case Ok(current) -> if current == byte { return Option.Some(i) }
+        case Error(_) -> {}
       }
-      case Error(_) -> {}
     }
 
-    i = i + step
+    match scanner.next(input, i) {
+      case Escaped(_) -> i = i + 2
+      case _ -> i = i + 1
+    }
   }
 
-  in_quote == false and paren_depth == 0 and angle_depth == 0
+  Option.None
 }
 
 fn parse_single_address(input: String) -> Option[EmailAddress] {
@@ -433,85 +506,54 @@ fn parse_single_address(input: String) -> Option[EmailAddress] {
   }
 }
 
+# Parse and append one list entry, ignoring empty or unparsable entries
+fn append_parsed_address(result: mut Array[EmailAddress], bytes: Array[Int]) {
+  let addr_str = byte_array_to_string(bytes).trim
+
+  if addr_str.empty? { return }
+
+  match parse_single_address(addr_str) {
+    case Some(addr) -> result.push(addr)
+    case None -> {}
+  }
+}
+
 fn pub parse_comma_separated_addresses(input: String) -> Array[EmailAddress] {
   # RFC 5322 group addresses use syntax: group-name: mailbox-list;
   # We don't support parsing groups, so return empty if detected
   # Only treat as group if colon is outside quotes/parens/angle brackets
-  let mut colon_pos = 0
-  let mut found_group_colon = false
-
-  loop {
-    match input.index_of(':', colon_pos) {
-      case Some(pos) -> {
-        if is_colon_outside_delimiters(input, pos) {
-          found_group_colon = true
-          break
-        }
-
-        colon_pos = pos + 1
-      }
-      case None -> break
-    }
+  match find_top_level_byte(input, ASCII_COLON, 0) {
+    case Some(_) -> return []
+    case None -> {}
   }
-
-  if found_group_colon { return [] }
 
   let mut result = []
   let mut current = [] as Array[Int]
-  let mut in_quote = false
-  let mut paren_depth = 0
+  let mut scanner = AddressScanner.new
   let mut i = 0
 
   while i < input.size {
-    let mut step = 1
-
-    match input.get(i) {
-      case Ok(byte) -> {
-        if byte == 92 and in_quote and i + 1 < input.size {
-          current.push(byte)
-
-          match input.get(i + 1) {
-            case Ok(escaped) -> current.push(escaped)
-            case Error(_) -> {}
-          }
-
-          step = 2
-        } else if byte == 34 and paren_depth == 0 {
-          in_quote = if in_quote { false } else { true }
-          current.push(byte)
-        } else if byte == 40 and in_quote == false {
-          paren_depth = paren_depth + 1
-        } else if byte == 41 and in_quote == false {
-          if paren_depth > 0 { paren_depth = paren_depth - 1 }
-        } else if byte == 44 and in_quote == false and paren_depth == 0 {
-          let addr_str = byte_array_to_string(current).trim
-
-          if addr_str.empty? == false {
-            match parse_single_address(addr_str) {
-              case Some(addr) -> result.push(addr)
-              case None -> {}
-            }
-          }
-
-          current = [] as Array[Int]
-        } else if in_quote == true or paren_depth == 0 {
-          current.push(byte)
-        }
+    match scanner.next(input, i) {
+      case Escaped(escaped) -> {
+        current.push(ASCII_BACKSLASH)
+        current.push(escaped)
+        i = i + 2
       }
-      case Error(_) -> {}
+      case Content(byte) -> {
+        current.push(byte)
+        i = i + 1
+      }
+      case Separator -> {
+        append_parsed_address(mut result, current)
+        current = [] as Array[Int]
+        i = i + 1
+      }
+      case Comment -> i = i + 1
+      case Invalid -> i = i + 1
     }
-
-    i = i + step
   }
 
-  let addr_str = byte_array_to_string(current).trim
-
-  if addr_str.empty? == false {
-    match parse_single_address(addr_str) {
-      case Some(addr) -> result.push(addr)
-      case None -> {}
-    }
-  }
+  append_parsed_address(mut result, current)
 
   result
 }
@@ -527,42 +569,10 @@ fn parse_address_list_impl(
       let mut rest = decoded.trim
 
       while !rest.empty? {
-        let mut colon_pos = 0
-        let mut group_colon = Option.None
-
-        loop {
-          match rest.index_of(':', colon_pos) {
-            case Some(pos) -> {
-              if is_colon_outside_delimiters(rest, pos) {
-                group_colon = Option.Some(pos)
-                break
-              }
-
-              colon_pos = pos + 1
-            }
-            case None -> break
-          }
-        }
-
-        match group_colon {
+        match find_top_level_byte(rest, ASCII_COLON, 0) {
           case Some(colon) -> {
             let content_start = colon + 1
-            let mut semi_pos = 0
-            let mut semi = Option.None
-
-            loop {
-              match rest.index_of(';', semi_pos) {
-                case Some(pos) -> {
-                  if is_colon_outside_delimiters(rest, pos) {
-                    semi = Option.Some(pos)
-                    break
-                  }
-
-                  semi_pos = pos + 1
-                }
-                case None -> break
-              }
-            }
+            let semi = find_top_level_byte(rest, ASCII_SEMICOLON, content_start)
 
             match semi {
               case Some(pos) -> {
