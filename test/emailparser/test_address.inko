@@ -358,6 +358,27 @@ fn pub tests(t: mut Tests) {
     t.equal(addrs.size, 1)
   })
 
+  t.test('parse_comma_separated_quoted_name_with_brackets', fn (t) {
+    let addrs = parse_comma_separated_addresses('"a > b" <x@y.com>')
+
+    t.equal(addrs.size, 1)
+    t.equal(addrs.get(0).or_panic.address, 'x@y.com')
+
+    let name = match addrs.get(0).or_panic.name {
+      case Some(name) -> name
+      case None -> ''
+    }
+
+    t.equal(name, 'a > b')
+  })
+
+  t.test('parse_comma_separated_quoted_name_with_lt', fn (t) {
+    let addrs = parse_comma_separated_addresses('"a < b" <x@y.com>')
+
+    t.equal(addrs.size, 1)
+    t.equal(addrs.get(0).or_panic.address, 'x@y.com')
+  })
+
   t.test('parse_comma_separated_comma_in_angle', fn (t) {
     let addrs = parse_comma_separated_addresses('John <a,b@example.com>')
 
