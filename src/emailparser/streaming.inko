@@ -346,7 +346,7 @@ impl StreamingParser {
       parse_mime_metadata(ref headers, @config.strict_mode)
     {
       case Ok(result) -> result
-      case Error(e) -> return Result.Error(e)
+      case Error(e) -> return Result.Error(notify_error(handler, e))
     }
 
     # Parse body based on content type
@@ -355,7 +355,7 @@ impl StreamingParser {
     # Validate boundary if multipart
     match validate_multipart_boundary(ct_main.clone, ref boundary) {
       case Ok(_) -> {}
-      case Error(e) -> return Result.Error(e)
+      case Error(e) -> return Result.Error(notify_error(handler, e))
     }
 
     # Metadata used when the whole message is a single non-text part

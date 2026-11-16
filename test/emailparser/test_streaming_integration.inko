@@ -979,4 +979,36 @@ ${body}
       case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
     }
   })
+
+  t.test('parse_stream_reports_mime_metadata_errors_to_handler', fn (t) {
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Bad type
+Content-Type: not-a-mime-type
+
+body'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.false(true)
+      case Error(_) -> t.equal(handler.get_errors.size, 1)
+    }
+  })
+
+  t.test('parse_stream_reports_boundary_errors_to_handler', fn (t) {
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: No boundary
+Content-Type: multipart/mixed
+
+body'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.false(true)
+      case Error(_) -> t.equal(handler.get_errors.size, 1)
+    }
+  })
 }
