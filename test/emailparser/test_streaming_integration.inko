@@ -304,6 +304,42 @@ fn pub tests(t: mut Tests) {
     }
   })
 
+  t.test('flushed_attachment_tail_reports_final_size', fn (t) {
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Tail
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="f.bin"
+Content-Transfer-Encoding: base64
+
+SGVsbG8
+--b--'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> {
+        let attachments = handler.get_attachments
+
+        t.equal(attachments.size, 1)
+
+        match attachments.get(0) {
+          case Ok((info, data)) -> {
+            # The unpadded tail is flushed at part end; the metadata must
+            # report the whole attachment rather than the begin-time size.
+            t.equal(data.clone().into_string, 'Hello')
+            t.equal(info.size, 5)
+          }
+          case Error(_) -> t.equal('should have attachment', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
   t.test('email_with_multiple_attachments_streaming', fn (t) {
     let mut generator = TestDataGenerator.new
     let attachments = [

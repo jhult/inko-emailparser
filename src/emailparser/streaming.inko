@@ -2304,17 +2304,9 @@ if
     # Now pass decoded data to handler
     match @current_info {
       case Some(info) -> {
-        # Report the accumulated decoded size and normalised type; the info
-        # passed to on_attachment_begin still has size 0.
-        let final_info = AttachmentInfo(
-          index: info.index,
-          content_type: info.content_type,
-          filename: info.filename.clone,
-          content_disposition: info.content_disposition,
-          content_id: info.content_id.clone,
-          size: @current_attachment_size,
-          transfer_encoding: info.transfer_encoding,
-        )
+        # Account for the flushed tail before building the metadata below, so
+        # the chunk and the end report the same, final size.
+        let mut tail: Option[ByteArray] = Option.None
 
         match base64_decoded {
           case Some(data) -> {
@@ -2333,14 +2325,7 @@ if
               )
             }
 
-            match @handler.on_attachment_chunk(data, info) {
-              case Ok(_) -> {}
-              case Error(e) -> {
-                return Result.Error(
-                  Error.from_string('Handler on_attachment_chunk failed: ${e}'),
-                )
-              }
-            }
+            tail = Option.Some(data)
           }
           case None -> {}
         }
@@ -2362,7 +2347,25 @@ if
               )
             }
 
-            match @handler.on_attachment_chunk(data, info) {
+            tail = Option.Some(data)
+          }
+          case None -> {}
+        }
+
+        let final_size = @current_attachment_size
+        let final_info = AttachmentInfo(
+          index: info.index,
+          content_type: info.content_type,
+          filename: info.filename.clone,
+          content_disposition: info.content_disposition,
+          content_id: info.content_id.clone,
+          size: final_size,
+          transfer_encoding: info.transfer_encoding,
+        )
+
+        match tail {
+          case Some(data) -> {
+            match @handler.on_attachment_chunk(data, final_info) {
               case Ok(_) -> {}
               case Error(e) -> {
                 return Result.Error(
