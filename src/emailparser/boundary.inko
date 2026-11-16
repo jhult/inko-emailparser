@@ -28,15 +28,24 @@ import std.bytes (ByteArray)
 import std.option (Option)
 
 # Whether a valid boundary delimiter appears at `pos`
+#
+# `head_line_start` says whether position 0 of `buffer` follows a line break.
+# Streaming callers trim buffers from the front, so position 0 is only a line
+# start when the caller knows the preceding byte was an LF.
 fn pub boundary_at(
   buffer: ref ByteArray,
   marker: ref ByteArray,
   pos: Int,
   at_eof: Bool,
+  head_line_start: Bool,
 ) -> Bool {
-  is_line_start(ref buffer, pos)
+  starts_line(ref buffer, pos, head_line_start)
     and bytes_match_at(ref buffer, ref marker, pos)
     and is_valid_boundary_tail(ref buffer, pos + marker.size, at_eof)
+}
+
+fn starts_line(buffer: ref ByteArray, pos: Int, head_line_start: Bool) -> Bool {
+  if pos == 0 { head_line_start } else { is_line_start(ref buffer, pos) }
 }
 
 # Find the first boundary marker in `buffer`
@@ -44,6 +53,7 @@ fn pub find_boundary(
   buffer: ref ByteArray,
   marker: ref ByteArray,
   at_eof: Bool,
+  head_line_start: Bool,
 ) -> Option[Int] {
   if marker.size == 0 or buffer.size < marker.size { return Option.None }
 
@@ -51,7 +61,9 @@ fn pub find_boundary(
   let mut i = 0
 
   while i <= max_i {
-    if boundary_at(ref buffer, ref marker, i, at_eof) { return Option.Some(i) }
+    if boundary_at(ref buffer, ref marker, i, at_eof, head_line_start) {
+      return Option.Some(i)
+    }
 
     i = i + 1
   }

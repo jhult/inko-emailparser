@@ -4,6 +4,7 @@
 
 # Tests for streaming multipart parser
 
+import emailparser.boundary (find_boundary)
 import emailparser.error (Error)
 import emailparser.streaming_multipart (
   MultipartStreamHandler, MultipartStreamParser,
@@ -788,6 +789,24 @@ Plain text without headers
     match parser.finish(mut handler) {
       case Ok(_) -> t.false(true)
       case Error(e) -> t.equal(e.variant, 'MultipartWithoutParts')
+    }
+  })
+
+  t.test('find_boundary_rejects_marker_at_truncated_head', fn (t) {
+    let marker = '--b'.to_byte_array
+    let buffer = '--b\r\n'.to_byte_array
+
+    # A genuine line start at position 0 is accepted.
+    match find_boundary(ref buffer, ref marker, false, true) {
+      case Some(pos) -> t.equal(pos, 0)
+      case None -> t.false(true)
+    }
+
+    # When the buffer was trimmed, position 0 has no known preceding byte, so
+    # a marker there must not be treated as a delimiter.
+    match find_boundary(ref buffer, ref marker, false, false) {
+      case Some(_) -> t.false(true)
+      case None -> t.true(true)
     }
   })
 }

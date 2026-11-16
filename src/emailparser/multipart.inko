@@ -521,7 +521,7 @@ fn split_on_boundary(raw: String, marker: String) -> Array[String] {
   let max_i = bytes.size - marker_bytes.size
 
   while i <= max_i {
-    if boundary_at(ref bytes, ref marker_bytes, i, true) {
+    if boundary_at(ref bytes, ref marker_bytes, i, true, true) {
       parts.push(bytes_range_to_string(ref bytes, start, i))
       start = i + marker_bytes.size
       i = start

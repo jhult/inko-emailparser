@@ -8,7 +8,7 @@
 # incrementally without loading entire parts into memory. Uses a state machine
 # to track parsing progress through multipart structure.
 
-import emailparser.boundary (find_boundary)
+import emailparser.boundary (find_boundary, is_line_start)
 import emailparser.error (Error)
 import emailparser.error (Severity)
 import emailparser.header (
@@ -97,6 +97,11 @@ type pub MultipartStreamParser {
   let mut @current_context: Option[CurrentPartContext]
   let mut @attachment_count: Int
   let mut @default_encoding: String
+
+  # Whether the first buffered byte is known to follow a line break. Buffer
+  # trimming drops bytes from the front, so position 0 is not automatically a
+  # line start for a streaming parser.
+  let mut @head_line_start: Bool
 }
 
 impl MultipartStreamParser {
@@ -136,6 +141,7 @@ impl MultipartStreamParser {
         current_context: Option.None,
         attachment_count: 0,
         default_encoding: '',
+        head_line_start: true,
       ),
     )
   }
@@ -327,7 +333,14 @@ fn process_preamble[H: mut + MultipartStreamHandler](
   let boundary_bytes = boundary_marker.to_byte_array
 
   # Scan for first boundary
-  match find_boundary(ref parser.buffer, ref boundary_bytes, false) {
+  match
+    find_boundary(
+      ref parser.buffer,
+      ref boundary_bytes,
+      false,
+      parser.head_line_start,
+    )
+  {
     case Some(pos) -> {
       # Found boundary - advance to AtBoundary state
       # Remove everything up to and including the boundary
@@ -347,6 +360,7 @@ fn process_preamble[H: mut + MultipartStreamHandler](
         i = i + 1
       }
 
+      parser.head_line_start = is_line_start(ref parser.buffer, skip_to)
       parser.buffer = new_buffer
       parser.state = MultipartState.AtBoundary
       Result.Ok(0)
@@ -372,6 +386,7 @@ fn process_preamble[H: mut + MultipartStreamHandler](
           i = i + 1
         }
 
+        parser.head_line_start = is_line_start(ref parser.buffer, skip_size)
         parser.buffer = new_buffer
       }
 
@@ -574,6 +589,7 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
         j = j + 1
       }
 
+      parser.head_line_start = is_line_start(ref parser.buffer, skip_to)
       parser.buffer = new_buffer
       parser.state = MultipartState.ReadingBody
       Result.Ok(0)
@@ -612,7 +628,14 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
   let boundary_bytes = boundary_marker.to_byte_array
 
   # Scan for next boundary
-  match find_boundary(ref parser.buffer, ref boundary_bytes, at_eof) {
+  match
+    find_boundary(
+      ref parser.buffer,
+      ref boundary_bytes,
+      at_eof,
+      parser.head_line_start,
+    )
+  {
     case Some(pos) -> {
       # Found boundary - emit body data before it
       let mut body_data = ByteArray.new
@@ -690,6 +713,8 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
         }
       }
 
+      parser.head_line_start = is_line_start(ref parser.buffer, j)
+
       while j < parser.buffer.size {
         match parser.buffer.get(j) {
           case Ok(byte) -> new_buffer.push(byte)
@@ -751,6 +776,7 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
           j = j + 1
         }
 
+        parser.head_line_start = is_line_start(ref parser.buffer, emit_size)
         parser.buffer = new_buffer
       }
 
