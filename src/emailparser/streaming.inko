@@ -31,7 +31,7 @@ import emailparser.limits (
   MAX_HEADERS_SECTION_SIZE, MAX_MULTIPART_DEPTH,
 )
 import emailparser.mime (
-  extract_boundary, is_multipart, is_text_html, is_text_plain,
+  extract_boundary, is_multipart, is_text_html, is_text_plain, main_type,
 )
 import emailparser.streaming_decoder (
   Base64StreamingDecoder, QuotedPrintableStreamingDecoder,
@@ -1888,19 +1888,21 @@ if
     content_type: String,
     is_attachment: Bool,
   ) -> Result[Int, Error] {
-    let (main_type, ct_params) = match
+    let (ct_main, ct_params) = match
       parse_content_type_impl(content_type, @strict_mode)
     {
       case Ok((mt, params)) -> (mt, params)
-      case Error(_) -> (content_type, [])
+      # Strip malformed parameters rather than keeping the raw header value:
+      # the rest of this wrapper compares against a bare `type/subtype`.
+      case Error(_) -> (main_type(content_type), [])
     }
 
-    @current_content_type = main_type
+    @current_content_type = ct_main
 
     # Nested multipart: buffer the part body and parse it as a new multipart
     # document when the part ends. Reject excessive nesting before buffering
     # anything so a depth bomb cannot allocate the whole nested payload first.
-    if main_type.starts_with?('multipart/') {
+    if ct_main.starts_with?('multipart/') {
       match get_param_value_impl(ref ct_params, 'boundary') {
         case Some(nested_boundary) -> {
           # Match the buffered parser: level `max_depth` itself is rejected,
@@ -1978,7 +1980,7 @@ if
 
       let info = AttachmentInfo(
         index: @attachment_count,
-        content_type: main_type,
+        content_type: ct_main,
         filename: filename,
         content_disposition: disposition,
         content_id: content_id,
