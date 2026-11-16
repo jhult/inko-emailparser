@@ -1011,4 +1011,24 @@ body'
       case Error(_) -> t.equal(handler.get_errors.size, 1)
     }
   })
+
+  t.test('text_chunks_do_not_split_utf8_characters', fn (t) {
+    let mut config = StreamingConfig.new
+
+    config.stream_chunk_size = 6
+
+    let parser = StreamingParser.with_config(config)
+    let handler = MemoryBufferingHandler.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: UTF-8
+Content-Type: text/plain; charset=utf-8
+
+😀😀'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.equal(handler.get_text_body, '😀😀')
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
 }

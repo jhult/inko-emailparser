@@ -1310,8 +1310,25 @@ fn send_text_chunks[H: mut + StreamHandler](
     } else {
       pos + chunk_size
     }
+
+    # Don't split a multi-byte UTF-8 sequence: if the cut lands on a
+    # continuation byte, back off to the previous character boundary. Keep at
+    # least one byte per chunk so a tiny chunk size cannot stall the loop.
+    let mut chunk_end = end
+
+    while chunk_end > pos and chunk_end < decoded_str.size {
+      match decoded_str.get(chunk_end) {
+        case Ok(byte) -> {
+          if (byte & 0xC0) == 0x80 { chunk_end = chunk_end - 1 } else { break }
+        }
+        case Error(_) -> break
+      }
+    }
+
+    if chunk_end == pos { chunk_end = end }
+
     # `slice` takes byte offsets, matching `size`; `substring` is char based.
-    let chunk = decoded_str.slice(pos, end).to_string
+    let chunk = decoded_str.slice(pos, chunk_end).to_string
 
     let result = if is_html {
       handler.on_html_chunk(chunk)
@@ -1328,7 +1345,7 @@ fn send_text_chunks[H: mut + StreamHandler](
       }
     }
 
-    pos = end
+    pos = chunk_end
   }
 
   Result.Ok(0)
