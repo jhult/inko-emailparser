@@ -1594,6 +1594,29 @@ QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB
     }
   })
 
+  t.test('attachment_constructors_sanitize_filenames', fn (t) {
+    let attachment = EmailAttachment.from_decoded_part(
+      content_type: 'application/octet-stream',
+      filename: Option.Some('../../etc/passwd'),
+      content_disposition: 'attachment',
+      content_id: Option.None,
+      decoded_bytes: ByteArray.new,
+    )
+
+    t.equal(attachment.filename, Option.Some('passwd'))
+
+    let manual = EmailAttachment.new(
+      content_type: 'application/octet-stream',
+      filename: Option.Some('..'),
+      content_disposition: 'attachment',
+      content_id: Option.None,
+      size: 0,
+      content: ByteArray.new,
+    )
+
+    t.equal(manual.filename, Option.None)
+  })
+
   t.test('is_image_is_case_insensitive', fn (t) {
     let attachment = EmailAttachment.from_decoded_part(
       content_type: 'Image/PNG',

@@ -81,11 +81,15 @@
 #
 # ### Security Considerations
 #
-# Filenames are sanitized at creation time (in the main parser) to prevent:
+# Both constructors run filenames through `sanitize_filename`, so attachments
+# built from any source (parser, IMAP, database, user upload) cannot carry:
 # - Path traversal attacks (.. sequences)
 # - Control character injection
 # - Excessively long filenames (>255 chars)
+#
+# A name that sanitizes to nothing is stored as None.
 
+import emailparser.header (sanitize_filename)
 import std.bytes (ByteArray)
 import std.option (Option)
 
@@ -114,7 +118,7 @@ impl EmailAttachment {
   ) -> EmailAttachment {
     EmailAttachment(
       content_type: content_type,
-      filename: filename,
+      filename: sanitize_optional_filename(filename),
       content_disposition: content_disposition,
       content_id: content_id,
       size: size,
@@ -125,7 +129,8 @@ impl EmailAttachment {
   # Create an attachment from decoded multipart part data
   #
   # Convenience constructor for the common case of creating an
-  # attachment from parsed multipart content.
+  # attachment from parsed multipart content. Filenames are sanitized by
+  # `EmailAttachment.new`.
   fn pub static from_decoded_part(
     content_type: String,
     filename: Option[String],
@@ -169,5 +174,13 @@ impl EmailAttachment {
       case Some(name) -> name
       case None -> default
     }
+  }
+}
+
+# Sanitize an optional filename, dropping one that is rejected outright
+fn sanitize_optional_filename(filename: Option[String]) -> Option[String] {
+  match filename {
+    case Some(name) -> sanitize_filename(name)
+    case None -> Option.None
   }
 }
