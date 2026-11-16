@@ -416,7 +416,9 @@ fn pub decode_rfc2047_word(word: String) -> String {
     return word
   }
 
-  let content = word.substring(2, word.size - 2)
+  # `size` is byte-based, so slice by bytes here: `substring` counts characters
+  # and would overshoot when the payload contains raw non-ASCII bytes.
+  let content = word.slice(2, word.size - 2).to_string
 
   let parts = content.split('?').map(fn (s) { s.to_string }).to_array
 
