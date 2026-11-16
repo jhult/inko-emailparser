@@ -2044,7 +2044,7 @@ if
           match @base64_decoder {
             case None -> {
               @base64_decoder = Option.Some(
-                Base64StreamingDecoder.new(@max_size, false),
+                Base64StreamingDecoder.new(@max_size, @strict_mode),
               )
             }
             case Some(_) -> {}
@@ -2172,7 +2172,7 @@ if
             match @base64_decoder {
               case None -> {
                 @base64_decoder = Option.Some(
-                  Base64StreamingDecoder.new(@max_size, false),
+                  Base64StreamingDecoder.new(@max_size, @strict_mode),
                 )
               }
               case Some(_) -> {}
@@ -2500,7 +2500,7 @@ fn finish_nested[H: mut + StreamHandler](
   }
 
   let mut nested_parser = match
-    MultipartStreamParser.new(nested_boundary, false, max_headers)
+    MultipartStreamParser.new(nested_boundary, strict_mode, max_headers)
   {
     case Ok(p) -> p
     case Error(e) -> return Result.Error(e)

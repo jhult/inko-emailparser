@@ -880,6 +880,40 @@ a=ZZb
     }
   })
 
+  t.test('strict_mode_reaches_multipart_attachment_decoders', fn (t) {
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Strict
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="f.bin"
+Content-Transfer-Encoding: base64
+
+ab$d
+--b--'
+
+    let lax_handler = MemoryBufferingHandler.new
+
+    match StreamingParser.new.parse_stream(email, lax_handler) {
+      case Ok(_) -> {}
+      case Error(e) -> t.equal('should parse lax', 'got error: ' + e.to_message)
+    }
+
+    let mut config = StreamingConfig.new
+
+    config.strict_mode = true
+
+    let strict_parser = StreamingParser.with_config(config)
+    let strict_handler = MemoryBufferingHandler.new
+
+    match strict_parser.parse_stream(email, strict_handler) {
+      case Ok(_) -> t.false(true)
+      case Error(_) -> t.true(true)
+    }
+  })
+
   t.test('malformed_part_content_type_keeps_body', fn (t) {
     let mut config = StreamingConfig.new
 
