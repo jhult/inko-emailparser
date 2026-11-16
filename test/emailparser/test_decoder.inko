@@ -280,6 +280,12 @@ fn pub tests(t: mut Tests) {
     t.equal(decoded, 'Hello Grüße')
   })
 
+  t.test('decode_header_value_unpadded_base64', fn (t) {
+    let decoded = decode_header_value_impl('=?utf-8?B?SGVsbG8?=')
+
+    t.equal(decoded, 'Hello')
+  })
+
   t.test('decode_header_value_raw_multibyte_payload', fn (t) {
     # Illegal but common: raw UTF-8 inside a Q encoded word
     let decoded = decode_header_value_impl('=?utf-8?Q?😀?=')
