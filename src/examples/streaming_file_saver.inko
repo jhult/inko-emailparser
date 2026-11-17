@@ -15,14 +15,20 @@
 # - Verbose progress output
 # - I/O error handling
 #
-# The output directory is created on start. Attachments without a usable
-# filename (or with one that cannot be sanitized) are skipped.
+# Each message is written to its own randomly named subdirectory of the output
+# directory. That subdirectory is created with `create_directory`, which fails
+# if the name already exists, so an attachment can never be truncated through a
+# pre-existing file or symlink. The output directory itself must be private to
+# the process: anyone who can create entries in it can still race the saver.
+# Attachments without a usable filename (or with one that cannot be
+# sanitized) are skipped.
 
 import emailparser.email_generator (TestAttachment, TestDataGenerator)
 import emailparser.error (Error)
 import emailparser.header (sanitize_filename)
 import emailparser.streaming (AttachmentInfo, StreamHandler, StreamingParser)
 import std.fs.file (WriteOnlyFile)
+import std.rand (Random)
 import std.stdio (Stderr, Stdout)
 
 # FileAttachmentSaver saves attachments to disk incrementally
@@ -32,6 +38,7 @@ import std.stdio (Stderr, Stdout)
 # to avoid loading large attachments into memory.
 type pub FileAttachmentSaver {
   let mut @output_dir: String
+  let mut @message_dir: String
   let mut @current_file: Option[OutputFile]
   let mut @attachment_count: Int
   let mut @verbose: Bool
@@ -71,6 +78,7 @@ impl FileAttachmentSaver {
   fn pub static new(output_dir: String, verbose: Bool) -> FileAttachmentSaver {
     FileAttachmentSaver(
       output_dir: output_dir,
+      message_dir: output_dir,
       current_file: Option.None,
       attachment_count: 0,
       verbose: verbose,
@@ -85,17 +93,49 @@ impl FileAttachmentSaver {
   # Create a safe output path for an attachment
   #
   # Uses the library's `sanitize_filename`, which strips path components,
-  # control characters, bidi overrides and Windows-reserved names.
+  # control characters, bidi overrides and Windows-reserved names. Paths that
+  # already exist are refused rather than truncated.
   fn mut create_output_path(filename: String) -> Option[String] {
     match sanitize_filename(filename) {
       case Some(safe_name) -> {
-        Option.Some(
-          @output_dir + '/' + @attachment_count.to_string + '_' + safe_name,
-        )
+        let path = @message_dir
+          + '/'
+          + @attachment_count.to_string
+          + '_'
+          + safe_name
+
+        if path.to_path.exists? { Option.None } else { Option.Some(path) }
       }
       case None -> Option.None
     }
   }
+}
+
+# Create a fresh, randomly named directory for one message
+#
+# `create_directory` (not `create_directory_all`) fails when the path already
+# exists, so a collision with a pre-existing entry is retried with a new name
+# instead of writing through it.
+fn create_message_directory(output_dir: String) -> Result[String, String] {
+  match output_dir.to_path.create_directory_all {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error('cannot create output directory: ${e}')
+  }
+
+  let mut rng = Random.new
+
+  for _ in 0.until(16) {
+    let path = output_dir
+      + '/message-'
+      + rng.int_between(0, 1000000000000000000).to_string
+
+    match path.to_path.create_directory {
+      case Ok(_) -> return Result.Ok(path)
+      case Error(_) -> {}
+    }
+  }
+
+  Result.Error('cannot create a fresh directory in ' + output_dir)
 }
 
 impl StreamHandler for FileAttachmentSaver {
@@ -107,12 +147,10 @@ impl StreamHandler for FileAttachmentSaver {
     # message's descriptor open.
     @current_file = Option.None
 
-    # Create the output directory (and any parents) before writing files
-    match @output_dir.to_path.create_directory_all {
-      case Ok(_) -> {}
-      case Error(e) -> {
-        return Result.Error('cannot create output directory: ${e}')
-      }
+    # Create a fresh directory for this message before writing files
+    match create_message_directory(@output_dir) {
+      case Ok(dir) -> @message_dir = dir
+      case Error(e) -> return Result.Error(e)
     }
 
     if @verbose {
@@ -322,7 +360,7 @@ type async Main {
 
     let _ = out.print('=== FileAttachmentSaver Example ===')
     let _ = out.print(
-      'Attachments are written to ./attachments as their chunks arrive',
+      'Attachments are written to a fresh subdirectory of ./attachments',
     )
     let _ = out.print('')
 
