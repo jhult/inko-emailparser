@@ -125,7 +125,6 @@ type pub enum Error {
     Option[String],
   )
   case MultipartWithoutParts(Severity, Option[Int], Option[Int], Option[String])
-  case NoBodyInPart(Severity, Option[Int], Option[Int], Option[String])
 
   # Generic parsing errors
   case ParseError(Severity, String, Option[Int], Option[Int], Option[String])
@@ -387,15 +386,6 @@ impl Error {
           fragment: frag.clone,
         )
       }
-      case NoBodyInPart(sev, line, pos, frag) -> {
-        ErrorContext(
-          severity: sev.copy,
-          message: 'No body found in multipart part',
-          line: line.clone,
-          position: pos.clone,
-          fragment: frag.clone,
-        )
-      }
       case ParseError(sev, message, line, pos, frag) -> {
         ErrorContext(
           severity: sev.copy,
@@ -488,7 +478,6 @@ impl Error {
       case BoundaryNotFound(_, _, _, _) -> 'BoundaryNotFound'
       case InvalidBoundary(_, _, _, _, _) -> 'InvalidBoundary'
       case MultipartWithoutParts(_, _, _, _) -> 'MultipartWithoutParts'
-      case NoBodyInPart(_, _, _, _) -> 'NoBodyInPart'
       case ParseError(_, _, _, _, _) -> 'ParseError'
       case DecodingFailed(_, _, _, _, _, _) -> 'DecodingFailed'
       case DecodedSizeTooLarge(_, _, _, _, _, _, _) -> 'DecodedSizeTooLarge'
@@ -554,7 +543,6 @@ fn pub is_recoverable_part_error(error: ref Error) -> Bool {
     case DuplicateHeader(_, _, _, _, _) -> true
     case DecodingFailed(_, _, _, _, _, _) -> true
     case InvalidContentType(_, _, _, _, _) -> true
-    case NoBodyInPart(_, _, _, _) -> true
     case MultipartWithoutParts(_, _, _, _) -> true
     # Size and structural limits abort the parse.
     case EmailSizeTooLarge(_, _, _, _, _, _) -> false

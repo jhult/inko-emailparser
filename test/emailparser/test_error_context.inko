@@ -89,7 +89,7 @@ fn pub tests(t: mut Tests) {
   })
 
   t.test('error_with_line_and_fragment', fn (t) {
-    let error = Error.NoBodyInPart(
+    let error = Error.MultipartWithoutParts(
       Severity.Error,
       Option.Some(100),
       Option.None,
@@ -100,7 +100,7 @@ fn pub tests(t: mut Tests) {
 
     t.true(message.contains?('Line 100'))
     t.true(message.contains?('Content-Type: text/plain'))
-    t.true(message.contains?('No body found'))
+    t.true(message.contains?('no body parts'))
     t.false(message.contains?('position'))
   })
 
