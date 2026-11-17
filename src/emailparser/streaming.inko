@@ -1416,40 +1416,27 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
     case Error(e) -> return Result.Error(e)
   }
 
-  let mut wrapper = MultipartHandlerWrapper(
-    handler: handler,
-    attachment_count: 0,
-    current_info: Option.None,
-    sink: Option.None,
-    current_content_type: 'text/plain',
-    max_size: max_size,
-    chunk_size: chunk_size,
-    max_headers: max_headers,
-    strict_mode: strict_mode,
-    max_attachments: max_attachments,
-    pending_attachment: recover ByteArray.new,
-    depth: 0,
-    max_depth: max_depth,
-    nested_buffer: Option.None,
-    nested_boundary: Option.None,
-    nested_budget: max_email_size,
-    nested_size: 0,
+  let mut wrapper = MultipartHandlerWrapper.new(
+    handler,
+    max_size,
+    chunk_size,
+    max_headers,
+    strict_mode,
+    max_attachments,
+    0,
+    max_depth,
+    0,
+    max_email_size,
   )
 
   # Feed initial body data
   if initial_body.size > 0 {
-    match parser.feed(ref initial_body, wrapper) {
-      case Ok(_) -> {}
-      case Error(e) -> {
-        if strict_mode or !is_recoverable_part_error(ref e) {
-          return Result.Error(e)
-        }
-
-        # The state machine cannot resynchronise, so the rest of the stream
-        # is dropped. Report it instead of failing silently.
-        wrapper.report_part_error(e)
-        return Result.Ok(wrapper.attachment_count)
-      }
+    match
+      feed_multipart(mut parser, ref initial_body, mut wrapper, strict_mode)
+    {
+      case Ok(true) -> {}
+      case Ok(false) -> return Result.Ok(wrapper.attachment_count)
+      case Error(e) -> return Result.Error(e)
     }
   }
 
@@ -1474,35 +1461,84 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
           )
         }
 
-        match parser.feed(ref chunk, wrapper) {
-          case Ok(_) -> {}
-          case Error(e) -> {
-            if strict_mode or !is_recoverable_part_error(ref e) {
-              return Result.Error(e)
-            }
-
-            # The state machine cannot resynchronise after a malformed part,
-            # so the remaining chunks are dropped. Report the loss through
-            # `on_error` instead of returning Ok as if nothing happened.
-            wrapper.report_part_error(e)
-            break
-          }
+        match feed_multipart(mut parser, ref chunk, mut wrapper, strict_mode) {
+          case Ok(true) -> {}
+          case Ok(false) -> break
+          case Error(e) -> return Result.Error(e)
         }
       }
       case Error(e) -> return Result.Error(Error.from_string(e))
     }
   }
 
-  match parser.finish(wrapper) {
+  match finish_multipart(mut parser, mut wrapper, strict_mode) {
     case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
+  }
+
+  Result.Ok(wrapper.attachment_count)
+}
+
+# Feed one chunk to a multipart parser
+#
+# Returns `Ok(true)` while the stream can continue, `Ok(false)` once a
+# recoverable part error ended it, and an error when parsing cannot continue.
+# The state machine cannot resynchronise after a malformed part, so the loss is
+# reported through `on_error` instead of being dropped silently.
+fn feed_multipart[H: mut + StreamHandler](
+  parser: mut MultipartStreamParser,
+  data: ref ByteArray,
+  wrapper: mut MultipartHandlerWrapper[H],
+  strict_mode: Bool,
+) -> Result[Bool, Error] {
+  match parser.feed(ref data, wrapper) {
+    case Ok(_) -> Result.Ok(true)
     case Error(e) -> {
       if strict_mode or !is_recoverable_part_error(ref e) {
         return Result.Error(e)
       }
+
+      wrapper.report_part_error(e)
+      Result.Ok(false)
     }
   }
+}
 
-  Result.Ok(wrapper.attachment_count)
+# Finish a multipart stream, tolerating recoverable part errors
+fn finish_multipart[H: mut + StreamHandler](
+  parser: mut MultipartStreamParser,
+  wrapper: mut MultipartHandlerWrapper[H],
+  strict_mode: Bool,
+) -> Result[Int, Error] {
+  match parser.finish(wrapper) {
+    case Ok(count) -> Result.Ok(count)
+    case Error(e) -> {
+      if strict_mode or !is_recoverable_part_error(ref e) {
+        return Result.Error(e)
+      }
+
+      Result.Ok(wrapper.attachment_count)
+    }
+  }
+}
+
+# Parse a complete multipart document held in a single buffer
+fn run_multipart[H: mut + StreamHandler](
+  parser: mut MultipartStreamParser,
+  wrapper: mut MultipartHandlerWrapper[H],
+  data: ref ByteArray,
+  strict_mode: Bool,
+) -> Result[Int, Error] {
+  match feed_multipart(mut parser, ref data, mut wrapper, strict_mode) {
+    case Ok(true) -> {}
+    case Ok(false) -> return Result.Ok(wrapper.attachment_count)
+    case Error(e) -> return Result.Error(e)
+  }
+
+  match finish_multipart(mut parser, mut wrapper, strict_mode) {
+    case Ok(_) -> Result.Ok(wrapper.attachment_count)
+    case Error(e) -> Result.Error(e)
+  }
 }
 
 # Helper type for multipart streaming parser
@@ -1898,7 +1934,7 @@ fn finish_nested[H: mut + StreamHandler](
   max_depth: Int,
   nested_budget: Int,
 ) -> Result[Int, Error] {
-  if depth + 1 > max_depth {
+  if depth + 1 >= max_depth {
     return Result.Error(
       Error.MultipartDepthExceeded(
         Severity.Error,
@@ -1918,45 +1954,25 @@ fn finish_nested[H: mut + StreamHandler](
     case Error(e) -> return Result.Error(e)
   }
 
-  let mut nested_wrapper = MultipartHandlerWrapper(
-    handler: handler,
-    attachment_count: attachment_count,
-    current_info: Option.None,
-    sink: Option.None,
-    current_content_type: 'text/plain',
-    max_size: max_size,
-    chunk_size: chunk_size,
-    max_headers: max_headers,
-    strict_mode: strict_mode,
-    max_attachments: max_attachments,
-    pending_attachment: recover ByteArray.new,
-    depth: depth + 1,
-    max_depth: max_depth,
-    nested_buffer: Option.None,
-    nested_boundary: Option.None,
-    nested_budget: nested_budget,
-    nested_size: 0,
+  let mut nested_wrapper = MultipartHandlerWrapper.new(
+    handler,
+    max_size,
+    chunk_size,
+    max_headers,
+    strict_mode,
+    max_attachments,
+    depth + 1,
+    max_depth,
+    attachment_count,
+    nested_budget,
   )
 
-  match nested_parser.feed(ref nested_buffer, nested_wrapper) {
-    case Ok(_) -> {}
-    case Error(e) -> {
-      if strict_mode or !is_recoverable_part_error(ref e) {
-        return Result.Error(e)
-      }
-    }
-  }
-
-  match nested_parser.finish(nested_wrapper) {
-    case Ok(_) -> {}
-    case Error(e) -> {
-      if strict_mode or !is_recoverable_part_error(ref e) {
-        return Result.Error(e)
-      }
-    }
-  }
-
-  Result.Ok(nested_wrapper.attachment_count)
+  run_multipart(
+    mut nested_parser,
+    mut nested_wrapper,
+    ref nested_buffer,
+    strict_mode,
+  )
 }
 
 # Parse multipart with streaming using MultipartStreamParser
@@ -1993,50 +2009,62 @@ fn parse_multipart_stream[H: mut + StreamHandler](
     case Error(e) -> return Result.Error(e)
   }
 
-  let mut wrapper = MultipartHandlerWrapper(
-    handler: handler,
-    attachment_count: 0,
-    current_info: Option.None,
-    sink: Option.None,
-    current_content_type: 'text/plain',
-    max_size: max_size,
-    chunk_size: chunk_size,
-    max_headers: max_headers,
-    strict_mode: strict_mode,
-    max_attachments: max_attachments,
-    pending_attachment: recover ByteArray.new,
-    depth: 0,
-    max_depth: max_depth,
-    nested_buffer: Option.None,
-    nested_boundary: Option.None,
-    nested_budget: max_email_size,
-    nested_size: 0,
+  let mut wrapper = MultipartHandlerWrapper.new(
+    handler,
+    max_size,
+    chunk_size,
+    max_headers,
+    strict_mode,
+    max_attachments,
+    0,
+    max_depth,
+    0,
+    max_email_size,
   )
 
   let data = raw.to_byte_array
 
-  match parser.feed(ref data, wrapper) {
-    case Ok(_) -> {}
-    case Error(e) -> {
-      if strict_mode or !is_recoverable_part_error(ref e) {
-        return Result.Error(e)
-      }
-    }
-  }
-
-  match parser.finish(wrapper) {
-    case Ok(_) -> {}
-    case Error(e) -> {
-      if strict_mode or !is_recoverable_part_error(ref e) {
-        return Result.Error(e)
-      }
-    }
-  }
-
-  Result.Ok(wrapper.attachment_count)
+  run_multipart(mut parser, mut wrapper, ref data, strict_mode)
 }
 
 impl MultipartHandlerWrapper if H: mut + StreamHandler {
+  # Create a wrapper with the shared defaults
+  #
+  # The three parse paths (whole buffer, async reader, nested part) previously
+  # spelled out the same seventeen fields, which let their defaults drift.
+  fn pub static new(
+    handler: mut H,
+    max_size: Int,
+    chunk_size: Int,
+    max_headers: Int,
+    strict_mode: Bool,
+    max_attachments: Int,
+    depth: Int,
+    max_depth: Int,
+    attachment_count: Int,
+    nested_budget: Int,
+  ) -> Self {
+    MultipartHandlerWrapper(
+      handler: handler,
+      attachment_count: attachment_count,
+      current_info: Option.None,
+      sink: Option.None,
+      current_content_type: 'text/plain',
+      max_size: max_size,
+      chunk_size: chunk_size,
+      max_headers: max_headers,
+      strict_mode: strict_mode,
+      max_attachments: max_attachments,
+      pending_attachment: recover ByteArray.new,
+      depth: depth,
+      max_depth: max_depth,
+      nested_buffer: Option.None,
+      nested_boundary: Option.None,
+      nested_budget: nested_budget,
+      nested_size: 0,
+    )
+  }
+
   # Report a recoverable part error to the caller's handler
   #
   # The multipart state machine has no resynchronisation, so a recoverable
