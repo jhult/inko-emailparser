@@ -113,6 +113,13 @@ fn pub tests(t: mut Tests) {
     t.equal(sanitize_filename('dir/file'), Option.Some('file'))
   })
 
+  t.test('sanitize_filename_strips_line_separators', fn (t) {
+    t.equal(
+      sanitize_filename('a\u{2028}b\u{2029}c.txt'),
+      Option.Some('abc.txt'),
+    )
+  })
+
   t.test('sanitize_filename_dots_inside_name', fn (t) {
     t.equal(sanitize_filename('report..pdf'), Option.Some('report..pdf'))
   })
