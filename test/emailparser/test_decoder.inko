@@ -8,6 +8,7 @@ import emailparser.decoder (
   decode_body_impl, decode_charset, decode_header_value_impl,
   decode_rfc2047_quoted_printable, decode_rfc2047_word,
 )
+import std.bytes (ByteArray)
 import std.test (Tests)
 
 fn pub tests(t: mut Tests) {
@@ -346,5 +347,38 @@ fn pub tests(t: mut Tests) {
     let decoded = decode_header_value_impl('Re: =? hmm =?utf-8?B?SGVsbG8=?=')
 
     t.equal(decoded, 'Re: =? hmm Hello')
+  })
+
+  t.test('decode_charset_keeps_utf8_bom_bytes_in_latin1', fn (t) {
+    let mut bytes = ByteArray.new
+
+    bytes.push(0xEF)
+    bytes.push(0xBB)
+    bytes.push(0xBF)
+
+    t.equal(decode_charset(bytes, 'iso-8859-1'), 'ï»¿')
+  })
+
+  t.test('decode_charset_strips_utf8_bom_for_utf8', fn (t) {
+    let mut bytes = ByteArray.new
+
+    bytes.push(0xEF)
+    bytes.push(0xBB)
+    bytes.push(0xBF)
+    bytes.push(0x48)
+    bytes.push(0x69)
+
+    t.equal(decode_charset(bytes, 'utf-8'), 'Hi')
+  })
+
+  t.test('decode_charset_bare_utf16_defaults_to_little_endian', fn (t) {
+    let mut bytes = ByteArray.new
+
+    bytes.push(0x48)
+    bytes.push(0x00)
+    bytes.push(0x69)
+    bytes.push(0x00)
+
+    t.equal(decode_charset(bytes, 'utf-16'), 'Hi')
   })
 }

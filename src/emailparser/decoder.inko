@@ -767,12 +767,17 @@ fn pub decode_charset(bytes: ByteArray, charset: String) -> String {
     or lower == 'utf16'
     or is_utf16le
     or is_utf16be
-  let mut little_endian = is_utf16le
+  let mut little_endian = is_utf16le or (is_utf16 and !is_utf16be)
   let mut start = 0
 
-  # BOMs take precedence over the label
+  # BOMs take precedence over the label. A UTF-8 BOM is only meaningful when
+  # the bytes will be decoded as UTF-8 (or an unknown label falls back to it);
+  # for Latin-1/Windows-1252 those bytes are real characters.
   if
-    bytes.size >= 3
+    !is_cp1252
+      and !is_latin1
+      and !is_utf16
+      and bytes.size >= 3
       and byte_at(ref bytes, 0) == 0xEF
       and byte_at(ref bytes, 1) == 0xBB
       and byte_at(ref bytes, 2) == 0xBF
