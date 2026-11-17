@@ -345,17 +345,31 @@ fn pub mut on_attachment_chunk(
 **Old code (EmailParser)**:
 
 ```inko
+import std.fs.file (WriteOnlyFile)
+
+# `attachments/` must already exist (create it with
+# `'attachments'.to_path.create_directory_all` if not), and `name` should be
+# sanitized first (see `emailparser.header.sanitize_filename`).
 let parser = EmailParser.new
 match parser.parse(email_string) {
   case Ok(message) -> {
     for att in message.attachments.iter {
       match att.filename {
         case Some(name) -> {
-          let path = "attachments/${name}"
-          match File.new(path) {
+          let path = 'attachments/' + name
+          match WriteOnlyFile.new(path.to_path) {
             case Ok(file) -> {
-              file.write_bytes(att.content)
-              file.flush
+              let mut file = file
+
+              match file.write(ref att.content) {
+                case Ok(_) -> {}
+                case Error(e) -> handle_error(e)
+              }
+
+              match file.flush {
+                case Ok(_) -> {}
+                case Error(e) -> handle_error(e)
+              }
             }
             case Error(e) -> handle_error(e)
           }
@@ -371,36 +385,44 @@ match parser.parse(email_string) {
 **New code (StreamingParser)**:
 
 ```inko
-import std.fs.file (File)
+import emailparser.header (sanitize_filename)
+import std.fs.file (WriteOnlyFile)
 
+# `attachments/` must already exist (create it with
+# `'attachments'.to_path.create_directory_all` if not), and it must be private
+# to the process that writes into it.
 type AttachmentSaver {
-  let mut @current_file: Option[File]
+  let mut @current_file: Option[WriteOnlyFile]
 }
 
 impl StreamHandler for AttachmentSaver {
   fn pub mut on_attachment_begin(info: ref AttachmentInfo) -> Result[Int, String] {
-    match info.filename {
-      case Some(name) -> {
-        let path = "attachments/${name}"
-        match File.new(path) {
-          case Ok(file) -> {
-            @current_file = Option.Some(file)
-            Result.Ok(0)
-          }
-          case Error(e) -> Result.Error(e.to_string)
-        }
+    let safe_name = match info.filename {
+      case Some(name) -> match sanitize_filename(name.clone) {
+        case Some(value) -> value
+        case None -> return Result.Ok(0)
       }
-      case None -> Result.Ok(0)
+      case None -> return Result.Ok(0)
+    }
+
+    let path = 'attachments/' + safe_name
+
+    match WriteOnlyFile.new(path.to_path) {
+      case Ok(file) -> {
+        @current_file = Option.Some(file)
+        Result.Ok(0)
+      }
+      case Error(e) -> Result.Error(e.to_string)
     }
   }
-  
+
   fn pub mut on_attachment_chunk(
     chunk: ByteArray,
     info: ref AttachmentInfo,
   ) -> Result[Int, String] {
     match @current_file {
-      case Some(ref mut file) -> {
-        match file.write_bytes(chunk) {
+      case Some(mut file) -> {
+        match file.write(ref chunk) {
           case Ok(_) -> Result.Ok(0)
           case Error(e) -> Result.Error(e.to_string)
         }
@@ -408,10 +430,10 @@ impl StreamHandler for AttachmentSaver {
       case None -> Result.Ok(0)
     }
   }
-  
+
   fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String] {
-    match @current_file {
-      case Some(ref mut file) -> {
+    let result = match @current_file {
+      case Some(mut file) -> {
         match file.flush {
           case Ok(_) -> Result.Ok(0)
           case Error(e) -> Result.Error(e.to_string)
@@ -419,15 +441,19 @@ impl StreamHandler for AttachmentSaver {
       }
       case None -> Result.Ok(0)
     }
+
+    # Dropping the file closes it, so clear the slot before the flush result is
+    # returned.
     @current_file = Option.None
-    Result.Ok(0)
+
+    result
   }
-  
+
   # ... other callbacks
 }
 
 let parser = StreamingParser.new
-let handler = AttachmentSaver.new
+let mut handler = AttachmentSaver(current_file: Option.None)
 match parser.parse_stream(email_string, handler) {
   case Ok(result) -> {}
   case Error(e) -> handle_error(e)
@@ -1030,13 +1056,13 @@ fn pub mut on_attachment_chunk(chunk: ByteArray, info: ref AttachmentInfo) -> Re
 
 # Good: Streaming to file
 type GoodHandler {
-  let mut @current_file: Option[File]
+  let mut @current_file: Option[WriteOnlyFile]
 }
 
 fn pub mut on_attachment_chunk(chunk: ByteArray, info: ref AttachmentInfo) -> Result[Int, String] {
   match @current_file {
-    case Some(ref mut file) -> {
-      file.write_bytes(chunk)
+    case Some(mut file) -> {
+      let _ = file.write(ref chunk)
       Result.Ok(0)
     }
     case None -> Result.Ok(0)
