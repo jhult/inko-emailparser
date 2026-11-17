@@ -812,6 +812,28 @@ Hi there'
     }
   })
 
+  t.test('close_delimiter_with_trailing_garbage_is_body', fn (t) {
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Garbage
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+Hi there
+--b--not-a-delimiter'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> {
+        t.true(handler.get_text_body.contains?('--b--not-a-delimiter'))
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+  })
+
   t.test('padded_close_delimiter_at_eof_keeps_body', fn (t) {
     let parser = StreamingParser.new
     let handler = MemoryBufferingHandler.new

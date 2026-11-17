@@ -128,11 +128,20 @@ fn pub is_valid_boundary_tail(
       } else if b == 10 {
         true
       } else if b == 45 {
-        # Close delimiter is exactly "--"
+        # Close delimiter is exactly "--" plus optional transport padding and
+        # a line break (or the end of the input). Anything else is body text.
         if pos + 1 >= buffer.size { return at_eof }
 
         match buffer.get(pos + 1) {
-          case Ok(following) -> following == 45
+          case Ok(following) -> {
+            if following != 45 { return false }
+
+            # Nothing follows the closing "--" in this buffer. Streaming
+            # callers can treat it as the end; a buffered parse is at EOF.
+            if pos + 2 >= buffer.size { return true }
+
+            valid_transport_padding(ref buffer, pos + 2, at_eof)
+          }
           case Error(_) -> false
         }
       } else if b == 32 or b == 9 {
