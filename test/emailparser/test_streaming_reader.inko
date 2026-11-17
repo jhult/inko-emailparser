@@ -454,6 +454,35 @@ data'
     }
   })
 
+  t.test('parse_async_reader_reports_recoverable_part_errors', fn (t) {
+    let mut parser = StreamingParser.new
+    let mut handler = CollectingHandler.new
+    # The middle part has an empty header name, which is recoverable in
+    # permissive mode. The reader cannot resynchronise, but the loss must be
+    # visible through on_error instead of a silent Ok.
+    let raw = 'From: a@example.com
+To: b@example.com
+Subject: bad part
+Content-Type: multipart/mixed; boundary=bnd
+
+--bnd
+Content-Type: text/plain
+
+first
+--bnd
+: empty name
+
+second
+--bnd--'
+
+    let mut reader = ByteArrayReader.from_string(raw)
+
+    match parser.parse_async_reader(mut reader, mut handler) {
+      case Ok(_) -> t.true(handler.errors_received >= 1)
+      case Error(e) -> panic('Permissive parse failed: ${e.to_message}')
+    }
+  })
+
   t.test('parse_async_reader_header_section_limit', fn (t) {
     let mut parser = StreamingParser.new
     let mut handler = CollectingHandler.new

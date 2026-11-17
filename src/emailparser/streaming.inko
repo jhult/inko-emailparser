@@ -1503,6 +1503,11 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
         if strict_mode or !is_recoverable_part_error(ref e) {
           return Result.Error(e)
         }
+
+        # The state machine cannot resynchronise, so the rest of the stream
+        # is dropped. Report it instead of failing silently.
+        wrapper.report_part_error(e)
+        return Result.Ok(wrapper.attachment_count)
       }
     }
   }
@@ -1535,6 +1540,10 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
               return Result.Error(e)
             }
 
+            # The state machine cannot resynchronise after a malformed part,
+            # so the remaining chunks are dropped. Report the loss through
+            # `on_error` instead of returning Ok as if nothing happened.
+            wrapper.report_part_error(e)
             break
           }
         }
@@ -2084,6 +2093,16 @@ fn parse_multipart_stream[H: mut + StreamHandler](
   }
 
   Result.Ok(wrapper.attachment_count)
+}
+
+impl MultipartHandlerWrapper if H: mut + StreamHandler {
+  # Report a recoverable part error to the caller's handler
+  #
+  # The multipart state machine has no resynchronisation, so a recoverable
+  # error still ends the stream. Reporting it keeps the data loss observable.
+  fn pub mut report_part_error(failure: Error) {
+    let _ = @handler.on_error(ref failure)
+  }
 }
 
 # Extract and sanitize the filename from a Content-Disposition value
