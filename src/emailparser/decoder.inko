@@ -54,7 +54,6 @@ import emailparser.error (Severity)
 import emailparser.hex (parse_hex_byte, two_bytes_to_hex_string)
 import emailparser.limits (MAX_HEADER_ITERATIONS)
 import emailparser.size_tracker (SizeTracker)
-import emailparser.streaming_decoder (QuotedPrintableStreamingDecoder)
 import std.base64 (Decoder)
 import std.bytes (ByteArray)
 import std.result (Result)
@@ -84,44 +83,15 @@ fn decode_body_bytes_impl(
   if enc_lower == 'base64' {
     decode_base64_body(raw, encoding, max_size)
   } else if enc_lower == 'quoted-printable' {
-    # Decode incrementally so the output limit is enforced while allocating,
-    # instead of decoding the whole body and checking afterwards.
-    let mut decoder = QuotedPrintableStreamingDecoder.new(max_size, true, false)
-    let decoded = ByteArray.new
+    # The whole body is available at once, so the shared state machine decodes
+    # it directly; the streaming decoder only helps for genuinely chunked input
+    # (see `part_sink`). The limit is checked on the result, like base64.
+    let decoded = decode_qp_bytes(raw, false, true)
 
-    match decoder.feed(raw) {
-      case Ok(bytes) -> decoded.append(bytes)
-      case Error(e) -> {
-        return Result.Error(
-          Error.DecodingFailed(
-            Severity.Error,
-            encoding,
-            e,
-            Option.None,
-            Option.None,
-            Option.None,
-          ),
-        )
-      }
+    match SizeTracker.check_allocation(0, decoded.size, max_size) {
+      case Ok(_) -> Result.Ok(decoded)
+      case Error(e) -> Result.Error(e)
     }
-
-    match decoder.finish {
-      case Ok(bytes) -> decoded.append(bytes)
-      case Error(e) -> {
-        return Result.Error(
-          Error.DecodingFailed(
-            Severity.Error,
-            encoding,
-            e,
-            Option.None,
-            Option.None,
-            Option.None,
-          ),
-        )
-      }
-    }
-
-    Result.Ok(decoded)
   } else {
     match SizeTracker.check_allocation(0, raw.size, max_size) {
       case Ok(_) -> Result.Ok(raw.to_byte_array)

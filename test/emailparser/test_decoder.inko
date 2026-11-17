@@ -37,7 +37,7 @@ fn pub tests(t: mut Tests) {
     }
   })
 
-  # Test that quoted-printable decoding rejects oversized content early
+  # Test that quoted-printable decoding rejects oversized content
   t.test('qp_oversized_content', fn (t) {
     # Create a QP-encoded string with many encoded bytes
     # Each =XX sequence decodes to 1 byte
@@ -51,7 +51,7 @@ fn pub tests(t: mut Tests) {
       i = i + 1
     }
 
-    # This should fail early with max_size of 50KB
+    # This should fail with max_size of 50KB (the decoded size is checked)
     match decode_body_impl(large_qp, 'quoted-printable', 50 * 1024) {
       case Ok(_) -> t.false(true) # Force failure
       case Error(_) -> t.true(true) # Expected error
