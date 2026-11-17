@@ -29,6 +29,14 @@ This library includes the following built-in protections:
 - **`max_email_size`**: Default 50 MB - Limits total email size to prevent memory exhaustion
 - **`max_attachment_size`**: Default 25 MB - Limits individual attachment size
 
+`max_email_size` bounds the memory the parser allocates for the message, not
+the memory the caller already spent on it. `EmailParser.parse` and
+`StreamingParser.parse_stream` both take the message as a `String`, so the
+whole message is in memory before the limit is checked and the limit only
+bounds the parser's own buffers. Use `parse_async_reader` (or feed
+`parse_stream` in chunks you control) when the input size must be bounded
+before it is read.
+
 ```inko
 import emailparser (EmailParser)
 import emailparser.limits (Limits)
@@ -75,7 +83,8 @@ still validate names before using them in filesystem paths.
 
 #### Input Validation
 
-- Email size validation before parsing begins
+- Email size validation before decoding begins (the caller still has to bound
+  the input it hands over; see Size Limits above)
 - Attachment size validation during decoding
 - Boundary string validation for multipart messages
 - Header folding/unfolding with iteration limits
