@@ -100,6 +100,23 @@ impl ContentScanner {
     found
   }
 
+  # Record one detection, warn about it and fail fast when configured
+  fn mut record(pattern: String, location: String) -> Result[Int, String] {
+    @patterns_found.push(pattern.clone)
+
+    let _ = Stderr.new.print(
+      "WARNING: Malicious pattern '" + pattern + "' found in " + location,
+    )
+
+    if @fail_fast {
+      return Result.Error(
+        'Malicious content detected in ' + location + ': ' + pattern,
+      )
+    }
+
+    Result.Ok(0)
+  }
+
   fn pub mut get_patterns_found -> Array[String] {
     @patterns_found.clone
   }
@@ -176,23 +193,10 @@ impl StreamHandler for ContentScanner {
 
     for (name, value) in headers.iter {
       let found = scan_text(value.clone)
+      let location = "header '" + name + "'"
 
       for pattern in found.iter {
-        @patterns_found.push(pattern.clone)
-
-        let _ = Stderr.new.print(
-          "WARNING: Malicious pattern '"
-            + pattern
-            + "' found in header '"
-            + name
-            + "'",
-        )
-
-        if @fail_fast {
-          return Result.Error(
-            "Malicious content detected in header '" + name + "': " + pattern,
-          )
-        }
+        let _ = try record(pattern.clone, location.clone)
       }
     }
 
@@ -209,17 +213,7 @@ impl StreamHandler for ContentScanner {
     let found = scan_text(chunk)
 
     for pattern in found.iter {
-      @patterns_found.push(pattern.clone)
-
-      let _ = Stderr.new.print(
-        "WARNING: Malicious pattern '" + pattern + "' found in text body",
-      )
-
-      if @fail_fast {
-        return Result.Error(
-          'Malicious content detected in text body: ' + pattern,
-        )
-      }
+      let _ = try record(pattern.clone, 'text body')
     }
 
     Result.Ok(0)
@@ -235,17 +229,7 @@ impl StreamHandler for ContentScanner {
     let found = scan_text(chunk)
 
     for pattern in found.iter {
-      @patterns_found.push(pattern.clone)
-
-      let _ = Stderr.new.print(
-        "WARNING: Malicious pattern '" + pattern + "' found in HTML body",
-      )
-
-      if @fail_fast {
-        return Result.Error(
-          'Malicious content detected in HTML body: ' + pattern,
-        )
-      }
+      let _ = try record(pattern.clone, 'HTML body')
     }
 
     Result.Ok(0)
@@ -283,17 +267,7 @@ impl StreamHandler for ContentScanner {
     let found = scan_binary(chunk)
 
     for pattern in found.iter {
-      @patterns_found.push(pattern.clone)
-
-      let _ = Stderr.new.print(
-        'WARNING: Malicious ' + pattern + ' found in attachment',
-      )
-
-      if @fail_fast {
-        return Result.Error(
-          'Malicious content detected in attachment: ' + pattern,
-        )
-      }
+      let _ = try record(pattern.clone, 'attachment')
     }
 
     Result.Ok(0)
