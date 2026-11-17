@@ -1556,7 +1556,7 @@ if
     # Nested multipart: buffer the part body and parse it as a new multipart
     # document when the part ends. Reject excessive nesting before buffering
     # anything so a depth bomb cannot allocate the whole nested payload first.
-    if ct_main.starts_with?('multipart/') {
+    if is_multipart(ct_main.clone) and !is_attachment {
       match get_param_value_impl(ref ct_params, 'boundary') {
         case Some(nested_boundary) -> {
           # Match the buffered parser: level `max_depth` itself is rejected,

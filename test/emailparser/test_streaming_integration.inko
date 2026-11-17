@@ -365,6 +365,34 @@ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
     }
   })
 
+  t.test('attached_multipart_is_attachment_not_nested_body', fn (t) {
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Forwarded
+Content-Type: multipart/mixed; boundary=outer
+
+--outer
+Content-Type: multipart/digest; boundary=inner
+Content-Disposition: attachment; filename=forwarded.eml
+
+--inner
+Content-Type: text/plain
+
+inner text
+--inner--
+--outer--'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> {
+        t.equal(handler.get_text_body.trim, '')
+        t.equal(handler.get_attachments.size, 1)
+      }
+      case Error(e) -> panic('Parse failed: ${e.to_message}')
+    }
+  })
+
   t.test('email_with_multiple_attachments_streaming', fn (t) {
     let mut generator = TestDataGenerator.new
     let attachments = [
