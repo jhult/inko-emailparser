@@ -19,7 +19,6 @@ fi
 _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR="$_script_dir"
 readonly BENCHMARK_DIR="$SCRIPT_DIR"
-readonly PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 readonly RESULTS_DIR="$SCRIPT_DIR/results"
 
 # JSON/regression detection defaults
@@ -98,6 +97,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Resolve the comparison path before main() changes into the benchmark
+# directory, so paths are relative to the caller's working directory.
+if [[ -n "$COMPARE_FILE" && "$COMPARE_FILE" != /* ]]; then
+  COMPARE_FILE="$PWD/$COMPARE_FILE"
+fi
+
 # Print header function
 print_header() {
   local text="$1"
@@ -120,7 +125,54 @@ print_section() {
 parse_ms() {
   local label="$1"
   local output="$2"
-  echo "$output" | grep -A1 "$label" | grep -oE '[0-9]+ ms' | head -1 | grep -oE '[0-9]+' | head -1
+
+  { echo "$output" | grep -A1 "$label" | grep -oE '[0-9]+ ms' | head -1 |
+    grep -oE '[0-9]+' || true; }
+}
+
+# Read one benchmark value from a JSON results file
+json_value() {
+  local name="$1"
+  local file="$2"
+
+  { grep -oE "\"name\": \"${name}\", \"unit\": \"[a-z]+\", \"value\": [0-9]+" \
+      "$file" | grep -oE '[0-9]+$' | head -1 || true; }
+}
+
+# Compare one measurement against the baseline
+#
+# Returns non-zero when the measurement regressed beyond the tolerance and the
+# absolute difference is above the noise floor.
+check_regression() {
+  local name="$1"
+  local current="$2"
+  local baseline="$3"
+
+  if [[ -z "$baseline" ]]; then
+    echo "  $name: no baseline value, skipping"
+    return 0
+  fi
+
+  local diff=$((current - baseline))
+
+  if ((diff < 0)); then
+    diff=$((0 - diff))
+  fi
+
+  local tolerance=$((baseline * TOLERANCE_PERCENT / 100))
+
+  if ((diff < MIN_MS_DIFF)); then
+    echo "  $name: ${current} ms vs ${baseline} ms (within ${MIN_MS_DIFF} ms noise floor)"
+    return 0
+  fi
+
+  if ((current > baseline + tolerance)); then
+    echo "  $name: REGRESSION ${current} ms vs ${baseline} ms (+${diff} ms)"
+    return 1
+  fi
+
+  echo "  $name: ${current} ms vs ${baseline} ms (within ${TOLERANCE_PERCENT}%)"
+  return 0
 }
 
 # Main function
@@ -164,14 +216,22 @@ main() {
     header_ms=$(parse_ms "Benchmark 5:" "$parsing_output")
     address_ms=$(parse_ms "Benchmark 6:" "$parsing_output")
 
+    # A missing measurement must never be recorded as 0: a smaller-is-better
+    # chart would show a crash as a large improvement.
+    if [[ -z "$simple_ms" || -z "$multipart_ms" || -z "$base64_ms" ||
+      -z "$qp_ms" || -z "$header_ms" || -z "$address_ms" ]]; then
+      echo "Error: failed to parse all benchmark timings from the output" >&2
+      exit 1
+    fi
+
     cat >"$json_results_file" <<EOF
 [
-  {"name": "simple_email_1000", "unit": "ms", "value": ${simple_ms:-0}},
-  {"name": "multipart_500", "unit": "ms", "value": ${multipart_ms:-0}},
-  {"name": "base64_1000", "unit": "ms", "value": ${base64_ms:-0}},
-  {"name": "quoted_printable_1000", "unit": "ms", "value": ${qp_ms:-0}},
-  {"name": "header_parsing_10000", "unit": "ms", "value": ${header_ms:-0}},
-  {"name": "address_parsing_5000", "unit": "ms", "value": ${address_ms:-0}}
+  {"name": "simple_email_1000", "unit": "ms", "value": ${simple_ms}},
+  {"name": "multipart_500", "unit": "ms", "value": ${multipart_ms}},
+  {"name": "base64_1000", "unit": "ms", "value": ${base64_ms}},
+  {"name": "quoted_printable_1000", "unit": "ms", "value": ${qp_ms}},
+  {"name": "header_parsing_10000", "unit": "ms", "value": ${header_ms}},
+  {"name": "address_parsing_5000", "unit": "ms", "value": ${address_ms}}
 ]
 EOF
 
@@ -181,6 +241,32 @@ EOF
   # Compare with previous run if requested
   if [[ -n "$COMPARE_FILE" ]]; then
     print_header "Comparing with: $COMPARE_FILE"
+
+    if [[ ! -f "$COMPARE_FILE" ]]; then
+      echo "Error: comparison file not found: $COMPARE_FILE" >&2
+      exit 1
+    fi
+
+    local regressed=0
+
+    check_regression simple_email_1000 "$simple_ms" \
+      "$(json_value simple_email_1000 "$COMPARE_FILE")" || regressed=1
+    check_regression multipart_500 "$multipart_ms" \
+      "$(json_value multipart_500 "$COMPARE_FILE")" || regressed=1
+    check_regression base64_1000 "$base64_ms" \
+      "$(json_value base64_1000 "$COMPARE_FILE")" || regressed=1
+    check_regression quoted_printable_1000 "$qp_ms" \
+      "$(json_value quoted_printable_1000 "$COMPARE_FILE")" || regressed=1
+    check_regression header_parsing_10000 "$header_ms" \
+      "$(json_value header_parsing_10000 "$COMPARE_FILE")" || regressed=1
+    check_regression address_parsing_5000 "$address_ms" \
+      "$(json_value address_parsing_5000 "$COMPARE_FILE")" || regressed=1
+
+    if ((regressed)); then
+      echo "" >&2
+      echo "Performance regression detected" >&2
+      exit 1
+    fi
   fi
 
   print_header "Benchmark complete!"
