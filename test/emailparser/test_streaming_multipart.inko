@@ -502,6 +502,47 @@ Actual content
     t.equal(handler.parts_ended, 1)
   })
 
+  # A delimiter that straddles two reads must survive preamble trimming: the
+  # trim window has to keep the partial marker and its preceding line break.
+  t.test('multipart_preamble_split_boundary', fn (t) {
+    let mut parser = match
+      MultipartStreamParser.new(
+        boundary: 'pre',
+        strict_mode: false,
+        max_headers: 100,
+      )
+    {
+      case Ok(p) -> p
+      case Error(e) -> panic('Failed to create parser: ${e.to_message}')
+    }
+
+    let mut handler = TestHandler.new
+
+    let first = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\n--pre\r'
+    let first_data = first.to_byte_array
+
+    match parser.feed(ref first_data, mut handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic('Feed failed: ${e.to_message}')
+    }
+
+    let second = '\nContent-Type: text/plain\r\n\r\nBody\r\n--pre--'
+    let second_data = second.to_byte_array
+
+    match parser.feed(ref second_data, mut handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic('Feed failed: ${e.to_message}')
+    }
+
+    match parser.finish(mut handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic('Finish failed: ${e.to_message}')
+    }
+
+    t.equal(handler.parts_begun, 1)
+    t.equal(handler.data_chunks.get(0).or(''), 'Body')
+  })
+
   t.test('multipart_filename_extraction', fn (t) {
     let mut parser = match
       MultipartStreamParser.new(

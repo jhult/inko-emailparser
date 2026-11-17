@@ -350,7 +350,11 @@ fn process_preamble[H: mut + MultipartStreamHandler](
       let max_preamble = boundary_marker.size * 2
 
       if parser.buffer.size > max_preamble {
-        let keep_size = boundary_marker.size
+        # Keep the marker plus the line break that precedes it. The marker
+        # itself can arrive split across reads, so retaining exactly its size
+        # would drop the leading '-' of a straddling delimiter and make it
+        # unmatchable once the rest arrives.
+        let keep_size = boundary_marker.size + 2
         let skip_size = parser.buffer.size - keep_size
 
         parser.head_line_start = is_line_start(ref parser.buffer, skip_size)
