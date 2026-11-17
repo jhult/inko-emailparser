@@ -305,6 +305,25 @@ A'
     t.equal(addresses.get(1).or_panic.address, 'b@y.com')
   })
 
+  t.test('parse_address_list_mailbox_before_group', fn (t) {
+    let parser = EmailParser.new
+    let addresses = parser.parse_address_list(
+      Option.Some('Alice <alice@example.com>, team: bob@example.com;'),
+    )
+
+    t.equal(addresses.size, 2)
+    t.equal(addresses.get(0).or_panic.address, 'alice@example.com')
+    t.equal(addresses.get(1).or_panic.address, 'bob@example.com')
+  })
+
+  t.test('parse_address_list_ipv6_literal', fn (t) {
+    let parser = EmailParser.new
+    let addresses = parser.parse_address_list(Option.Some('user@[IPv6:::1]'))
+
+    t.equal(addresses.size, 1)
+    t.equal(addresses.get(0).or_panic.address, 'user@[IPv6:::1]')
+  })
+
   t.test('parse_address_list_quote_in_comment', fn (t) {
     let parser = EmailParser.new
     let addresses = parser.parse_address_list(

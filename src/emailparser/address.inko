@@ -52,9 +52,10 @@
 #
 import emailparser.ascii (
   ASCII_AT, ASCII_BACKSLASH, ASCII_COLON, ASCII_COMMA, ASCII_CR, ASCII_DOT,
-  ASCII_DQUOTE, ASCII_GREATER_THAN, ASCII_HYPHEN, ASCII_LESS_THAN, ASCII_LF,
-  ASCII_LPAREN, ASCII_RPAREN, ASCII_SEMICOLON, ASCII_SPACE,
-  UNICODE_REPLACEMENT_CHAR_UTF8, is_alnum, is_email_local_special,
+  ASCII_DQUOTE, ASCII_GREATER_THAN, ASCII_HYPHEN, ASCII_LEFT_BRACKET,
+  ASCII_LESS_THAN, ASCII_LF, ASCII_LPAREN, ASCII_RIGHT_BRACKET, ASCII_RPAREN,
+  ASCII_SEMICOLON, ASCII_SPACE, UNICODE_REPLACEMENT_CHAR_UTF8, is_alnum,
+  is_email_local_special,
 )
 import emailparser.limits (
   MAX_DOMAIN_SIZE, MAX_EMAIL_ADDRESS_SIZE, MAX_LOCAL_PART_SIZE,
@@ -92,11 +93,17 @@ type AddressScanner {
   let mut @in_quote: Bool
   let mut @paren_depth: Int
   let mut @angle_depth: Int
+  let mut @bracket_depth: Int
 }
 
 impl AddressScanner {
   fn static new -> AddressScanner {
-    AddressScanner(in_quote: false, paren_depth: 0, angle_depth: 0)
+    AddressScanner(
+      in_quote: false,
+      paren_depth: 0,
+      angle_depth: 0,
+      bracket_depth: 0,
+    )
   }
 
   # Classify the byte at `pos` and advance the state
@@ -134,10 +141,28 @@ impl AddressScanner {
           if @angle_depth > 0 { @angle_depth = @angle_depth - 1 }
 
           AddressStep.Content(byte)
+        } else if
+          byte == ASCII_LEFT_BRACKET
+            and @in_quote == false
+            and @paren_depth == 0
+        {
+          @bracket_depth = @bracket_depth + 1
+          AddressStep.Content(byte)
+        } else if
+          byte == ASCII_RIGHT_BRACKET
+            and @in_quote == false
+            and @paren_depth == 0
+        {
+          if @bracket_depth > 0 { @bracket_depth = @bracket_depth - 1 }
+
+          AddressStep.Content(byte)
         } else if @paren_depth > 0 {
           AddressStep.Comment
         } else if
-          byte == ASCII_COMMA and @in_quote == false and @angle_depth == 0
+          byte == ASCII_COMMA
+            and @in_quote == false
+            and @angle_depth == 0
+            and @bracket_depth == 0
         {
           AddressStep.Separator
         } else {
@@ -148,9 +173,13 @@ impl AddressScanner {
     }
   }
 
-  # Whether the scanner is outside quotes, comments and angle brackets
+  # Whether the scanner is outside quotes, comments, angle brackets and
+  # domain literals (`[192.0.2.1]`, `[IPv6:::1]`)
   fn top_level? -> Bool {
-    @in_quote == false and @paren_depth == 0 and @angle_depth == 0
+    @in_quote == false
+      and @paren_depth == 0
+      and @angle_depth == 0
+      and @bracket_depth == 0
   }
 
   # Whether the scanner is outside quotes and comments
@@ -620,7 +649,42 @@ fn pub parse_comma_separated_addresses(input: String) -> Array[EmailAddress] {
   result
 }
 
+# Find the last occurrence of `byte` before `before` that is outside quotes,
+# comments, angle brackets and domain literals
+fn find_last_top_level_byte_before(
+  input: String,
+  byte: Int,
+  before: Int,
+) -> Option[Int] {
+  let mut scanner = AddressScanner.new
+  let limit = if before < input.size { before } else { input.size }
+  let mut last = 0 - 1
+  let mut i = 0
+
+  while i < limit {
+    if scanner.top_level? {
+      match input.get(i) {
+        case Ok(current) -> if current == byte { last = i }
+        case Error(_) -> {}
+      }
+    }
+
+    match scanner.next(input, i) {
+      case Escaped(_) -> i = i + 2
+      case _ -> i = i + 1
+    }
+  }
+
+  if last >= 0 { Option.Some(last) } else { Option.None }
+}
+
 # Core parsing logic for address lists
+#
+# A colon only starts a group when a matching semicolon follows it. Without a
+# semicolon the colon is ordinary address text (for example in an unquoted
+# display name), so the whole list is parsed as mailboxes. Anything before a
+# group is its own comma-separated entry list; its last entry is the group
+# display name and is discarded.
 fn parse_address_list_impl(
   raw: ref Option[String],
   decoded: String,
@@ -638,6 +702,25 @@ fn parse_address_list_impl(
 
             match semi {
               case Some(pos) -> {
+                # Addresses listed before the group name are separate
+                # mailboxes. The group name itself is the final entry.
+                match
+                  find_last_top_level_byte_before(rest, ASCII_COMMA, colon)
+                {
+                  case Some(comma) -> {
+                    let before = rest.slice(0, comma).to_string
+
+                    for
+                      addr
+                    in
+                      parse_comma_separated_addresses(before).into_iter
+                    {
+                      result.push(addr)
+                    }
+                  }
+                  case None -> {}
+                }
+
                 let content = rest.slice(content_start, pos).to_string
 
                 for addr in parse_comma_separated_addresses(content).into_iter {
@@ -647,9 +730,8 @@ fn parse_address_list_impl(
                 rest = rest.slice(pos + 1, rest.size).to_string.trim
               }
               case None -> {
-                let content = rest.slice(content_start, rest.size).to_string
-
-                for addr in parse_comma_separated_addresses(content).into_iter {
+                # No closing semicolon: this is a mailbox list, not a group.
+                for addr in parse_comma_separated_addresses(rest).into_iter {
                   result.push(addr)
                 }
 
