@@ -271,7 +271,7 @@ fn parse_multipart_impl(
         Severity.Error,
         Option.None,
         Option.None,
-        Option.Some(raw.clone),
+        error_fragment(raw),
       ),
     )
   }
@@ -423,6 +423,18 @@ fn parse_multipart_impl(
   )
 }
 
+# Bounded snippet of a body for use in an error value
+#
+# Error values are usually only formatted, so copying a whole multipart body
+# (up to the email size limit) into one is pointless memory amplification.
+fn error_fragment(raw: String) -> Option[String] {
+  if raw.size > 50 {
+    Option.Some(raw.slice(0, 50).to_string)
+  } else {
+    Option.Some(raw.clone)
+  }
+}
+
 # Split and validate multipart body by boundary
 fn split_multipart_body(
   raw: String,
@@ -431,18 +443,12 @@ fn split_multipart_body(
   let boundary_delim = '--' + boundary.trim
 
   if raw.contains?(boundary_delim) == false {
-    let fragment = if raw.size > 50 {
-      raw.slice(0, 50).to_string
-    } else {
-      raw.clone
-    }
-
     return Result.Error(
       Error.BoundaryNotFound(
         Severity.Error,
         Option.None,
         Option.None,
-        Option.Some(fragment),
+        error_fragment(raw),
       ),
     )
   }
