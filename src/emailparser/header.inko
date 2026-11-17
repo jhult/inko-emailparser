@@ -772,10 +772,11 @@ fn get_param_value_impl(
   params: ref Array[(String, String)],
   key: String,
 ) -> Option[String] {
-  let key_lower = key.to_lower
-
+  # Parameter names are case-insensitive. Compare without lower-casing either
+  # side: `assemble_rfc2231_continuation` calls this once per segment, so
+  # allocating a copy of every key turns hostile headers quadratic.
   for (k, v) in params.iter {
-    if k.to_lower == key_lower { return Option.Some(v.clone) }
+    if eq_ignore_case(k, key) { return Option.Some(v.clone) }
   }
 
   Option.None
