@@ -130,6 +130,99 @@ fn decode_body_bytes_impl(
   }
 }
 
+# Build the error reported when base64 decoding fails
+fn base64_decoding_error(encoding: String) -> Error {
+  Error.DecodingFailed(
+    Severity.Error,
+    encoding,
+    'base64 decoding failed',
+    Option.None,
+    Option.None,
+    Option.None,
+  )
+}
+
+# Split trailing base64 padding off `input`
+#
+# `input` must already be free of whitespace. Returns the data bytes without
+# the trailing `=` run and the number of padding characters removed.
+#
+# In strict mode a `=` before the trailing run is an error. In lax mode such
+# bytes are dropped, matching the streaming decoder, which skips them while
+# filling its buffer.
+fn pub strip_base64_padding(
+  input: ref ByteArray,
+  strict_mode: Bool,
+) -> Result[(ByteArray, Int), String] {
+  let mut data_size = input.size
+  let mut padding = 0
+
+  while data_size > 0 {
+    match input.get(data_size - 1) {
+      case Ok(byte) -> {
+        if byte == ASCII_EQUALS {
+          padding = padding + 1
+          data_size = data_size - 1
+        } else {
+          break
+        }
+      }
+      case Error(_) -> break
+    }
+  }
+
+  let data = ByteArray.new
+  let mut i = 0
+
+  while i < data_size {
+    match input.get(i) {
+      case Ok(byte) -> {
+        if byte == ASCII_EQUALS {
+          if strict_mode {
+            return Result.Error('Padding appears before end of data')
+          }
+        } else {
+          data.push(byte)
+        }
+      }
+      case Error(_) -> {}
+    }
+
+    i = i + 1
+  }
+
+  Result.Ok((data, padding))
+}
+
+# Check that the base64 padding count matches the data length
+#
+# A one-character tail can never decode to a whole byte, so it is always
+# rejected. The padding/remainder consistency checks are only applied in
+# strict mode: unpadded and under-padded input is otherwise decoded as-is.
+fn pub validate_base64_padding(
+  data_size: Int,
+  padding: Int,
+  strict_mode: Bool,
+) -> Result[Nil, String] {
+  let remainder = data_size % 4
+
+  if remainder == 1 { return Result.Error('Invalid base64 length') }
+
+  if strict_mode {
+    if padding > 2 { return Result.Error('Invalid base64 padding') }
+
+    if padding == 1 and remainder != 3 {
+      return Result.Error('Invalid base64 padding')
+    }
+
+    if padding == 2 and remainder != 2 {
+      return Result.Error('Invalid base64 padding')
+    }
+  }
+
+  Result.Ok(nil)
+}
+
 # Decode a base64 body, accepting both padded and unpadded input.
 #
 # Whitespace is ignored. Padding may only appear at the end of the input and
@@ -161,62 +254,29 @@ fn decode_base64_body(
     i = i + 1
   }
 
-  let mut data_size = cleaned.size
-  let mut padding = 0
-
-  while data_size > 0 {
-    match cleaned.get(data_size - 1) {
-      case Ok(byte) -> {
-        if byte == ASCII_EQUALS {
-          padding = padding + 1
-          data_size = data_size - 1
-        } else {
-          break
-        }
-      }
-      case Error(_) -> break
-    }
+  let (data, padding) = match strip_base64_padding(ref cleaned, true) {
+    case Ok(pair) -> pair
+    case Error(_) -> return Result.Error(base64_decoding_error(encoding))
   }
 
-  let data = ByteArray.new
-  let mut valid = padding <= 2
+  let mut valid = true
   let mut j = 0
 
-  while j < data_size {
-    match cleaned.get(j) {
-      case Ok(byte) -> {
-        if is_base64_char(byte, false) {
-          data.push(byte)
-        } else {
-          valid = false
-        }
-      }
+  while j < data.size {
+    match data.get(j) {
+      case Ok(byte) -> if !is_base64_char(byte, false) { valid = false }
       case Error(_) -> valid = false
     }
 
     j = j + 1
   }
 
-  let remainder = data.size % 4
-
-  if remainder == 1 { valid = false }
-
-  if padding == 1 and remainder != 3 { valid = false }
-
-  if padding == 2 and remainder != 2 { valid = false }
-
-  if !valid {
-    return Result.Error(
-      Error.DecodingFailed(
-        Severity.Error,
-        encoding,
-        'base64 decoding failed',
-        Option.None,
-        Option.None,
-        Option.None,
-      ),
-    )
+  match validate_base64_padding(data.size, padding, true) {
+    case Ok(_) -> {}
+    case Error(_) -> valid = false
   }
+
+  if !valid { return Result.Error(base64_decoding_error(encoding)) }
 
   let estimated_size = (data.size * BASE64_DECODED_SIZE) / BASE64_CHUNK_SIZE
 
@@ -233,18 +293,7 @@ fn decode_base64_body(
 
   match decoder.decode(data, output) {
     case Ok(_) -> Result.Ok(output)
-    case Error(_) -> {
-      Result.Error(
-        Error.DecodingFailed(
-          Severity.Error,
-          encoding,
-          'base64 decoding failed',
-          Option.None,
-          Option.None,
-          Option.None,
-        ),
-      )
-    }
+    case Error(_) -> Result.Error(base64_decoding_error(encoding))
   }
 }
 
@@ -571,27 +620,18 @@ fn pub decode_rfc2047_word(word: String) -> String {
       }
 
       # Encoded words are frequently unpadded, and padded ones are common too.
-      # Strip up to two '=' and decode in unpadded mode, like
-      # decode_base64_body does, so both forms work.
-      let mut data = filtered.into_string
-      let mut stripped = 0
-
-      while stripped < 2 and data.size > 0 {
-        match data.get(data.size - 1) {
-          case Ok(byte) -> {
-            if byte == ASCII_EQUALS {
-              data = data.slice(0, data.size - 1).to_string
-              stripped = stripped + 1
-            } else {
-              break
-            }
-          }
-          case Error(_) -> break
-        }
+      # Strip the padding and decode in unpadded mode, sharing the padding and
+      # length rules with the body path. A malformed payload falls back to the
+      # literal encoded word.
+      let (data, padding) = match strip_base64_padding(ref filtered, true) {
+        case Ok(pair) -> pair
+        case Error(_) -> return word
       }
 
-      # A one-character tail can't decode to a whole byte
-      if data.size % 4 == 1 { return word }
+      match validate_base64_padding(data.size, padding, true) {
+        case Ok(_) -> {}
+        case Error(_) -> return word
+      }
 
       let mut decoder = Decoder.new
 
@@ -599,7 +639,7 @@ fn pub decode_rfc2047_word(word: String) -> String {
 
       let output = ByteArray.new
 
-      match decoder.decode(data.to_byte_array, output) {
+      match decoder.decode(data, output) {
         case Ok(_) -> decode_charset(output, charset)
         case Error(_) -> word
       }

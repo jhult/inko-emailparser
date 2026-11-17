@@ -5,7 +5,10 @@
 import emailparser.ascii (
   ASCII_CR, ASCII_EQUALS, ASCII_HT, ASCII_LF, ASCII_SPACE,
 )
-import emailparser.decoder (decode_qp_bytes_range, is_base64_char)
+import emailparser.decoder (
+  decode_qp_bytes_range, is_base64_char, strip_base64_padding,
+  validate_base64_padding,
+)
 import emailparser.hex (hex_char_to_value)
 import emailparser.size_tracker (SizeTracker)
 import std.base64 (Decoder)
@@ -157,57 +160,14 @@ fn decode_base64_bytes(
 ) -> Result[Nil, String] {
   if input.empty? { return Result.Ok(nil) }
 
-  let mut data_size = input.size
-  let mut padding = 0
-
-  while data_size > 0 {
-    match input.get(data_size - 1) {
-      case Ok(byte) -> {
-        if byte == ASCII_EQUALS {
-          padding = padding + 1
-          data_size = data_size - 1
-        } else {
-          break
-        }
-      }
-      case Error(_) -> break
-    }
+  let (data, padding) = match strip_base64_padding(ref input, strict_mode) {
+    case Ok(pair) -> pair
+    case Error(e) -> return Result.Error(e)
   }
 
-  let data = ByteArray.new
-  let mut i = 0
-
-  while i < data_size {
-    match input.get(i) {
-      case Ok(byte) -> {
-        if byte == ASCII_EQUALS {
-          if strict_mode {
-            return Result.Error('Padding appears before end of data')
-          }
-        } else {
-          data.push(byte)
-        }
-      }
-      case Error(_) -> {}
-    }
-
-    i = i + 1
-  }
-
-  let remainder = data.size % 4
-
-  if remainder == 1 { return Result.Error('Invalid base64 length') }
-
-  if strict_mode {
-    if padding > 2 { return Result.Error('Invalid base64 padding') }
-
-    if padding == 1 and remainder != 3 {
-      return Result.Error('Invalid base64 padding')
-    }
-
-    if padding == 2 and remainder != 2 {
-      return Result.Error('Invalid base64 padding')
-    }
+  match validate_base64_padding(data.size, padding, strict_mode) {
+    case Ok(_) -> {}
+    case Error(e) -> return Result.Error(e)
   }
 
   let mut decoder = Decoder.new

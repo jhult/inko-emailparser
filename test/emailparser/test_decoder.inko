@@ -319,6 +319,16 @@ fn pub tests(t: mut Tests) {
     t.equal(decoded, 'Hello')
   })
 
+  t.test('decode_header_value_invalid_base64_padding', fn (t) {
+    # Two padding characters require a two-character remainder. A malformed
+    # payload must fall back to the literal encoded word instead of decoding
+    # a partial result.
+    let word = '=?utf-8?B?aGVsbG8gd29ybGQ==?='
+    let decoded = decode_header_value_impl(word)
+
+    t.equal(decoded, word)
+  })
+
   t.test('decode_header_value_raw_multibyte_payload', fn (t) {
     # Illegal but common: raw UTF-8 inside a Q encoded word
     let decoded = decode_header_value_impl('=?utf-8?Q?😀?=')
