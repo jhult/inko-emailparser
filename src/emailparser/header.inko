@@ -293,7 +293,7 @@ fn parse_headers_impl(
     # Check for folded header (continuation line starting with whitespace)
     if line_str.starts_with?(' ') or line_str.starts_with?('\t') {
       if in_header {
-        let new_size = current_value.size + 1 + line_str.trim.size
+        let new_size = current_value.size + line_str.size
         let mut append = true
 
         match
@@ -320,7 +320,10 @@ fn parse_headers_impl(
           }
         }
 
-        if append { current_value = current_value + ' ' + line_str.trim }
+        # RFC 5322 unfolding removes only the line break; the continuation's
+        # leading white space (and any significant inner/trailing whitespace)
+        # is part of the value, e.g. for folded MIME parameters.
+        if append { current_value = current_value + line_str }
       }
     } else {
       # New header

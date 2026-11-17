@@ -372,6 +372,26 @@ fn pub tests(t: mut Tests) {
     }
   })
 
+  t.test('parse_headers_unfolding_preserves_continuation_whitespace', fn (t) {
+    # RFC 5322 unfolding removes only the line break; significant whitespace in
+    # a folded parameter value must survive.
+    let parser = EmailParser.new
+    let raw = 'Content-Type: multipart/mixed; boundary=abc\n   123\n\n'
+    let result = parser.parse_headers(raw)
+
+    match result {
+      case Ok(headers) -> {
+        match get_header_value_impl(ref headers, 'Content-Type') {
+          case Some(value) -> {
+            t.equal(value, 'multipart/mixed; boundary=abc   123')
+          }
+          case None -> t.equal('expected a Content-Type header', 'got none')
+        }
+      }
+      case Error(e) -> panic('parse_headers failed: ${e.to_message}')
+    }
+  })
+
   t.test('parse_headers_folding_inside_last_param', fn (t) {
     # Folding in the last parameter value is valid too
     let parser = EmailParser.new
