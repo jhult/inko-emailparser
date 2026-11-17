@@ -259,6 +259,22 @@ fn pub tests(t: mut Tests) {
     t.equal(decoded, '\u{FFFD}A')
   })
 
+  t.test('decode_charset_rejects_overlong_and_surrogate_sequences', fn (t) {
+    # Both encode U+0000 / a surrogate and are invalid UTF-8: they must be
+    # replaced, never copied into the decoded String.
+    let overlong = decode_charset(
+      ByteArray.from_array([0xE0, 0x80, 0x80]),
+      'utf-8',
+    )
+    let surrogate = decode_charset(
+      ByteArray.from_array([0xED, 0xA0, 0x80]),
+      'utf-8',
+    )
+
+    t.equal(overlong, '\u{FFFD}\u{FFFD}\u{FFFD}')
+    t.equal(surrogate, '\u{FFFD}\u{FFFD}\u{FFFD}')
+  })
+
   # Non-ASCII text around an encoded word must not shift byte offsets:
   # index_of returns byte offsets while substring is character indexed.
   t.test('decode_header_value_non_ascii_before_word', fn (t) {
