@@ -179,10 +179,10 @@
 # ```
 
 import emailparser.ascii (
-  ASCII_APOSTROPHE, ASCII_COLON, ASCII_COMMA, ASCII_DEL, ASCII_DOT,
-  ASCII_EQUALS, ASCII_HYPHEN, ASCII_LPAREN, ASCII_PLUS, ASCII_QUESTION,
-  ASCII_RPAREN, ASCII_SLASH, ASCII_SPACE, ASCII_UNDERSCORE, is_alnum,
-  is_control_char, is_domain_char, is_mime_tspecial, is_printable_ascii,
+  ASCII_APOSTROPHE, ASCII_COLON, ASCII_COMMA, ASCII_DOT, ASCII_EQUALS,
+  ASCII_HYPHEN, ASCII_LPAREN, ASCII_PLUS, ASCII_QUESTION, ASCII_RPAREN,
+  ASCII_SLASH, ASCII_SPACE, ASCII_UNDERSCORE, is_alnum, is_control_char,
+  is_domain_char, is_mime_tspecial, is_printable_ascii,
 )
 import emailparser.limits (
   MAX_BOUNDARY_LENGTH, MAX_DOMAIN_LABEL_SIZE, MAX_DOMAIN_SIZE,
@@ -360,8 +360,8 @@ fn pub is_valid_boundary(boundary: String) -> Bool {
   while i < boundary.size {
     match boundary.get(i) {
       case Ok(byte) -> {
-        # Reject control characters (including newlines, tabs, null, DEL)
-        if is_control_char(byte) or byte == ASCII_DEL { return false }
+        # Reject control characters (including newlines, tabs and null)
+        if is_control_char(byte) { return false }
 
         # Validate character using helper predicate
         if !is_valid_boundary_char(byte) { return false }
