@@ -35,7 +35,7 @@ import emailparser.limits (
   Limits, MAX_ATTACHMENTS, MAX_ATTACHMENT_SIZE, MAX_EMAIL_SIZE, MAX_HEADERS,
   MAX_HEADERS_SECTION_SIZE, MAX_MULTIPART_DEPTH,
 )
-import emailparser.message_id (parse_message_ids_impl)
+import emailparser.message_id (normalize_content_id, parse_message_ids_impl)
 import emailparser.mime (
   extract_boundary, is_multipart, is_text_html, is_text_plain,
 )
@@ -608,7 +608,9 @@ impl EmailParser {
             }
 
             match get_header_value_impl(headers, 'Content-ID') {
-              case Some(id) -> content_id = Option.Some(id.trim)
+              case Some(id) -> {
+                content_id = Option.Some(normalize_content_id(id))
+              }
               case None -> {}
             }
 

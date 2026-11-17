@@ -244,6 +244,15 @@ fn pub normalize_message_id(raw: String) -> String {
   }
 }
 
+# Normalize a Content-ID header value
+#
+# Content-ID uses the msg-id syntax (RFC 2045 section 7) and inline references
+# (`cid:<id>`) never include the angle brackets, so the bracket-free form is
+# what callers can match against.
+fn pub normalize_content_id(raw: String) -> String {
+  normalize_message_id(raw)
+}
+
 # Build a random component of `size` lowercase hexadecimal digits
 #
 # Each digit is drawn independently, so a digit carries exactly four bits of

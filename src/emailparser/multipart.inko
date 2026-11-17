@@ -70,6 +70,7 @@ import emailparser.header (
   parse_headers_impl, sanitize_filename,
 )
 import emailparser.limits (MAX_HEADERS_SECTION_SIZE)
+import emailparser.message_id (normalize_content_id)
 import emailparser.mime (classify_part, is_attachment_disposition)
 import emailparser.validation (is_valid_boundary)
 import std.bytes (ByteArray)
@@ -613,17 +614,7 @@ fn process_multipart_part_body(
 # Extract content ID from part headers
 fn extract_content_id(part_headers: Array[(String, String)]) -> Option[String] {
   get_header_value_impl(part_headers, 'Content-ID').map(fn (id) {
-    let trimmed = id.trim
-
-    if
-      trimmed.size >= 2
-        and trimmed.starts_with?('<')
-        and trimmed.ends_with?('>')
-    {
-      trimmed.slice(1, trimmed.size - 1).to_string
-    } else {
-      trimmed
-    }
+    normalize_content_id(id)
   })
 }
 

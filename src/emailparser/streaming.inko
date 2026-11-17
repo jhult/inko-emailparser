@@ -29,6 +29,7 @@ import emailparser.limits (
   Limits, MAX_ATTACHMENTS, MAX_ATTACHMENT_SIZE, MAX_EMAIL_SIZE, MAX_HEADERS,
   MAX_HEADERS_SECTION_SIZE, MAX_MULTIPART_DEPTH,
 )
+import emailparser.message_id (normalize_content_id)
 import emailparser.mime (
   extract_boundary, is_multipart, is_text_html, is_text_plain, main_type,
 )
@@ -1135,7 +1136,7 @@ fn single_part_attachment_info(
   let mut content_id = Option.None
 
   match get_header_value_impl(headers, 'Content-ID') {
-    case Some(id) -> content_id = Option.Some(id.trim)
+    case Some(id) -> content_id = Option.Some(normalize_content_id(id))
     case None -> {}
   }
 
@@ -1649,7 +1650,9 @@ if
     )
       .or('7bit')
 
-    let content_id = get_header_value_impl(ref headers, 'Content-ID')
+    let content_id = get_header_value_impl(ref headers, 'Content-ID').map(
+      fn (id) { normalize_content_id(id) },
+    )
 
     # MultipartStreamParser already applies the shared classification.
     let is_actual_attachment = is_attachment
