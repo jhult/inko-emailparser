@@ -166,21 +166,30 @@ fn pub parse_mime_metadata(
 fn pub parse_threading_headers(
   headers: ref Array[(String, String)],
 ) -> (Option[String], Array[String], String) {
+  # RFC 5322 permits the same field to appear more than once; a header split
+  # over multiple occurrences must still contribute every message ID.
   let mut in_reply_to = Option.None
+  let in_reply_to_raw = join_header_values(headers, 'In-Reply-To')
 
-  match get_header_value_impl(headers, 'In-Reply-To') {
-    case Some(raw) -> {
-      let normalized = normalize_message_id(raw)
+  if !in_reply_to_raw.empty? {
+    let ids = parse_message_ids_impl(in_reply_to_raw.clone)
+
+    if !ids.empty? {
+      match ids.get(0) {
+        case Ok(id) -> in_reply_to = Option.Some(id)
+        case Error(_) -> {}
+      }
+    } else {
+      let normalized = normalize_message_id(in_reply_to_raw)
 
       if !normalized.empty? { in_reply_to = Option.Some(normalized) }
     }
-    case None -> {}
   }
 
   # `parse_message_ids_impl` already returns bracket-free IDs, which is the
   # same representation `normalize_message_id` produces.
   let references = parse_message_ids_impl(
-    get_header_value_impl(headers, 'References').or(''),
+    join_header_values(headers, 'References'),
   )
   let message_id = normalize_message_id(
     get_header_value_impl(headers, 'Message-ID').or(''),
@@ -198,6 +207,31 @@ fn pub parse_threading_headers(
   }
 
   (in_reply_to, references, thread_id)
+}
+
+# Join every occurrence of a header with a single space
+fn join_header_values(
+  headers: ref Array[(String, String)],
+  name: String,
+) -> String {
+  let values = get_header_values_impl(headers, name)
+  let mut joined = ''
+  let mut idx = 0
+
+  while idx < values.size {
+    match values.get(idx) {
+      case Ok(value) -> {
+        if !joined.empty? { joined = joined + ' ' }
+
+        joined = joined + value
+      }
+      case Error(_) -> {}
+    }
+
+    idx = idx + 1
+  }
+
+  joined
 }
 
 # Validate the boundary of a multipart message

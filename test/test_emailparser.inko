@@ -817,6 +817,34 @@ This email has multiple recipients including CC and BCC.'
     }
   })
 
+  t.test('threading_headers_merged_across_occurrences', fn (t) {
+    let parser = EmailParser.new
+    let raw_email = 'From: replier@example.com
+To: original@example.com
+Subject: Re: Thread
+Message-ID: <reply@example.com>
+In-Reply-To: <first@example.com>
+In-Reply-To: <second@example.com>
+References: <root@example.com>
+References: <first@example.com>
+
+Body'
+
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        match msg.threading.in_reply_to.clone {
+          case Some(value) -> t.equal(value, 'first@example.com')
+          case None -> t.equal('expected in_reply_to', 'got none')
+        }
+
+        t.equal(msg.threading.references.size, 2)
+        t.equal(msg.threading.references.get(0).or_panic, 'root@example.com')
+        t.equal(msg.threading.references.get(1).or_panic, 'first@example.com')
+      }
+      case Error(e) -> panic('Parse failed: ${e.to_message}')
+    }
+  })
+
   t.test('threading_headers', fn (t) {
     let parser = EmailParser.new
     let raw_email = 'From: replier@example.com
