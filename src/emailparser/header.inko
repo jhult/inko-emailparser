@@ -1155,15 +1155,10 @@ fn decode_rfc2231_value(value: String, has_charset: Bool) -> String {
   let mut encoded = value
 
   if has_charset {
-    match value.index_of("'", 0) {
-      case Some(first) -> {
-        match value.index_of("'", first + 1) {
-          case Some(second) -> {
-            charset = value.slice(0, first).to_string
-            encoded = value.slice(second + 1, value.size).to_string
-          }
-          case None -> {}
-        }
+    match split_rfc2231_charset(value) {
+      case Some((declared, rest)) -> {
+        charset = declared
+        encoded = rest
       }
       case None -> {}
     }
