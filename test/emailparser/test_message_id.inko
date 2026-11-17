@@ -159,6 +159,41 @@ fn pub tests(t: mut Tests) {
     t.equal(generator.local_part('<a.b.c.d@example.com>'), 'a.b.c.d')
   })
 
+  t.test('local_part_uses_header_normalization', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+
+    # Whitespace inside surrounding brackets is trimmed, matching
+    # normalize_message_id and therefore the parsed header values.
+    t.equal(generator.local_part('< a@b.com >'), 'a')
+    t.equal(generator.domain_part('< a@b.com >'), 'b.com')
+  })
+
+  t.test('generated_random_component_is_hex', fn (t) {
+    let generator = MessageIdGenerator.new('example.com')
+    let message_id = generator.generate
+    let content = message_id.substring(1, message_id.size - 1)
+    let local = match content.index_of('@', 0) {
+      case Some(at) -> content.substring(0, at)
+      case None -> content
+    }
+    let parts = local.split('.').map(fn (s) { s.to_string }).to_array
+    let random = parts.get(1).or('')
+
+    t.equal(random.size, 16)
+
+    let mut i = 0
+
+    while i < random.size {
+      let byte = random.get(i).or(0)
+      let is_digit = byte >= 48 and byte <= 57
+      let is_hex_letter = byte >= 97 and byte <= 102
+
+      t.true(is_digit or is_hex_letter)
+
+      i = i + 1
+    }
+  })
+
   t.test('local_part_edge_cases', fn (t) {
     let generator = MessageIdGenerator.new('example.com')
 

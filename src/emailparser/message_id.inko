@@ -42,14 +42,14 @@
 # - Hostname provides spatial uniqueness (different servers)
 #
 # Format: `<timestamp.random@hostname>`
-# - Example: `<1736946800.1234567890123456@example.com>`
+# - Example: `<1736946800.4f1c9ab73d2e0856@example.com>`
 #
 # ### Random Component Length
 #
-# The random component is truncated to 12-16 characters because:
-# - 128 bits of randomness provides sufficient collision resistance
+# The random component is 12-16 lowercase hexadecimal digits, drawn one nibble
+# at a time from a ChaCha-based `Random`, so it carries 48-64 bits of entropy:
+# - That is plenty of collision resistance when combined with the timestamp
 # - Shorter values are more readable in headers
-# - Full Inko integers would be unnecessarily long
 #
 # ### Hostname Default
 #
@@ -159,6 +159,7 @@ import emailparser.ascii (
 )
 import emailparser.limits (MAX_MESSAGE_IDS)
 import emailparser.validation (is_valid_domain)
+import std.bytes (ByteArray)
 import std.rand (Random)
 import std.time (DateTime)
 
@@ -243,6 +244,30 @@ fn pub normalize_message_id(raw: String) -> String {
   }
 }
 
+# Build a random component of `size` lowercase hexadecimal digits
+#
+# Each digit is drawn independently, so a digit carries exactly four bits of
+# entropy regardless of the value. Formatting a whole `Int` and slicing it
+# instead would keep only the leading decimal digits and with them a fraction
+# of the available entropy.
+fn random_hex_component(size: Int) -> String {
+  let digits = '0123456789abcdef'
+  let result = ByteArray.new
+  let mut rng = Random.new
+  let mut i = 0
+
+  while i < size {
+    match digits.get(rng.int_between(0, 16)) {
+      case Ok(byte) -> result.push(byte)
+      case Error(_) -> {}
+    }
+
+    i = i + 1
+  }
+
+  result.into_string
+}
+
 # Message-ID generator
 type pub MessageIdGenerator {
   let pub @hostname: String
@@ -274,14 +299,7 @@ impl MessageIdGenerator {
   # Build a Message-ID from a validated hostname/prefix and a random component
   fn generate_id(hostname: String, prefix: String, random_size: Int) -> String {
     let timestamp = DateTime.local.to_int
-    let mut rng = Random.new
-    let random = rng.int.absolute.to_string
-
-    let rand_part = if random.size >= random_size {
-      random.slice(0, random_size).to_string
-    } else {
-      random
-    }
+    let rand_part = random_hex_component(random_size)
 
     let host = if is_valid_domain(hostname) { hostname } else { 'localhost' }
     let safe_prefix = if is_valid_local_part(prefix) { prefix } else { '' }
@@ -379,25 +397,9 @@ impl MessageIdGenerator {
     is_valid_domain(domain)
   }
 
-  # Strip angle brackets from a string
-  # Removes leading '<' and trailing '>' if present
-  fn strip_angle_brackets(s: String) -> String {
-    let without_start = if s.starts_with?('<') {
-      s.slice(1, s.size).to_string
-    } else {
-      s
-    }
-
-    if without_start.ends_with?('>') {
-      without_start.slice(0, without_start.size - 1).to_string
-    } else {
-      without_start
-    }
-  }
-
   # Extract local part from Message-ID
   fn pub local_part(message_id: String) -> String {
-    let without_brackets = strip_angle_brackets(message_id)
+    let without_brackets = normalize_message_id(message_id)
 
     match without_brackets.index_of('@', 0) {
       case Some(pos) -> without_brackets.slice(0, pos).to_string
@@ -407,7 +409,7 @@ impl MessageIdGenerator {
 
   # Extract domain from Message-ID
   fn pub domain_part(message_id: String) -> String {
-    let without_brackets = strip_angle_brackets(message_id)
+    let without_brackets = normalize_message_id(message_id)
 
     match without_brackets.index_of('@', 0) {
       case Some(pos) -> {
