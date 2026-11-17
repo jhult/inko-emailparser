@@ -203,6 +203,23 @@ fn pub tests(t: mut Tests) {
   # Quoted-PrintableStreamingDecoder Tests
   # ============================================================================
 
+  t.test('base64_padding_resets_between_blocks', fn (t) {
+    let mut decoder = Base64StreamingDecoder.new(1000000, false)
+    let mut output = ByteArray.new
+
+    match decoder.feed('SGVsbG8=') {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    match decoder.feed('V29ybGQ=') {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    t.equal(output.into_string, 'HelloWorld')
+  })
+
   t.test('qp_simple', fn (t) {
     let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, false)
 

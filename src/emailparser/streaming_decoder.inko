@@ -109,6 +109,10 @@ impl Base64StreamingDecoder {
 
     @buffer = rest
 
+    # Padding only ends one encoded block. Reset the state so a caller can
+    # feed another block through the same decoder.
+    if @padding_seen { @padding_seen = false }
+
     let output = ByteArray.new
 
     match decode_base64_bytes(ref to_decode, @strict_mode, output) {
