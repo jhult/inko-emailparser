@@ -632,20 +632,11 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
         case Error(e) -> return Result.Error(e)
       }
 
-      # Remove body and boundary from buffer
+      # Remove body and boundary from buffer. Leave the line break after the
+      # delimiter in place: process_reading_headers strips exactly one leading
+      # line break, so an empty header section (headerless part) is preserved.
       let skip_to = pos + boundary_bytes.size
-
-      # Skip past boundary and trailing CRLF
-      let mut j = skip_to
-
-      while j < parser.buffer.size {
-        match parser.buffer.get(j) {
-          case Ok(byte) -> {
-            if byte == 13 or byte == 10 { j = j + 1 } else { break }
-          }
-          case Error(_) -> break
-        }
-      }
+      let j = skip_to
 
       parser.head_line_start = is_line_start(ref parser.buffer, j)
 

@@ -365,6 +365,31 @@ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
     }
   })
 
+  t.test('headerless_multipart_parts_are_not_dropped', fn (t) {
+    let parser = StreamingParser.new
+    let handler = MemoryBufferingHandler.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Headerless
+Content-Type: multipart/mixed; boundary="b"
+
+--b
+
+first
+--b
+
+second
+--b--'
+
+    match parser.parse_stream(email, handler) {
+      case Ok(_) -> {
+        t.true(handler.get_text_body.contains?('first'))
+        t.true(handler.get_text_body.contains?('second'))
+      }
+      case Error(e) -> panic('Parse failed: ${e.to_message}')
+    }
+  })
+
   t.test('attached_multipart_is_attachment_not_nested_body', fn (t) {
     let parser = StreamingParser.new
     let handler = MemoryBufferingHandler.new
