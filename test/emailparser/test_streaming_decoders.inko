@@ -360,4 +360,60 @@ fn pub tests(t: mut Tests) {
       case Error(e) -> panic('Failed: ${e}')
     }
   })
+
+  t.test('qp_strips_whitespace_before_line_break_across_chunks', fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, false)
+    let mut output = ByteArray.new
+
+    match decoder.feed('Hello ') {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    match decoder.feed(' \r\nWorld') {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    match decoder.finish {
+      case Ok(final) -> output.append(final)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    t.equal(output.into_string, 'Hello\r\nWorld')
+  })
+
+  t.test('qp_strips_whitespace_at_eof', fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, false)
+    let mut output = ByteArray.new
+
+    match decoder.feed('Hello  ') {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    match decoder.finish {
+      case Ok(final) -> output.append(final)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    t.equal(output.into_string, 'Hello')
+  })
+
+  t.test('qp_soft_break_at_end_of_input', fn (t) {
+    let mut decoder = QuotedPrintableStreamingDecoder.new(1000000, false, false)
+    let mut output = ByteArray.new
+
+    match decoder.feed('abc=\n') {
+      case Ok(decoded) -> output.append(decoded)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    match decoder.finish {
+      case Ok(final) -> output.append(final)
+      case Error(e) -> panic('Failed: ${e}')
+    }
+
+    t.equal(output.into_string, 'abc')
+  })
 }

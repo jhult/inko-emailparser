@@ -292,4 +292,42 @@ fn pub tests(t: mut Tests) {
 
     t.equal(decoded, '😀')
   })
+
+  t.test('quoted_printable_strips_trailing_whitespace', fn (t) {
+    let decoded = match
+      decode_body_impl('hello  \nworld\t\r\n', 'quoted-printable', 1000)
+    {
+      case Ok(v) -> v
+      case Error(_) -> panic('Failed to decode QP')
+    }
+
+    t.equal(decoded, 'hello\nworld\r\n')
+  })
+
+  t.test('quoted_printable_strips_trailing_whitespace_at_eof', fn (t) {
+    let decoded = match decode_body_impl('hello  ', 'quoted-printable', 1000) {
+      case Ok(v) -> v
+      case Error(_) -> panic('Failed to decode QP')
+    }
+
+    t.equal(decoded, 'hello')
+  })
+
+  t.test('quoted_printable_soft_break_at_eof', fn (t) {
+    let decoded = match decode_body_impl('abc=\n', 'quoted-printable', 1000) {
+      case Ok(v) -> v
+      case Error(_) -> panic('Failed to decode QP')
+    }
+
+    t.equal(decoded, 'abc')
+  })
+
+  t.test('quoted_printable_soft_break_crlf_at_eof', fn (t) {
+    let decoded = match decode_body_impl('abc=\r\n', 'quoted-printable', 1000) {
+      case Ok(v) -> v
+      case Error(_) -> panic('Failed to decode QP')
+    }
+
+    t.equal(decoded, 'abc')
+  })
 }
