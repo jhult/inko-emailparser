@@ -555,8 +555,6 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
   {
     case Some(pos) -> {
       # Found boundary - emit body data before it
-      let mut body_data = ByteArray.new
-      let mut i = 0
 
       # Copy body data up to boundary.
       #
@@ -584,14 +582,7 @@ fn process_reading_body[H: mut + MultipartStreamHandler](
         }
       }
 
-      while i < body_end {
-        match parser.buffer.get(i) {
-          case Ok(byte) -> body_data.push(byte)
-          case Error(_) -> {}
-        }
-
-        i = i + 1
-      }
+      let body_data = parser.buffer.slice(0, body_end).to_byte_array
 
       # Emit body data
       if body_data.size > 0 {

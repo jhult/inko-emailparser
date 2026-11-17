@@ -439,16 +439,9 @@ impl StreamingParser {
               headers_parsed = true
 
               # Extract body bytes remaining in buffer after headers
-              let mut j = pos + separator_size
-
-              while j < buffer.size {
-                match buffer.get(j) {
-                  case Ok(byte) -> initial_body.push(byte)
-                  case Error(_) -> {}
-                }
-
-                j = j + 1
-              }
+              initial_body = buffer
+                .slice(pos + separator_size, buffer.size)
+                .to_byte_array
 
               break
             }
