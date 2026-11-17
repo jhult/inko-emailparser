@@ -66,8 +66,8 @@ import emailparser.decoder (decode_body_bytes_impl)
 import emailparser.error (Error, Severity, is_recoverable_part_error)
 import emailparser.header (
   extract_filename_param, get_header_value_impl, get_param_value_impl,
-  parse_content_disposition_impl, parse_content_type_impl, parse_headers_impl,
-  sanitize_filename,
+  is_valid_field_name, parse_content_disposition_impl, parse_content_type_impl,
+  parse_headers_impl, sanitize_filename,
 )
 import emailparser.limits (MAX_HEADERS_SECTION_SIZE)
 import emailparser.mime (classify_part, is_attachment_disposition)
@@ -644,79 +644,84 @@ fn parse_single_multipart_part(
   ),
   Error,
 ] {
-  let newline_pos = trimmed.index_of('\n\n', 0)
-
-  match newline_pos {
+  # A part is either headers + empty line + body, or (RFC 2046) has an empty
+  # header section and is all body. A part with headers but no body has no
+  # "\n\n" after trimming, so detect that case instead of treating the
+  # headers as body text.
+  let (part_headers_raw, part_body_raw) = match trimmed.index_of('\n\n', 0) {
     case Some(pos) -> {
-      let part_headers_raw = trimmed.slice(0, pos).to_string
-      let part_body_raw = trimmed.slice(pos + 2, trimmed.size).to_string
-
-      let part_headers = match
-        parse_multipart_part_headers(part_headers_raw, max_headers, strict_mode)
-      {
-        case Ok(h) -> h
-        case Error(e) -> return Result.Error(e)
-      }
-
-      let (ct_main, ct_params, disp_main, _, transfer_encoding) = match
-        extract_part_metadata(part_headers, strict_mode)
-      {
-        case Ok(metadata) -> metadata
-        case Error(e) -> return Result.Error(e)
-      }
-
-      let decoded_body = match
-        process_multipart_part_body(
-          part_body_raw,
-          transfer_encoding,
-          max_attachment_size,
-        )
-      {
-        case Ok(b) -> b
-        case Error(e) -> return Result.Error(e)
-      }
-
-      let mut filename = match
-        get_header_value_impl(part_headers, 'Content-Disposition')
-      {
-        case Some(raw) -> extract_filename_param(raw)
-        case None -> Option.None
-      }
-
-      # Fall back to the Content-Type name parameter
-      if filename.none? {
-        match get_param_value_impl(ref ct_params, 'name') {
-          case Some(n) -> filename = sanitize_filename(n)
-          case None -> {}
-        }
-      }
-
-      let content_id = extract_content_id(part_headers)
-
-      Result.Ok(
-        (ct_main, ct_params, disp_main, filename, content_id, decoded_body),
+      (
+        trimmed.slice(0, pos).to_string,
+        trimmed.slice(pos + 2, trimmed.size).to_string,
       )
     }
     case None -> {
-      # RFC 2046 allows a part with an empty header section: everything after
-      # the delimiter is body, and the default content type is text/plain.
-      let decoded_body = match
-        process_multipart_part_body(trimmed, '7bit', max_attachment_size)
-      {
-        case Ok(b) -> b
-        case Error(e) -> return Result.Error(e)
-      }
-
-      Result.Ok(
-        (
-          'text/plain',
-          [] as Array[(String, String)],
-          '',
-          Option.None,
-          Option.None,
-          decoded_body,
-        ),
-      )
+      if headers_only_part(trimmed) { (trimmed, '') } else { ('', trimmed) }
     }
+  }
+
+  let part_headers = match
+    parse_multipart_part_headers(part_headers_raw, max_headers, strict_mode)
+  {
+    case Ok(h) -> h
+    case Error(e) -> return Result.Error(e)
+  }
+
+  let (ct_main, ct_params, disp_main, _, transfer_encoding) = match
+    extract_part_metadata(part_headers, strict_mode)
+  {
+    case Ok(metadata) -> metadata
+    case Error(e) -> return Result.Error(e)
+  }
+
+  let decoded_body = match
+    process_multipart_part_body(
+      part_body_raw,
+      transfer_encoding,
+      max_attachment_size,
+    )
+  {
+    case Ok(b) -> b
+    case Error(e) -> return Result.Error(e)
+  }
+
+  let mut filename = match
+    get_header_value_impl(part_headers, 'Content-Disposition')
+  {
+    case Some(raw) -> extract_filename_param(raw)
+    case None -> Option.None
+  }
+
+  # Fall back to the Content-Type name parameter
+  if filename.none? {
+    match get_param_value_impl(ref ct_params, 'name') {
+      case Some(n) -> filename = sanitize_filename(n)
+      case None -> {}
+    }
+  }
+
+  let content_id = extract_content_id(part_headers)
+
+  Result.Ok((ct_main, ct_params, disp_main, filename, content_id, decoded_body))
+}
+
+# Whether a trimmed part consists only of headers
+#
+# Used for a part whose header block is followed by neither a body nor the
+# empty line that separates headers from body.
+fn headers_only_part(text: String) -> Bool {
+  let first_line_end = text.index_of('\n', 0).or(text.size)
+
+  if first_line_end <= 0 { return false }
+
+  let first_line = text.slice(0, first_line_end).to_string
+
+  match first_line.index_of(':', 0) {
+    case Some(colon) -> {
+      if colon == 0 { return false }
+
+      is_valid_field_name(first_line.slice(0, colon).to_string)
+    }
+    case None -> false
   }
 }

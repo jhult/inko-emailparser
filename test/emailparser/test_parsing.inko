@@ -314,4 +314,36 @@ A'
     t.equal(addresses.size, 2)
     t.equal(addresses.get(1).or_panic.address, 'b@example.com')
   })
+
+  t.test('multipart_headers_only_part_has_empty_body', fn (t) {
+    let parser = EmailParser.new
+    let email = 'From: a@example.com
+To: b@example.com
+Subject: Empty text part
+Content-Type: multipart/alternative; boundary=b
+
+--b
+Content-Type: text/plain
+
+--b
+Content-Type: text/html
+
+<p>html</p>
+--b--'
+
+    match parser.parse(email) {
+      case Ok(msg) -> {
+        match msg.text_body.clone {
+          case Some(body) -> t.equal(body, '')
+          case None -> t.equal('expected an empty text body', 'got none')
+        }
+
+        match msg.html_body.clone {
+          case Some(body) -> t.equal(body, '<p>html</p>')
+          case None -> t.equal('expected an html body', 'got none')
+        }
+      }
+      case Error(e) -> panic('Parse failed: ${e.to_message}')
+    }
+  })
 }
