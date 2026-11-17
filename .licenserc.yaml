@@ -11,8 +11,6 @@ header:
     - "dist"
     - "target"
     - "build"
-    - "benchmark-results"
-    - "benchmarks/results"
     - "**/*.md"
     - "LICENSE"
     - ".git/**"

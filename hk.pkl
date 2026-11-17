@@ -7,17 +7,17 @@
 amends "package://github.com/jdx/hk/releases/download/v1.55.0/hk@1.55.0#/Config.pkl"
 import "package://github.com/jdx/hk/releases/download/v1.55.0/hk@1.55.0#/Builtins.pkl"
 
+// Issue refs are synced explicitly (`grite sync`), not from a hook: doing it
+// here made every commit pull and push over the network, and fail offline.
 local linters = new Mapping<String, Step> {
-    ["grite-sync"] {
-        check = "grite sync --pull --push"
-    }
     ["inko-fmt"] {
         glob = "*.inko"
         check = "inko fmt --check {{files}}"
         fix = "inko fmt {{files}}"
     }
     ["inko-test"] {
-	glob = "*.inko"
+        // No glob: the tests cover the whole package, so anything that can
+        // change behaviour (inko.pkg, fixtures, sources) must run them.
         check = "inko test --release"
     }
     ["license-eye"] {
