@@ -546,19 +546,10 @@ fn parse_content_type_impl(
 ) -> Result[(String, Array[(String, String)]), Error] {
   # Validate Content-Type format per RFC 2045
   # Must be "type/subtype" optionally followed by parameters
-  let trimmed = raw.trim
-  let trimmed_size = trimmed.size
-
-  # Find the first semicolon to separate main type from parameters
-  let semi_pos = trimmed.index_of(';', 0)
-
-  # Extract the main type (before any parameters)
-  let main_type_end = match semi_pos.clone {
-    case Some(pos) -> pos
-    case None -> trimmed_size
+  let (main_type, params) = match parse_type_and_parameters(raw, strict_mode) {
+    case Ok(pair) -> pair
+    case Error(e) -> return Result.Error(e)
   }
-
-  let main_type = trimmed.slice(0, main_type_end).to_string.trim
 
   # Validate that main type is in valid "type/subtype" format
   if !is_valid_mime_type(main_type.clone) {
@@ -577,7 +568,32 @@ fn parse_content_type_impl(
     )
   }
 
-  # Now parse parameters if present
+  # MIME types are case-insensitive (RFC 2045 section 5.1); normalize once so
+  # all downstream comparisons can be exact.
+  Result.Ok((main_type.to_lower, params))
+}
+
+# Split a header value into its leading token and its parameters
+#
+# The token is the text before the first `;`, trimmed but not normalized.
+# Callers validate and normalize it themselves: Content-Type uses a
+# `type/subtype` form while Content-Disposition uses a bare disposition type.
+fn parse_type_and_parameters(
+  raw: String,
+  strict_mode: Bool,
+) -> Result[(String, Array[(String, String)]), Error] {
+  let trimmed = raw.trim
+  let trimmed_size = trimmed.size
+
+  # Find the first semicolon to separate the token from parameters
+  let semi_pos = trimmed.index_of(';', 0)
+
+  let token_end = match semi_pos.clone {
+    case Some(pos) -> pos
+    case None -> trimmed_size
+  }
+
+  let token = trimmed.slice(0, token_end).to_string.trim
   let mut params = []
 
   match semi_pos {
@@ -593,9 +609,7 @@ fn parse_content_type_impl(
     case None -> {}
   }
 
-  # MIME types are case-insensitive (RFC 2045 section 5.1); normalize once so
-  # all downstream comparisons can be exact.
-  Result.Ok((main_type.to_lower, params))
+  Result.Ok((token, params))
 }
 
 # Parse parameters with quote-aware semicolon splitting
@@ -762,19 +776,10 @@ fn parse_content_disposition_impl(
   raw: String,
   strict_mode: Bool,
 ) -> Result[(String, Array[(String, String)]), Error] {
-  let trimmed = raw.trim
-  let trimmed_size = trimmed.size
-
-  # Find the first semicolon to separate disposition type from parameters
-  let semi_pos = trimmed.index_of(';', 0)
-
-  # Extract the disposition type (before any parameters)
-  let disp_type_end = match semi_pos.clone {
-    case Some(pos) -> pos
-    case None -> trimmed_size
+  let (disp_type, params) = match parse_type_and_parameters(raw, strict_mode) {
+    case Ok(pair) -> pair
+    case Error(e) -> return Result.Error(e)
   }
-
-  let disp_type = trimmed.slice(0, disp_type_end).to_string.trim
 
   # Validate disposition type (should be "inline", "attachment", or form-data)
   # Unlike Content-Type, this is NOT a MIME type format
@@ -785,25 +790,9 @@ fn parse_content_disposition_impl(
         'empty disposition type',
         Option.None,
         Option.None,
-        Option.Some(trimmed.clone),
+        Option.Some(raw.trim),
       ),
     )
-  }
-
-  # Now parse parameters if present
-  let mut params = []
-
-  match semi_pos {
-    case Some(pos) -> {
-      let params_raw = trimmed.slice(pos + 1, trimmed_size).to_string
-
-      # Parse parameters with quote awareness
-      match parse_parameters_impl(params_raw, strict_mode) {
-        case Ok(parsed_params) -> params = parsed_params
-        case Error(e) -> return Result.Error(e)
-      }
-    }
-    case None -> {}
   }
 
   # Disposition types are case-insensitive (RFC 2183).
