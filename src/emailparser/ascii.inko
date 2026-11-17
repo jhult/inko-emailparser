@@ -274,9 +274,3 @@ fn pub is_control_char(byte: Int) -> Bool {
 # Base64 encoding constants
 let pub BASE64_CHUNK_SIZE = 4 # Input characters per base64 chunk
 let pub BASE64_DECODED_SIZE = 3 # Output bytes per base64 chunk
-
-# Quoted-printable encoding constants
-# QP uses 3 characters (=XX) per encoded byte, worst case is all bytes encoded
-# Conservative estimate: assume 75% of bytes are encoded (typical for binary)
-let pub QP_DECODED_RATIO = 3 # Worst case: 3 chars per decoded byte
-let pub QP_SAFETY_FACTOR = 4 # Conservative estimate: 4 chars per decoded byte (75% encoded)
