@@ -11,12 +11,24 @@ on:
     branches: [trunk]
     paths:
       - "**/*.inko"
+      - "**/*.sh"
+      - "test/benchmark/**"
+      - "test/fixtures/**"
       - ".github/workflows/**"
+      - ".licenserc.yaml"
+      - "hk.pkl"
+      - "inko.pkg"
   pull_request:
     branches: [trunk]
     paths:
       - "**/*.inko"
+      - "**/*.sh"
+      - "test/benchmark/**"
+      - "test/fixtures/**"
       - ".github/workflows/**"
+      - ".licenserc.yaml"
+      - "hk.pkl"
+      - "inko.pkg"
 
 permissions:
   contents: read
@@ -78,10 +90,7 @@ jobs:
           inko --version
 
       - name: Run Performance Benchmarks
-        continue-on-error: true
-        run: |
-          echo "Running performance benchmarks (informational only)..."
-          ./test/benchmark/benchmark.sh --json || echo "Benchmarks completed with issues"
+        run: ./test/benchmark/benchmark.sh --json
 
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
@@ -90,10 +99,12 @@ jobs:
           tool: "customSmallerIsBetter"
           output-file-path: test/benchmark/results/benchmark-latest.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: false
+          # Persist results on a dedicated branch: without history the action
+          # has nothing to compare against, so alerting and charting are no-ops.
+          auto-push: true
+          gh-pages-branch: "benchmark-data"
+          benchmark-data-dir-path: "dev/bench"
           alert-threshold: "200%"
-          comment-on-alert: ${{ github.event.pull_request.head.repo.fork == false }}
           summary-always: true
-          alert-comment-cc-users: "@jhult"
           fail-on-alert: true
           max-items-in-chart: 25
