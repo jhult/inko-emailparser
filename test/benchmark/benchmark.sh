@@ -19,6 +19,7 @@ fi
 _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR="$_script_dir"
 readonly BENCHMARK_DIR="$SCRIPT_DIR"
+readonly PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 readonly RESULTS_DIR="$SCRIPT_DIR/results"
 
 # JSON/regression detection defaults
@@ -194,10 +195,15 @@ main() {
   echo "Timestamp: $(date)"
   echo ""
 
+  # Build a release binary: `inko run` uses a debug build, so its timings
+  # cannot be compared across runs or against CI history.
+  local bench_bin="$PROJECT_DIR/build/release/benchmark_bench"
+
+  inko build --release "$BENCHMARK_DIR/benchmark_bench.inko"
+
   # Run the benchmark and capture output
-  cd "$BENCHMARK_DIR"
   local parsing_output
-  parsing_output=$(inko run benchmark_bench.inko 2>&1)
+  parsing_output=$("$bench_bin" 2>&1)
 
   # Always show output and save text results
   echo "$parsing_output" | tee "$text_results_file"

@@ -28,10 +28,17 @@ The script:
 
 ### Manual Execution
 
+The script builds a release binary before running, because debug-build timings
+are not comparable across runs or with CI history. To reproduce that manually:
+
 ```bash
 cd test/benchmark
-inko run benchmark_bench.inko
+inko build --release benchmark_bench.inko
+./build/release/benchmark_bench
 ```
+
+Each benchmark is warmed up once and then run three times; the fastest round is
+reported so a one-off scheduling hiccup does not dominate the result.
 
 ## Benchmark Categories
 

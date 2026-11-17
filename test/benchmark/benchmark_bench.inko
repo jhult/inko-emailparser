@@ -6,6 +6,37 @@ import emailparser (EmailParser)
 import std.stdio (Stdout)
 import std.time (Instant)
 
+# Rounds per benchmark. The fastest round is reported so a single scheduler
+# hiccup does not dominate the measurement.
+let REPETITIONS = 3
+
+# Time `iterations` calls of `body`, repeated `REPETITIONS` times
+#
+# Returns the fastest round in milliseconds.
+fn measure(iterations: Int, body: fn) -> Int {
+  let mut best = 0
+  let mut round = 0
+
+  while round < REPETITIONS {
+    let start = Instant.new
+    let mut i = 0
+
+    while i < iterations {
+      body.call
+
+      i = i + 1
+    }
+
+    let elapsed = start.elapsed.to_millis
+
+    if round == 0 or elapsed < best { best = elapsed }
+
+    round = round + 1
+  }
+
+  best
+}
+
 type async Main {
   fn async main {
     let out = Stdout.new
@@ -22,118 +53,53 @@ type async Main {
 
     let qp_email = 'From: sender@example.com\nTo: recipient@example.com\nSubject: QP Test\nMIME-Version: 1.0\nContent-Type: text/plain\nContent-Transfer-Encoding: quoted-printable\n\nHello=20World=21\n'
 
-    # Warmup
-    out.print('Warming up...')
+    let header_input = 'From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n'
+
+    let address_input = 'John Doe <john@example.com>, Jane <jane@example.com>'
 
     let parser = EmailParser.new
 
-    parser.parse(simple_email.clone)
+    # Warm up every input, not just the first: otherwise benchmarks 2-6 pay
+    # first-call costs inside their timed section.
+    out.print('Warming up...')
+
+    let _ = parser.parse(simple_email)
+    let _ = parser.parse(multipart_email)
+    let _ = parser.parse(base64_email)
+    let _ = parser.parse(qp_email)
+    let _ = parser.parse_headers(header_input)
+    let _ = parser.parse_address_list(Option.Some(address_input))
 
     out.print('  Warmup complete')
     out.print('')
 
     # Benchmark 1: Simple email parsing (1000 iterations)
     out.print('Benchmark 1: Simple email parsing (1000 iterations)...')
-
-    let start1 = Instant.new
-    let mut i1 = 0
-
-    while i1 < 1000 {
-      parser.parse(simple_email.clone)
-
-      i1 = i1 + 1
-    }
-
-    let elapsed1 = start1.elapsed
-
-    out.print('  ${elapsed1.to_millis} ms')
+    out.print('  ${measure(1000, fn { parser.parse(simple_email) })} ms')
 
     # Benchmark 2: Multipart parsing (500 iterations)
     out.print('Benchmark 2: Multipart parsing (500 iterations)...')
-
-    let start2 = Instant.new
-    let mut i2 = 0
-
-    while i2 < 500 {
-      parser.parse(multipart_email.clone)
-
-      i2 = i2 + 1
-    }
-
-    let elapsed2 = start2.elapsed
-
-    out.print('  ${elapsed2.to_millis} ms')
+    out.print('  ${measure(500, fn { parser.parse(multipart_email) })} ms')
 
     # Benchmark 3: Base64 decoding (1000 iterations)
     out.print('Benchmark 3: Base64 decoding (1000 iterations)...')
-
-    let start3 = Instant.new
-    let mut i3 = 0
-
-    while i3 < 1000 {
-      parser.parse(base64_email.clone)
-
-      i3 = i3 + 1
-    }
-
-    let elapsed3 = start3.elapsed
-
-    out.print('  ${elapsed3.to_millis} ms')
+    out.print('  ${measure(1000, fn { parser.parse(base64_email) })} ms')
 
     # Benchmark 4: Quoted-printable decoding (1000 iterations)
     out.print('Benchmark 4: Quoted-printable decoding (1000 iterations)...')
-
-    let start4 = Instant.new
-    let mut i4 = 0
-
-    while i4 < 1000 {
-      parser.parse(qp_email.clone)
-
-      i4 = i4 + 1
-    }
-
-    let elapsed4 = start4.elapsed
-
-    out.print('  ${elapsed4.to_millis} ms')
+    out.print('  ${measure(1000, fn { parser.parse(qp_email) })} ms')
 
     # Benchmark 5: Header parsing (10000 iterations)
     out.print('Benchmark 5: Header parsing (10000 iterations)...')
-
-    let start5 = Instant.new
-    let mut i5 = 0
-
-    while i5 < 10000 {
-      parser.parse_headers(
-        'From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n'
-          .to_string,
-      )
-
-      i5 = i5 + 1
-    }
-
-    let elapsed5 = start5.elapsed
-
-    out.print('  ${elapsed5.to_millis} ms')
+    out.print(
+      '  ${measure(10000, fn { parser.parse_headers(header_input) })} ms',
+    )
 
     # Benchmark 6: Address parsing (5000 iterations)
     out.print('Benchmark 6: Address parsing (5000 iterations)...')
-
-    let start6 = Instant.new
-    let mut i6 = 0
-
-    while i6 < 5000 {
-      parser.parse_address_list(
-        Option.Some(
-          'John Doe <john@example.com>, Jane <jane@example.com>'.to_string,
-        ),
-      )
-
-      i6 = i6 + 1
-    }
-
-    let elapsed6 = start6.elapsed
-
-    out.print('  ${elapsed6.to_millis} ms')
+    out.print(
+      '  ${measure(5000, fn { parser.parse_address_list(Option.Some(address_input)) })} ms',
+    )
 
     out.print('')
     out.print('All benchmarks complete!')
