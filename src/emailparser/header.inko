@@ -13,8 +13,8 @@
 # - Standard header identification
 
 import emailparser.ascii (
-  ASCII_COLON, ASCII_DQUOTE, ASCII_EXCLAMATION, ASCII_SEMICOLON, ASCII_TILDE,
-  is_uppercase,
+  ASCII_BACKSLASH, ASCII_COLON, ASCII_DQUOTE, ASCII_EXCLAMATION,
+  ASCII_SEMICOLON, ASCII_TILDE, is_uppercase,
 )
 import emailparser.decoder (decode_charset)
 import emailparser.error (Error)
@@ -616,7 +616,12 @@ fn parse_parameters_impl(
   while i < params_raw.size {
     match params_raw.get(i) {
       case Ok(byte) -> {
-        if byte == ASCII_DQUOTE {
+        if byte == ASCII_BACKSLASH and in_quotes {
+          # RFC 2045 quoted-pair: the escaped byte is literal, so an escaped
+          # quote must not toggle the quote state and an escaped semicolon must
+          # not end the parameter. Skip it.
+          i = i + 1
+        } else if byte == ASCII_DQUOTE {
           # Toggle quote state
           in_quotes = !in_quotes
         } else if byte == ASCII_SEMICOLON and !in_quotes {
@@ -688,9 +693,10 @@ fn parse_single_parameter(
         )
       }
 
-      # Remove quotes if present
+      # Remove quotes if present, resolving the quoted-pairs used to embed a
+      # quote or backslash in the value.
       let clean_value = if is_quoted_string(value) {
-        value.slice(1, value.size - 1).to_string
+        unescape_quoted_pairs(value.slice(1, value.size - 1).to_string)
       } else {
         value.to_string
       }
@@ -710,6 +716,43 @@ fn parse_single_parameter(
       )
     }
   }
+}
+
+# Resolve the quoted-pairs of a quoted-string body
+#
+# Only `\"` and `\\` are unescaped: RFC 2045 allows any quoted-pair, but
+# resolving e.g. the backslash in an unescaped Windows path would silently
+# mangle the value.
+fn unescape_quoted_pairs(value: String) -> String {
+  let result = ByteArray.new
+  let mut i = 0
+
+  while i < value.size {
+    match value.get(i) {
+      case Ok(byte) -> {
+        if byte == ASCII_BACKSLASH and i + 1 < value.size {
+          match value.get(i + 1) {
+            case Ok(following) -> {
+              if following == ASCII_DQUOTE or following == ASCII_BACKSLASH {
+                result.push(following)
+                i = i + 1
+              } else {
+                result.push(byte)
+              }
+            }
+            case Error(_) -> result.push(byte)
+          }
+        } else {
+          result.push(byte)
+        }
+      }
+      case Error(_) -> {}
+    }
+
+    i = i + 1
+  }
+
+  result.into_string
 }
 
 # Parse Content-Disposition header value

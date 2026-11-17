@@ -142,6 +142,32 @@ fn pub tests(t: mut Tests) {
     },
   )
 
+  t.test('extract_filename_param_escaped_quote', fn (t) {
+    # The escaped quote must neither end the value nor swallow "; size=1".
+    # sanitize_filename replaces the embedded quote with '_'.
+    t.equal(
+      extract_filename_param('attachment; filename="a\\"b.txt"; size=1'),
+      Option.Some('a_b.txt'),
+    )
+  })
+
+  t.test('content_type_parameter_escaped_backslash', fn (t) {
+    match parse_content_type_impl('text/plain; name="a\\\\b.txt"', true) {
+      case Ok((_, params)) -> {
+        t.equal(params.size, 1)
+
+        match params.get(0) {
+          case Ok((key, value)) -> {
+            t.equal(key, 'name')
+            t.equal(value, 'a\\b.txt')
+          }
+          case Error(_) -> t.true(false)
+        }
+      }
+      case Error(e) -> t.equal('should parse', e.to_message)
+    }
+  })
+
   t.test('content_type_quoted_non_ascii_boundary', fn (t) {
     match
       parse_content_type_impl('multipart/mixed; boundary="ersönlich"', true)
