@@ -241,12 +241,17 @@ fn join_header_values(
 fn pub validate_multipart_boundary(
   content_type: String,
   boundary: ref Option[String],
+  strict_mode: Bool,
 ) -> Result[Bool, Error] {
   if !is_multipart(content_type) { return Result.Ok(true) }
 
   match boundary.clone {
     case Some(b) -> {
       if !is_valid_boundary(b.clone) {
+        # Permissive parsing still processes the message; the body falls back
+        # to plain text when the boundary cannot be used.
+        if !strict_mode { return Result.Ok(false) }
+
         return Result.Error(
           Error.InvalidBoundary(
             Severity.Error,
@@ -259,6 +264,8 @@ fn pub validate_multipart_boundary(
       }
     }
     case None -> {
+      if !strict_mode { return Result.Ok(false) }
+
       return Result.Error(
         Error.InvalidBoundary(
           Severity.Error,

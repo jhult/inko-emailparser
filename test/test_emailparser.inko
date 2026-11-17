@@ -1460,10 +1460,8 @@ Body
   })
 
   # MIME boundary validation tests
-  t.test('multipart_without_boundary_rejected', fn (t) {
+  t.test('multipart_without_boundary_falls_back_to_text', fn (t) {
     let parser = EmailParser.new
-
-    # Multipart without boundary parameter should be rejected
     let email = 'From: sender@example.com
 To: user@example.com
 Subject: No Boundary
@@ -1473,6 +1471,18 @@ Content-Type: multipart/mixed
 Body'
 
     match parser.parse(email) {
+      case Ok(msg) -> {
+        match msg.text_body.clone {
+          case Some(body) -> t.equal(body, 'Body')
+          case None -> t.equal('expected body text', 'got none')
+        }
+      }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+
+    let strict = EmailParser.new.with_strict_mode(true)
+
+    match strict.parse(email) {
       case Ok(_) -> t.equal('should error', 'got ok')
       case Error(e) -> t.true(e.to_message.contains?('boundary'))
     }

@@ -436,8 +436,21 @@ data'
     let mut reader = ByteArrayReader.from_string(raw)
 
     match parser.parse_async_reader(mut reader, mut handler) {
+      case Ok(_) -> t.equal(handler.errors_received, 0)
+      case Error(e) -> panic('Permissive parse failed: ${e.to_message}')
+    }
+
+    let mut config = StreamingConfig.new
+
+    config.strict_mode = true
+
+    let mut strict = StreamingParser.with_config(config)
+    let mut strict_handler = CollectingHandler.new
+    let mut strict_reader = ByteArrayReader.from_string(raw)
+
+    match strict.parse_async_reader(mut strict_reader, mut strict_handler) {
       case Ok(_) -> t.false(true)
-      case Error(_) -> t.equal(handler.errors_received, 1)
+      case Error(_) -> t.equal(strict_handler.errors_received, 1)
     }
   })
 

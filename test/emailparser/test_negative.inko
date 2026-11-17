@@ -123,12 +123,16 @@ Text
 --boundary--
 '
 
-    let result = parser.parse(raw_email)
+    match parser.parse(raw_email) {
+      case Ok(_) -> t.true(true) # Permissive mode keeps the body as text
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
 
-    match result {
-      case Ok(_) -> t.false(true) # Should fail
+    let strict = EmailParser.new.with_strict_mode(true)
+
+    match strict.parse(raw_email) {
+      case Ok(_) -> t.false(true) # Strict mode should fail
       case Error(e) -> {
-        # Fixed error check
         t.true(
           e.to_message.contains?('boundary')
             or e.to_message.contains?('Boundary'),
@@ -602,12 +606,16 @@ Text
       + '--
 '
 
-    let result = parser.parse(raw_email)
+    match parser.parse(raw_email) {
+      case Ok(_) -> t.true(true) # Permissive mode keeps the body as text
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
 
-    match result {
-      case Ok(_) -> t.false(true) # Should fail
+    let strict = EmailParser.new.with_strict_mode(true)
+
+    match strict.parse(raw_email) {
+      case Ok(_) -> t.false(true) # Strict mode should fail
       case Error(e) -> {
-        # Fixed error check
         t.true(
           e.to_message.contains?('boundary')
             or e.to_message.contains?('Boundary'),

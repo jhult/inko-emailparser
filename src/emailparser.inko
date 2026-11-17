@@ -337,7 +337,21 @@ fn parse_email_body(
           strict_mode,
         )
       }
-      case None -> Result.Ok((Option.None, Option.None, []))
+      case None -> {
+        # Permissive mode: a multipart body without a usable boundary cannot
+        # be split, so treat it as text instead of dropping it.
+        match
+          decode_text_body(
+            body_raw,
+            'text/plain',
+            content_transfer_encoding,
+            max_size,
+          )
+        {
+          case Ok((text, _)) -> Result.Ok((text, Option.None, []))
+          case Error(e) -> Result.Error(e)
+        }
+      }
     }
   } else {
     Result.Ok((Option.None, Option.None, []))
@@ -504,13 +518,22 @@ impl EmailParser {
       case Error(e) -> return Result.Error(e)
     }
 
-    let boundary = extract_boundary(ref ct_params)
+    let mut boundary = extract_boundary(ref ct_params)
 
-    # Validate boundary string format and existence in one pass
-    match validate_multipart_boundary(ct_main.clone, ref boundary) {
-      case Ok(_) -> {}
+    # Validate boundary string format and existence in one pass. In permissive
+    # mode an unusable boundary becomes None so the body falls back to text.
+    let boundary_ok = match
+      validate_multipart_boundary(
+        ct_main.clone,
+        ref boundary,
+        @config.strict_mode,
+      )
+    {
+      case Ok(valid) -> valid
       case Error(e) -> return Result.Error(e)
     }
+
+    if !boundary_ok { boundary = Option.None }
 
     # Parse body based on content type
     let max_depth = @config.max_multipart_depth
