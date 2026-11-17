@@ -76,50 +76,31 @@ import emailparser.validation (is_valid_boundary)
 import std.bytes (ByteArray)
 import std.option (Option)
 import std.result (Result)
+import std.string (StringBuffer)
 
 # Process a single multipart part and merge results
+#
+# Body segments are appended to the arrays rather than concatenated into an
+# accumulator: cloning the accumulator per part is quadratic in the number of
+# parts, which a sender controls. `join_body_segments` builds the final body
+# once, after every part has been seen.
 fn merge_multipart_part(
-  text_body: ref Option[String],
-  html_body: ref Option[String],
+  text_parts: mut Array[String],
+  html_parts: mut Array[String],
   ct_main: String,
   disp_main: String,
   filename: Option[String],
   content_id: Option[String],
   decoded_bytes: ByteArray,
-) -> (Option[String], Option[String], Option[EmailAttachment]) {
-  # Track if we need to clone (lazy initialization)
-  let mut text_modified = false
-  let mut html_modified = false
-  let mut new_text_body = Option.None
-  let mut new_html_body = Option.None
-  let mut new_attachment = Option.None
-
+) -> Option[EmailAttachment] {
   match classify_part(ct_main.clone, disp_main.clone, ref filename) {
     case TextBody -> {
-      let segment = decoded_bytes.into_string
-
-      if text_body.some? {
-        let existing: String = text_body.clone.get
-
-        new_text_body = Option.Some(existing + '\n' + segment)
-      } else {
-        new_text_body = Option.Some(segment)
-      }
-
-      text_modified = true
+      text_parts.push(decoded_bytes.into_string)
+      Option.None
     }
     case HtmlBody -> {
-      let segment = decoded_bytes.into_string
-
-      if html_body.some? {
-        let existing: String = html_body.clone.get
-
-        new_html_body = Option.Some(existing + '\n' + segment)
-      } else {
-        new_html_body = Option.Some(segment)
-      }
-
-      html_modified = true
+      html_parts.push(decoded_bytes.into_string)
+      Option.None
     }
     case _ -> {
       # Attachments and unhandled kinds. An un-attached multipart/* part is
@@ -130,7 +111,7 @@ fn merge_multipart_part(
       # explicit "inline" is preserved (e.g. images in multipart/related).
       let disposition = if disp_main.empty? { 'attachment' } else { disp_main }
 
-      new_attachment = Option.Some(
+      Option.Some(
         EmailAttachment.from_decoded_part(
           content_type: ct_main,
           filename: filename,
@@ -141,27 +122,22 @@ fn merge_multipart_part(
       )
     }
   }
+}
 
-  # Clone original values only if we didn't modify them
-  let final_text = if text_modified {
-    new_text_body
-  } else {
-    match text_body.clone {
-      case Some(v) -> Option.Some(v)
-      case None -> Option.None
-    }
+# Join the body segments of one kind with the separator used between parts
+fn join_body_segments(segments: ref Array[String]) -> Option[String] {
+  if segments.empty? { return Option.None }
+
+  let mut buffer = StringBuffer.new
+  let mut first = true
+
+  for segment in segments.iter {
+    if first { first = false } else { buffer.push('\n') }
+
+    buffer.push(segment.clone)
   }
 
-  let final_html = if html_modified {
-    new_html_body
-  } else {
-    match html_body.clone {
-      case Some(v) -> Option.Some(v)
-      case None -> Option.None
-    }
-  }
-
-  (final_text, final_html, new_attachment)
+  Option.Some(buffer.into_string)
 }
 
 # Handle nested multipart messages
@@ -255,8 +231,8 @@ fn parse_multipart_impl(
     )
   }
 
-  let mut text_body = Option.None
-  let mut html_body = Option.None
+  let mut text_parts: Array[String] = []
+  let mut html_parts: Array[String] = []
   let mut attachments = []
 
   let parts = match split_multipart_body(raw, boundary) {
@@ -358,28 +334,12 @@ fn parse_multipart_impl(
               {
                 case Ok((nested_text, nested_html, nested_atts)) -> {
                   match nested_text {
-                    case Some(txt) -> {
-                      if text_body.some? {
-                        let existing: String = text_body.clone.get
-
-                        text_body = Option.Some(existing + '\n' + txt)
-                      } else {
-                        text_body = Option.Some(txt)
-                      }
-                    }
+                    case Some(txt) -> text_parts.push(txt)
                     case None -> {}
                   }
 
                   match nested_html {
-                    case Some(html) -> {
-                      if html_body.some? {
-                        let existing: String = html_body.clone.get
-
-                        html_body = Option.Some(existing + '\n' + html)
-                      } else {
-                        html_body = Option.Some(html)
-                      }
-                    }
+                    case Some(html) -> html_parts.push(html)
                     case None -> {}
                   }
 
@@ -409,18 +369,15 @@ fn parse_multipart_impl(
                 }
               }
             } else {
-              let (new_text, new_html, new_att) = merge_multipart_part(
-                text_body,
-                html_body,
+              let new_att = merge_multipart_part(
+                mut text_parts,
+                mut html_parts,
                 ct_main,
                 disp_main,
                 filename,
                 content_id,
                 decoded_bytes,
               )
-
-              text_body = new_text
-              html_body = new_html
 
               match new_att {
                 case Some(att) -> {
@@ -457,7 +414,13 @@ fn parse_multipart_impl(
     }
   }
 
-  Result.Ok((text_body, html_body, attachments))
+  Result.Ok(
+    (
+      join_body_segments(ref text_parts),
+      join_body_segments(ref html_parts),
+      attachments,
+    ),
+  )
 }
 
 # Split and validate multipart body by boundary
