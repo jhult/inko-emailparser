@@ -9,8 +9,7 @@
 # to track parsing progress through multipart structure.
 
 import emailparser.boundary (find_boundary, is_line_start)
-import emailparser.error (Error)
-import emailparser.error (Severity)
+import emailparser.error (Error, Severity)
 import emailparser.header (
   extract_filename_param, find_header_separator_bytes, get_header_value_impl,
   parse_headers_impl,
@@ -51,17 +50,13 @@ type pub enum MultipartState {
   }
 }
 
-# Current part context for tracking active part metadata
+# Metadata for the part currently being read
+#
+# Only the transfer encoding survives here: it is needed to label subsequent
+# `on_part_data` calls, while the remaining part metadata is emitted once
+# through `on_part_begin`.
 type pub CurrentPartContext {
-  let pub @index: Int
-  let pub @headers: Array[(String, String)]
-  let pub @content_type: String
-  let pub @content_disposition: String
   let pub @content_transfer_encoding: String
-  let pub @is_attachment: Bool
-  let pub @filename: Option[String]
-  let pub @content_id: Option[String]
-  let pub @bytes_read: Int
 }
 
 # Handler trait for multipart streaming events
@@ -96,7 +91,6 @@ type pub MultipartStreamParser {
   let @strict_mode: Bool
   let @max_headers: Int
   let mut @current_context: Option[CurrentPartContext]
-  let mut @attachment_count: Int
 
   # Whether the first buffered byte is known to follow a line break. Buffer
   # trimming drops bytes from the front, so position 0 is not automatically a
@@ -139,7 +133,6 @@ impl MultipartStreamParser {
         strict_mode: strict_mode,
         max_headers: max_headers,
         current_context: Option.None,
-        attachment_count: 0,
         head_line_start: true,
       ),
     )
@@ -466,8 +459,6 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
         'Content-Transfer-Encoding',
       )
         .or('7bit')
-      let content_id = get_header_value_impl(ref headers, 'Content-ID')
-
       # Determine if attachment (RFC 2183 values are case-insensitive)
       #
       # Use the shared classifier so the streaming and buffered parsers agree
@@ -487,12 +478,6 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
 
       if !is_attachment { filename = Option.None }
 
-      # Get attachment index for this part
-      let att_index = if is_attachment { parser.attachment_count } else { -1 }
-
-      # Increment attachment counter if this is an attachment
-      if is_attachment { parser.attachment_count = parser.attachment_count + 1 }
-
       # Notify handler before creating context (to avoid moving headers)
       match
         handler.on_part_begin(ref headers, content_type.clone, is_attachment)
@@ -503,15 +488,7 @@ fn process_reading_headers[H: mut + MultipartStreamHandler](
 
       # Create part context
       let context = CurrentPartContext(
-        index: att_index,
-        headers: headers,
-        content_type: content_type,
-        content_disposition: content_disposition,
         content_transfer_encoding: content_transfer_encoding,
-        is_attachment: is_attachment,
-        filename: filename,
-        content_id: content_id,
-        bytes_read: 0,
       )
 
       parser.current_context = Option.Some(context)
