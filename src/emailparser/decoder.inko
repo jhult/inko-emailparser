@@ -739,7 +739,31 @@ fn pub decode_header_value_impl(raw: String) -> String {
     result.append(remaining_bytes)
   }
 
-  result.into_string
+  strip_header_controls(ref result)
+}
+
+# Drop C0 controls and DEL from a decoded header value
+#
+# An encoded word can carry raw line breaks (`=?utf-8?Q?Hi=0D=0AInjected:X?=`
+# decodes to "Hi\r\nInjected:X"), and callers commonly re-emit decoded header
+# values in replies and forwards. Removing them here keeps the value a single
+# line. Horizontal tabs are kept because they are legal header whitespace.
+fn strip_header_controls(bytes: ref ByteArray) -> String {
+  let clean = ByteArray.new
+  let mut i = 0
+
+  while i < bytes.size {
+    match bytes.get(i) {
+      case Ok(byte) -> {
+        if (byte >= 32 or byte == ASCII_HT) and byte != 127 { clean.push(byte) }
+      }
+      case Error(_) -> {}
+    }
+
+    i = i + 1
+  }
+
+  clean.into_string
 }
 
 fn pub decode_rfc2047_quoted_printable(text: String) -> String {

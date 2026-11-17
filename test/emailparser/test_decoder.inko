@@ -281,6 +281,22 @@ fn pub tests(t: mut Tests) {
     t.equal(decoded, 'Hello Grüße')
   })
 
+  t.test('decode_header_value_strips_line_breaks', fn (t) {
+    # A sender must not be able to inject headers through an encoded word,
+    # since decoded values are commonly re-emitted in replies and forwards.
+    let decoded = decode_header_value_impl('=?utf-8?Q?Hi=0D=0AInjected:X?=')
+
+    t.equal(decoded, 'HiInjected:X')
+    t.false(decoded.contains?('\r'))
+    t.false(decoded.contains?('\n'))
+  })
+
+  t.test('decode_header_value_keeps_tabs', fn (t) {
+    let decoded = decode_header_value_impl('=?utf-8?Q?a=09b?=')
+
+    t.equal(decoded, 'a\tb')
+  })
+
   t.test('decode_header_value_unpadded_base64', fn (t) {
     let decoded = decode_header_value_impl('=?utf-8?B?SGVsbG8?=')
 
