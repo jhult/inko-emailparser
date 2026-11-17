@@ -270,7 +270,7 @@ fn drain_buffer[H: mut + MultipartStreamHandler](
 
     match parser.state {
       case Preamble -> {
-        match process_preamble(parser, handler) {
+        match process_preamble(parser, handler, at_eof) {
           case Ok(_) -> {}
           case Error(e) -> return Result.Error(e)
         }
@@ -315,6 +315,7 @@ fn drain_buffer[H: mut + MultipartStreamHandler](
 fn process_preamble[H: mut + MultipartStreamHandler](
   parser: mut MultipartStreamParser,
   handler: mut H,
+  at_eof: Bool,
 ) -> Result[Int, Error] {
   let boundary_marker = '--' + parser.boundary
   let boundary_bytes = boundary_marker.to_byte_array
@@ -324,7 +325,7 @@ fn process_preamble[H: mut + MultipartStreamHandler](
     find_boundary(
       ref parser.buffer,
       ref boundary_bytes,
-      false,
+      at_eof,
       parser.head_line_start,
     )
   {

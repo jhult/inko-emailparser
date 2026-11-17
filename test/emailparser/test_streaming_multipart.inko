@@ -502,6 +502,35 @@ Actual content
     t.equal(handler.parts_ended, 1)
   })
 
+  # At EOF an incomplete delimiter tail is accepted, so a message truncated
+  # inside the preamble delimiter is reported as an error instead of parsing
+  # as a preamble-only message with no parts.
+  t.test('multipart_preamble_truncated_delimiter_at_eof', fn (t) {
+    let mut parser = match
+      MultipartStreamParser.new(
+        boundary: 'pre',
+        strict_mode: false,
+        max_headers: 100,
+      )
+    {
+      case Ok(p) -> p
+      case Error(e) -> panic('Failed to create parser: ${e.to_message}')
+    }
+
+    let mut handler = TestHandler.new
+    let data = 'preamble text\r\n--pre'.to_byte_array
+
+    match parser.feed(ref data, mut handler) {
+      case Ok(_) -> {}
+      case Error(e) -> panic('Feed failed: ${e.to_message}')
+    }
+
+    match parser.finish(mut handler) {
+      case Ok(_) -> t.equal('truncated delimiter should fail', 'got Ok')
+      case Error(_) -> t.equal(handler.parts_begun, 0)
+    }
+  })
+
   # A delimiter that straddles two reads must survive preamble trimming: the
   # trim window has to keep the partial marker and its preceding line break.
   t.test('multipart_preamble_split_boundary', fn (t) {
