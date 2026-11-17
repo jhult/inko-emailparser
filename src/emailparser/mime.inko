@@ -25,7 +25,7 @@
 # - RFC 2045 section 5: Content-Type Header Field
 # # - RFC 2046 section 5.1: Multipart Media Type
 
-import emailparser.header (eq_ignore_case)
+import emailparser.header (get_param_value_impl)
 import std.option (Option)
 
 # Role of a MIME part
@@ -126,10 +126,6 @@ fn pub is_text_html(content_type: String) -> Bool {
 
 # Extract the boundary parameter from Content-Type params
 fn pub extract_boundary(params: ref Array[(String, String)]) -> Option[String] {
-  for (key, value) in params.iter {
-    # Boundary parameter names are case-insensitive
-    if eq_ignore_case(key, 'boundary') { return Option.Some(value.clone) }
-  }
-
-  Option.None
+  # Parameter names are case-insensitive, which `get_param_value_impl` handles
+  get_param_value_impl(ref params, 'boundary')
 }
