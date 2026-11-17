@@ -258,17 +258,23 @@ Content-Type: invalidformat
 
 Body text.'
 
-    let result = parser.parse(raw_email)
+    match parser.parse(raw_email) {
+      case Ok(msg) -> {
+        t.equal(msg.mime.content_type, 'text/plain')
 
-    match result {
-      case Ok(_) -> t.false(true) # Should fail
-      case Error(e) -> {
-        # Fixed error check
-        t.true(
-          e.to_message.contains?('Content-Type')
-            or e.to_message.contains?('content'),
-        )
+        match msg.text_body.clone {
+          case Some(body) -> t.equal(body, 'Body text.')
+          case None -> t.equal('expected body text', 'got none')
+        }
       }
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
+
+    let strict = EmailParser.new.with_strict_mode(true)
+
+    match strict.parse(raw_email) {
+      case Ok(_) -> t.false(true) # Strict mode should fail
+      case Error(_) -> t.true(true)
     }
   })
 
@@ -283,11 +289,16 @@ Content-Type: text/
 
 Body text.'
 
-    let result = parser.parse(raw_email)
+    match parser.parse(raw_email) {
+      case Ok(msg) -> t.equal(msg.mime.content_type, 'text/plain')
+      case Error(e) -> t.equal('should parse', 'got error: ' + e.to_message)
+    }
 
-    match result {
-      case Ok(_) -> t.false(true) # Should fail
-      case Error(_) -> t.true(true) # Expected error
+    let strict = EmailParser.new.with_strict_mode(true)
+
+    match strict.parse(raw_email) {
+      case Ok(_) -> t.false(true) # Strict mode should fail
+      case Error(_) -> t.true(true)
     }
   })
 

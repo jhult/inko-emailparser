@@ -595,4 +595,19 @@ Body'
       case None -> t.false(true)
     }
   })
+
+  t.test('invalid_content_type_falls_back_in_permissive_mode', fn (t) {
+    match parse_content_type_impl('not-a-mime-type', false) {
+      case Ok((main, params)) -> {
+        t.equal(main, 'text/plain')
+        t.equal(params.size, 0)
+      }
+      case Error(_) -> t.equal('expected a fallback', 'got error')
+    }
+
+    match parse_content_type_impl('text', true) {
+      case Ok(_) -> t.equal('expected an error', 'got ok')
+      case Error(_) -> t.true(true)
+    }
+  })
 }

@@ -562,6 +562,10 @@ fn parse_content_type_impl(
 
   # Validate that main type is in valid "type/subtype" format
   if !is_valid_mime_type(main_type.clone) {
+    # Permissive mode treats an unusable Content-Type as text/plain instead of
+    # failing the whole message.
+    if !strict_mode { return Result.Ok(('text/plain', [])) }
+
     return Result.Error(
       Error.InvalidContentType(
         Severity.Error,

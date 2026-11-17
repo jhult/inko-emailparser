@@ -1055,7 +1055,7 @@ ${body}
     }
   })
 
-  t.test('parse_stream_reports_mime_metadata_errors_to_handler', fn (t) {
+  t.test('parse_stream_falls_back_for_invalid_content_type', fn (t) {
     let parser = StreamingParser.new
     let handler = MemoryBufferingHandler.new
     let email = 'From: a@example.com
@@ -1066,8 +1066,20 @@ Content-Type: not-a-mime-type
 body'
 
     match parser.parse_stream(email, handler) {
+      case Ok(_) -> t.equal(handler.get_text_body.trim, 'body')
+      case Error(e) -> panic('Permissive parse failed: ${e.to_message}')
+    }
+
+    let mut config = StreamingConfig.new
+
+    config.strict_mode = true
+
+    let strict = StreamingParser.with_config(config)
+    let strict_handler = MemoryBufferingHandler.new
+
+    match strict.parse_stream(email, strict_handler) {
       case Ok(_) -> t.false(true)
-      case Error(_) -> t.equal(handler.get_errors.size, 1)
+      case Error(_) -> t.equal(strict_handler.get_errors.size, 1)
     }
   })
 
