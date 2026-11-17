@@ -19,8 +19,7 @@ on:
       - ".github/workflows/**"
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -34,7 +33,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check License Headers
-        uses: apache/skywalking-eyes/header@main
+        uses: apache/skywalking-eyes/header@a196742f472feaffafea537ce5a2a4c3c53a8de4 # v0.9.0
         with:
           config: .licenserc.yaml
 
@@ -58,6 +57,9 @@ jobs:
   benchmark:
     name: Performance Benchmarks
     runs-on: ubuntu-latest
+    # The benchmark action posts a commit summary on trunk pushes
+    permissions:
+      contents: write
     container:
       image: ghcr.io/inko-lang/inko@sha256:fa5aad694709c95e7e9abe3fd290f71ec62f1b4e2b230fad8b56b6b64617052e
     needs: [license-check, check-and-test]
