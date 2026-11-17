@@ -71,19 +71,10 @@ impl AsyncReader for ByteArrayReader {
     let remaining = @data.size - @position
     let bytes_to_read = if size < remaining { size } else { remaining }
 
-    let mut result = ByteArray.new
-    let mut i = 0
+    let start = @position
+    let result = @data.slice(start, start + bytes_to_read).to_byte_array
 
-    while i < bytes_to_read {
-      match @data.get(@position + i) {
-        case Ok(byte) -> result.push(byte)
-        case Error(_) -> {}
-      }
-
-      i = i + 1
-    }
-
-    @position = @position + bytes_to_read
+    @position = start + bytes_to_read
 
     Result.Ok(result)
   }
