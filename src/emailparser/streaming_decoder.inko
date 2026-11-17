@@ -92,22 +92,9 @@ impl Base64StreamingDecoder {
 
     if decode_len == 0 { return Result.Ok(ByteArray.new) }
 
-    let to_decode = ByteArray.new
-    let rest = ByteArray.new
-    let mut idx = 0
+    let to_decode = @buffer.slice(0, decode_len).to_byte_array
 
-    while idx < @buffer.size {
-      match @buffer.get(idx) {
-        case Ok(byte) -> {
-          if idx < decode_len { to_decode.push(byte) } else { rest.push(byte) }
-        }
-        case Error(_) -> {}
-      }
-
-      idx = idx + 1
-    }
-
-    @buffer = rest
+    @buffer = @buffer.slice(decode_len, @buffer.size).to_byte_array
 
     # Padding only ends one encoded block. Reset the state so a caller can
     # feed another block through the same decoder.
@@ -135,17 +122,7 @@ impl Base64StreamingDecoder {
 
     if @buffer.size == 0 { return Result.Ok(output) }
 
-    let to_decode = ByteArray.new
-    let mut idx = 0
-
-    while idx < @buffer.size {
-      match @buffer.get(idx) {
-        case Ok(byte) -> to_decode.push(byte)
-        case Error(_) -> {}
-      }
-
-      idx = idx + 1
-    }
+    let to_decode = @buffer.clone
 
     @buffer = ByteArray.new
 
@@ -273,28 +250,9 @@ impl QuotedPrintableStreamingDecoder {
   # Feed raw bytes. The byte path preserves non-UTF-8 attachment content.
   fn pub mut feed_bytes(chunk: ref ByteArray) -> Result[ByteArray, String] {
     # Combine pending data with new chunk
-    let combined = ByteArray.new
-    let mut p = 0
+    let mut combined = @pending.clone
 
-    while p < @pending.size {
-      match @pending.get(p) {
-        case Ok(b) -> combined.push(b)
-        case Error(_) -> {}
-      }
-
-      p = p + 1
-    }
-
-    let mut c = 0
-
-    while c < chunk.size {
-      match chunk.get(c) {
-        case Ok(b) -> combined.push(b)
-        case Error(_) -> {}
-      }
-
-      c = c + 1
-    }
+    combined.append(chunk.clone)
 
     # Only the trailing bytes of a potentially incomplete sequence are
     # buffered: '=', '=X' (X a hex digit) or '=\r'. Everything before it is
@@ -302,19 +260,7 @@ impl QuotedPrintableStreamingDecoder {
     let tail = qp_incomplete_tail(combined)
     let process_end = combined.size - tail
 
-    let pending = ByteArray.new
-    let mut t = process_end
-
-    while t < combined.size {
-      match combined.get(t) {
-        case Ok(b) -> pending.push(b)
-        case Error(_) -> {}
-      }
-
-      t = t + 1
-    }
-
-    @pending = pending
+    @pending = combined.slice(process_end, combined.size).to_byte_array
 
     # Decode the complete prefix with the shared QP state machine. The byte
     # range API keeps raw 8-bit content intact.
