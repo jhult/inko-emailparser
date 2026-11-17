@@ -54,6 +54,7 @@ import emailparser.message_id (normalize_message_id, parse_message_ids_impl)
 import emailparser.mime (is_multipart)
 import emailparser.validation (is_valid_boundary)
 import std.option (Option)
+import std.string (StringBuffer)
 
 # Parse a single address header (From, To, Cc, Bcc)
 fn parse_address_header(
@@ -66,15 +67,18 @@ fn parse_address_header(
 
   if values.empty? { return [] }
 
-  let mut combined = ''
+  # Build the joined value with a buffer: repeated string concatenation copies
+  # the whole accumulator on every iteration, which is quadratic.
+  let mut buffer = StringBuffer.new
+  let mut first = true
 
   for value in values.iter {
-    if combined.empty? {
-      combined = value.clone
-    } else {
-      combined = combined + ', ' + value.clone
-    }
+    if first { first = false } else { buffer.push(', ') }
+
+    buffer.push(value.clone)
   }
+
+  let combined = buffer.into_string
 
   let raw = Option.Some(combined.clone)
   let decoded = decode_header_value_impl(combined)
