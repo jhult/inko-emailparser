@@ -185,7 +185,11 @@ fn decode_base64_body(
   while j < data_size {
     match cleaned.get(j) {
       case Ok(byte) -> {
-        if is_base64_data_char(byte) { data.push(byte) } else { valid = false }
+        if is_base64_char(byte, false) {
+          data.push(byte)
+        } else {
+          valid = false
+        }
       }
       case Error(_) -> valid = false
     }
@@ -244,12 +248,18 @@ fn decode_base64_body(
   }
 }
 
-fn is_base64_data_char(byte: Int) -> Bool {
+# Whether a byte belongs to the base64 alphabet
+#
+# Padding (`=`) is only part of the alphabet when `allow_padding` is true: the
+# buffered decoder strips padding before this check, while the streaming
+# decoder needs to accept and track it in the input stream.
+fn pub is_base64_char(byte: Int, allow_padding: Bool) -> Bool {
   (byte >= 65 and byte <= 90)
     or (byte >= 97 and byte <= 122)
     or (byte >= 48 and byte <= 57)
     or byte == 43
     or byte == 47
+    or (allow_padding and byte == ASCII_EQUALS)
 }
 
 # Decode quoted-printable / RFC 2047 Q data
