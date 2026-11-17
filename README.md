@@ -73,10 +73,10 @@ src/emailparser.inko (main entry point)
         │   └── is_angle_bracketed()
         │
         ├── error.inko (error types)
-        │   └── 21 error constructors
+        │   └── 21 error variants
         │
         ├── limits.inko (constants)
-        │   └── 12 system limits
+        │   └── 16 system limits
         │
         └── [supporting modules]
             ├── date.inko (date formatting)
@@ -497,8 +497,8 @@ match parser.parse(raw_email_string) {
     # Success
   }
   case Error(e) -> match e {
-    case EmailSizeExceeded(_, max_size, actual_size, _, _) -> {
-      # Too large: max_size vs actual_size
+    case EmailSizeTooLarge(_, size, max_size, _, _, _) -> {
+      # Too large: size vs max_size
     }
     case TooManyHeaders(_, count, max_headers, _, _, _) -> {
       # Header limit exceeded
@@ -602,10 +602,14 @@ You can also run benchmarks directly:
 
 ```bash
 cd test/benchmark
-inko run benchmark_bench.inko
+inko build --release benchmark_bench.inko
+./build/release/benchmark_bench
 ```
 
-Note: The benchmark suite measures relative performance. Due to Inko's type system limitations, exact timing values are not displayed, but the benchmarks complete successfully and can be used to compare relative performance between code versions.
+Build with `--release`: `inko run` uses a debug build, so its timings are not
+comparable across runs. Each benchmark prints the elapsed milliseconds for the
+fastest of three rounds; the values are useful for comparing versions of this
+parser, not as absolute numbers.
 
 ## Modules
 

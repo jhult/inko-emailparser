@@ -173,7 +173,7 @@ All limits are designed to prevent denial-of-service attacks:
 
 ### Memory Management
 
-- **Streaming where possible**: Large attachments are processed without loading entire content
+- **Streaming where needed**: `StreamingParser` delivers parts incrementally, so handlers can write large attachments to disk without holding them in memory; `EmailParser.parse` buffers the whole message, including decoded attachments
 - **Bounded allocations**: All limits ensure bounded memory usage
 - **Early validation**: Limits are checked before expensive operations
 
@@ -242,10 +242,10 @@ All limits are designed to prevent denial-of-service attacks:
 
 **Trade-off**: Streaming (slower but memory-efficient) vs. buffering (faster but memory-intensive)
 
-**Decision**: Mixed approach
-- Stream large attachments
-- Buffer headers and small messages
-- Limits ensure bounded memory usage
+**Decision**: Two APIs
+- `StreamingParser` streams parts and attachment chunks to a handler
+- `EmailParser.parse` buffers the whole message, including decoded attachments
+- Limits ensure bounded memory usage in both cases
 
 **Rationale**: Balances performance with resource constraints.
 
@@ -266,10 +266,7 @@ All limits are designed to prevent denial-of-service attacks:
 
 ### Potential Enhancements
 
-1. **Streaming API**: Incremental parsing for very large emails
-2. **Validation modes**: Strict vs. lenient parsing modes
-3. **Custom limits**: Per-instance limit configuration
-4. **Performance metrics**: Built-in profiling and logging
+1. **Performance metrics**: Built-in profiling and logging
 
 ### Extensibility
 
