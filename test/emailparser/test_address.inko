@@ -181,6 +181,13 @@ fn pub tests(t: mut Tests) {
     t.equal(name, Option.None)
   })
 
+  t.test('extract_display_name_angle_inside_quotes', fn (t) {
+    let (name, address) = extract_display_name('"A <b> C" <a@b.com>')
+
+    t.equal(name, Option.Some('A <b> C'))
+    t.equal(address, '"A <b> C" <a@b.com>')
+  })
+
   t.test('is_valid_email_format_simple', fn (t) {
     t.true(is_valid_email_format('test@example.com'))
   })

@@ -241,7 +241,9 @@ fn pub unquote_string(input: String) -> String {
 fn pub extract_display_name(input: String) -> (Option[String], String) {
   let trimmed = input.trim
 
-  match trimmed.index_of('<', 0) {
+  # A quoted display name may contain '<' (e.g. `"A <b> C" <a@b.com>`), so the
+  # bracket that starts the address is the first *top-level* one.
+  match find_top_level_byte(trimmed.clone, ASCII_LESS_THAN, 0) {
     case Some(lt_pos) -> {
       if lt_pos > 0 {
         let name_part = trimmed.slice(0, lt_pos).to_string.trim
