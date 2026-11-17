@@ -6,7 +6,7 @@
 
 import emailparser.decoder (
   decode_body_impl, decode_charset, decode_header_value_impl,
-  decode_rfc2047_quoted_printable,
+  decode_rfc2047_quoted_printable, decode_rfc2047_word,
 )
 import std.test (Tests)
 
@@ -329,5 +329,22 @@ fn pub tests(t: mut Tests) {
     }
 
     t.equal(decoded, 'abc')
+  })
+
+  t.test('rfc2047_word_bare_delimiters_do_not_panic', fn (t) {
+    t.equal(decode_rfc2047_word('=?='), '=?=')
+    t.equal(decode_rfc2047_word('=?A?='), '=?A?=')
+  })
+
+  t.test('rfc2047_b_word_with_whitespace', fn (t) {
+    let decoded = decode_header_value_impl('=?utf-8?B?SGVs bG8=?=')
+
+    t.equal(decoded, 'Hello')
+  })
+
+  t.test('rfc2047_stray_start_marker_does_not_block_later_words', fn (t) {
+    let decoded = decode_header_value_impl('Re: =? hmm =?utf-8?B?SGVsbG8=?=')
+
+    t.equal(decoded, 'Re: =? hmm Hello')
   })
 }

@@ -490,6 +490,9 @@ fn pub decode_rfc2047_word(word: String) -> String {
     return word
   }
 
+  # "=?=" satisfies both delimiters but has no content; slicing it would panic.
+  if word.size < 5 { return word }
+
   # `size` is byte-based, so slice by bytes here: `substring` counts characters
   # and would overshoot when the payload contains raw non-ASCII bytes.
   let content = word.slice(2, word.size - 2).to_string
@@ -532,10 +535,35 @@ fn pub decode_rfc2047_word(word: String) -> String {
 
   match encoding {
     case 'B' -> {
+      # Real-world encoded words occasionally contain whitespace (for example
+      # when a producer wrapped the payload). Strip it before decoding; the
+      # standard base64 decoder rejects such input outright.
+      let filtered = ByteArray.new
+      let encoded_bytes = encoded_text.to_byte_array
+      let mut f = 0
+
+      while f < encoded_bytes.size {
+        match encoded_bytes.get(f) {
+          case Ok(byte) -> {
+            if
+              byte != ASCII_SPACE
+                and byte != ASCII_HT
+                and byte != ASCII_CR
+                and byte != ASCII_LF
+            {
+              filtered.push(byte)
+            }
+
+            f = f + 1
+          }
+          case Error(_) -> f = f + 1
+        }
+      }
+
       # Encoded words are frequently unpadded, and padded ones are common too.
       # Strip up to two '=' and decode in unpadded mode, like
       # decode_base64_body does, so both forms work.
-      let mut data = encoded_text
+      let mut data = filtered.into_string
       let mut stripped = 0
 
       while stripped < 2 and data.size > 0 {
@@ -659,15 +687,34 @@ fn pub decode_header_value_impl(raw: String) -> String {
             # Decode and push the encoded word
             let encoded_word = raw.slice(begin, end).to_string
             let decoded = decode_rfc2047_word(encoded_word)
-            let decoded_bytes = decoded.to_byte_array
 
-            result.append(decoded_bytes)
+            if decoded == encoded_word {
+              # Not a valid encoded word. Emit the "=?" literally and keep
+              # scanning, so a bogus marker cannot hide later valid words.
+              result.append(raw.slice(begin, begin + 2).to_string.to_byte_array)
 
-            # Move position past the encoded word
-            pos = end
-            previous_encoded = true
+              pos = begin + 2
+              previous_encoded = false
+            } else {
+              result.append(decoded.to_byte_array)
+
+              # Move position past the encoded word
+              pos = end
+              previous_encoded = true
+            }
           }
-          case None -> break
+          case None -> {
+            # A stray "=?" must not stop the scan: emit it literally and
+            # resume searching after it for a well-formed encoded word.
+            let resume = begin + 2
+
+            if resume > pos {
+              result.append(raw.slice(pos, resume).to_string.to_byte_array)
+            }
+
+            pos = resume
+            previous_encoded = false
+          }
         }
       }
       case None -> break
