@@ -197,27 +197,11 @@ impl EmailDateFormatter {
 
     let weekday = self.format_weekday(local_date.day_of_week)
     let month = self.format_month(local_date.month)
-    let day = if local_date.day < 10 {
-      '0${local_date.day}'
-    } else {
-      local_date.day.to_string
-    }
+    let day = pad_number(local_date.day, 2)
     let year = pad_number(local_date.year, 4)
-    let hour = if local_date.hour < 10 {
-      '0${local_date.hour}'
-    } else {
-      local_date.hour.to_string
-    }
-    let minute = if local_date.minute < 10 {
-      '0${local_date.minute}'
-    } else {
-      local_date.minute.to_string
-    }
-    let second = if local_date.second < 10 {
-      '0${local_date.second}'
-    } else {
-      local_date.second.to_string
-    }
+    let hour = pad_number(local_date.hour, 2)
+    let minute = pad_number(local_date.minute, 2)
+    let second = pad_number(local_date.second, 2)
 
     # Format timezone as ±HHMM
     let tz = format_offset_seconds(offset)
