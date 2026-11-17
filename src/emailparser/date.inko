@@ -143,16 +143,15 @@ import std.time (DateTime)
 # Date formatter for email headers
 type pub EmailDateFormatter {
   let pub @timezone: String
-  let @use_local_offset: Bool
 }
 
 impl EmailDateFormatter {
   fn pub static new -> EmailDateFormatter {
-    EmailDateFormatter(timezone: '0000', use_local_offset: false)
+    EmailDateFormatter(timezone: '0000')
   }
 
   fn pub static with_timezone(tz: String) -> EmailDateFormatter {
-    EmailDateFormatter(timezone: tz, use_local_offset: false)
+    EmailDateFormatter(timezone: tz)
   }
 
   # Create a formatter for `tz`, or None when the offset can't be parsed
@@ -161,9 +160,7 @@ impl EmailDateFormatter {
   # mistyped offset instead of silently emitting a wrong Date header.
   fn pub static try_with_timezone(tz: String) -> Option[EmailDateFormatter] {
     match parse_timezone_seconds(tz) {
-      case Some(_) -> {
-        Option.Some(EmailDateFormatter(timezone: tz, use_local_offset: false))
-      }
+      case Some(_) -> Option.Some(EmailDateFormatter(timezone: tz))
       case None -> Option.None
     }
   }
@@ -179,13 +176,9 @@ impl EmailDateFormatter {
     # Convert the instant to the target offset so the wall-clock fields and
     # the numeric offset agree. Without this a local time could be emitted
     # with a +0000 suffix.
-    let offset = if @use_local_offset {
-      date.utc_offset
-    } else {
-      match parse_timezone_seconds(@timezone) {
-        case Some(seconds) -> seconds
-        case None -> 0
-      }
+    let offset = match parse_timezone_seconds(@timezone) {
+      case Some(seconds) -> seconds
+      case None -> 0
     }
 
     let local_date = match
