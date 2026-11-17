@@ -244,7 +244,6 @@ fn pub tests(t: mut Tests) {
     let result = parser.parse_multipart(
       'This is a body without any boundaries',
       'nonexistent',
-      '7bit',
     )
 
     match result {
@@ -257,7 +256,7 @@ fn pub tests(t: mut Tests) {
     let parser = EmailParser.new
     # Boundary with whitespace should be trimmed
     let body = '--boundary \n\nContent-Type: text/plain\n\nHello\n--boundary--'
-    let result = parser.parse_multipart(body, 'boundary ', '7bit')
+    let result = parser.parse_multipart(body, 'boundary ')
 
     match result {
       case Ok((text, _, _)) -> {
@@ -273,7 +272,7 @@ fn pub tests(t: mut Tests) {
   t.test('mime_multipart_basic', fn (t) {
     let parser = EmailParser.new
     let body = '--boundary\n\nContent-Type: text/plain\n\nHello\n--boundary--'
-    let result = parser.parse_multipart(body, 'boundary', '7bit')
+    let result = parser.parse_multipart(body, 'boundary')
 
     match result {
       case Ok((text, _, _)) -> {

@@ -342,7 +342,7 @@ import emailparser (EmailParser)
 
 let parser = EmailParser.new
 
-match parser.parse_multipart(raw_body, "boundary123", "7bit") {
+match parser.parse_multipart(raw_body, "boundary123") {
   case Ok((text, html, attachments)) -> {
     text         # Option[String] (text/plain body)
     html         # Option[String] (text/html body)

@@ -178,7 +178,6 @@ fn merge_multipart_part(
 fn handle_nested_multipart(
   decoded_bytes: ByteArray,
   ct_params: Array[(String, String)],
-  transfer_encoding: String,
   depth: Int,
   max_depth: Int,
   max_attachment_size: Int,
@@ -196,7 +195,6 @@ fn handle_nested_multipart(
         parse_multipart_impl(
           decoded_bytes.into_string,
           nested_boundary,
-          transfer_encoding,
           depth + 1,
           max_depth,
           max_attachment_size,
@@ -233,7 +231,6 @@ fn handle_nested_multipart(
 fn parse_multipart_impl(
   raw: String,
   boundary: String,
-  default_encoding: String,
   depth: Int,
   max_depth: Int,
   max_attachment_size: Int,
@@ -333,7 +330,6 @@ fn parse_multipart_impl(
             trimmed,
             max_attachment_size,
             max_headers,
-            default_encoding,
             strict_mode,
           )
         {
@@ -358,7 +354,6 @@ fn parse_multipart_impl(
                 handle_nested_multipart(
                   decoded_bytes,
                   ct_params,
-                  default_encoding,
                   depth,
                   max_depth,
                   max_attachment_size,
@@ -558,7 +553,6 @@ fn parse_multipart_part_headers(
 # Extract metadata from a multipart part's headers
 fn extract_part_metadata(
   part_headers: ref Array[(String, String)],
-  default_encoding: String,
   strict_mode: Bool,
 ) -> Result[
   (String, Array[(String, String)], String, Array[(String, String)], String),
@@ -649,7 +643,6 @@ fn parse_single_multipart_part(
   trimmed: String,
   max_attachment_size: Int,
   max_headers: Int,
-  default_encoding: String,
   strict_mode: Bool,
 ) -> Result[
   (
@@ -677,7 +670,7 @@ fn parse_single_multipart_part(
       }
 
       let (ct_main, ct_params, disp_main, _, transfer_encoding) = match
-        extract_part_metadata(part_headers, default_encoding, strict_mode)
+        extract_part_metadata(part_headers, strict_mode)
       {
         case Ok(metadata) -> metadata
         case Error(e) -> return Result.Error(e)

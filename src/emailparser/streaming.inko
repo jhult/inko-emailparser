@@ -641,7 +641,6 @@ impl StreamingParser {
               reader,
               initial_body,
               b,
-              content_transfer_encoding,
               @config.max_multipart_depth,
               @config.max_attachment_size,
               @config.max_headers,
@@ -772,7 +771,6 @@ fn parse_body_stream[H: mut + StreamHandler](
         parse_multipart_stream(
           body_raw,
           b,
-          content_transfer_encoding,
           0,
           config.max_multipart_depth,
           config.max_attachment_size,
@@ -1414,7 +1412,6 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
   reader: mut R,
   initial_body: ByteArray,
   boundary: String,
-  default_encoding: String,
   max_depth: Int,
   max_size: Int,
   max_headers: Int,
@@ -1455,7 +1452,7 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
 
   # Feed initial body data
   if initial_body.size > 0 {
-    match parser.feed(ref initial_body, wrapper, default_encoding) {
+    match parser.feed(ref initial_body, wrapper) {
       case Ok(_) -> {}
       case Error(e) -> {
         if strict_mode or !is_recoverable_part_error(ref e) {
@@ -1486,7 +1483,7 @@ fn process_body_reader_multipart[H: mut + StreamHandler, R: mut + AsyncReader](
           )
         }
 
-        match parser.feed(ref chunk, wrapper, default_encoding) {
+        match parser.feed(ref chunk, wrapper) {
           case Ok(_) -> {}
           case Error(e) -> {
             if strict_mode or !is_recoverable_part_error(ref e) {
@@ -1944,7 +1941,7 @@ fn finish_nested[H: mut + StreamHandler](
     nested_size: 0,
   )
 
-  match nested_parser.feed(ref nested_buffer, nested_wrapper, '7bit') {
+  match nested_parser.feed(ref nested_buffer, nested_wrapper) {
     case Ok(_) -> {}
     case Error(e) -> {
       if strict_mode or !is_recoverable_part_error(ref e) {
@@ -1969,7 +1966,6 @@ fn finish_nested[H: mut + StreamHandler](
 fn parse_multipart_stream[H: mut + StreamHandler](
   raw: String,
   boundary: String,
-  default_encoding: String,
   current_depth: Int,
   max_depth: Int,
   max_size: Int,
@@ -2022,7 +2018,7 @@ fn parse_multipart_stream[H: mut + StreamHandler](
 
   let data = raw.to_byte_array
 
-  match parser.feed(ref data, wrapper, default_encoding) {
+  match parser.feed(ref data, wrapper) {
     case Ok(_) -> {}
     case Error(e) -> {
       if strict_mode or !is_recoverable_part_error(ref e) {

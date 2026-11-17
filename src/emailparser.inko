@@ -329,7 +329,6 @@ fn parse_email_body(
         parse_multipart_impl(
           body_raw,
           b,
-          content_transfer_encoding,
           0,
           max_depth,
           max_size,
@@ -713,13 +712,11 @@ impl EmailParser {
   fn pub parse_multipart(
     raw: String,
     boundary: String,
-    default_encoding: String,
   ) -> Result[(Option[String], Option[String], Array[EmailAttachment]), Error] {
     match
       parse_multipart_impl(
         raw,
         boundary,
-        default_encoding,
         0,
         @config.max_multipart_depth,
         @config.max_attachment_size,
