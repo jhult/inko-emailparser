@@ -103,6 +103,10 @@ impl StreamHandler for FileAttachmentSaver {
   fn pub mut on_begin -> Result[Int, String] {
     @attachment_count = 0
 
+    # Reusing the saver for another message must not keep the previous
+    # message's descriptor open.
+    @current_file = Option.None
+
     # Create the output directory (and any parents) before writing files
     match @output_dir.to_path.create_directory_all {
       case Ok(_) -> {}
@@ -259,29 +263,35 @@ impl StreamHandler for FileAttachmentSaver {
   # Flushes and closes the file, logs final statistics.
   fn pub mut on_attachment_end(info: ref AttachmentInfo) -> Result[Int, String]
   {
-    match @current_file {
+    let result = match @current_file {
       case Some(mut file) -> {
         match file.file.flush {
-          case Ok(_) -> {}
+          case Ok(_) -> {
+            if @verbose {
+              let _ = Stdout.new.print(
+                '  Completed: '
+                  + file.chunk_count.to_string
+                  + ' chunks, '
+                  + file.total_bytes.to_string
+                  + ' bytes total',
+              )
+            }
+
+            Result.Ok(0)
+          }
           case Error(e) -> {
-            return Result.Error('failed to flush ' + file.path + ': ${e}')
+            Result.Error('failed to flush ' + file.path + ': ${e}')
           }
         }
-
-        if @verbose {
-          let _ = Stdout.new.print(
-            '  Completed: '
-              + file.chunk_count.to_string
-              + ' chunks, '
-              + file.total_bytes.to_string
-              + ' bytes total',
-          )
-        }
       }
-      case None -> {}
+      case None -> Result.Ok(0)
     }
 
-    Result.Ok(0)
+    # Dropping the `OutputFile` closes the descriptor, so do it before the
+    # flush error (if any) is propagated.
+    @current_file = Option.None
+
+    result
   }
 
   # Called when parsing completes successfully
