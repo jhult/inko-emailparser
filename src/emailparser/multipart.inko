@@ -120,24 +120,13 @@ fn merge_multipart_part(
 
       html_modified = true
     }
-    case Attachment -> {
-      # A missing disposition means the part was inferred to be an
-      # attachment; report it as such instead of the empty value. An explicit
-      # "inline" is preserved (e.g. images referenced from multipart/related).
-      let disposition = if disp_main.empty? { 'attachment' } else { disp_main }
-
-      new_attachment = Option.Some(
-        EmailAttachment.from_decoded_part(
-          content_type: ct_main,
-          filename: filename,
-          content_disposition: disposition,
-          content_id: content_id,
-          decoded_bytes: decoded_bytes,
-        ),
-      )
-    }
-    case Multipart -> {
-      # Nested multipart is handled before this function is called
+    case _ -> {
+      # Attachments and unhandled kinds. An un-attached multipart/* part is
+      # parsed recursively before this function is called, so the remaining
+      # kinds (Attachment, or Multipart when nested parsing is skipped) become
+      # attachments. A missing disposition means the part was inferred to be
+      # an attachment; report it as such instead of the empty value. An
+      # explicit "inline" is preserved (e.g. images in multipart/related).
       let disposition = if disp_main.empty? { 'attachment' } else { disp_main }
 
       new_attachment = Option.Some(
