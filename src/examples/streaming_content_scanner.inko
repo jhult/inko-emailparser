@@ -19,7 +19,6 @@ import emailparser.email_generator (TestAttachment, TestDataGenerator)
 import emailparser.error (Error)
 import emailparser.streaming (AttachmentInfo, StreamHandler, StreamingParser)
 import std.bytes (ByteArray)
-import std.option (Option)
 import std.stdio (Stderr, Stdout)
 
 # ContentScanner scans email content for malicious patterns
@@ -65,30 +64,40 @@ impl ContentScanner {
       'shell_exec',
     ]
 
-    let binary_pattern = recover ByteArray.new
+    # The EICAR antivirus test file signature. It is harmless, but scanners
+    # are expected to flag it, so it exercises the binary path.
+    let binary_pattern = 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
+      .to_byte_array
     let binary_patterns = [binary_pattern]
 
     ContentScanner.new(patterns, binary_patterns, true, verbose)
   }
 
-  fn mut scan_text(content: String) -> Option[String] {
+  # Return every malicious pattern present in the content
+  #
+  # The content is lowercased once, rather than once per pattern.
+  fn mut scan_text(content: String) -> Array[String] {
+    let haystack = content.to_lower
+    let mut found: Array[String] = []
+
     for pattern in @malicious_patterns.iter {
-      if content.contains?(pattern.to_lower) or content.contains?(pattern) {
-        return Option.Some(pattern.clone)
-      }
+      if haystack.contains?(pattern.to_lower) { found.push(pattern.clone) }
     }
 
-    Option.None
+    found
   }
 
-  fn mut scan_binary(data: ref ByteArray) -> Option[String] {
+  # Return every binary signature present in the data
+  fn mut scan_binary(data: ref ByteArray) -> Array[String] {
+    let mut found: Array[String] = []
+
     for pattern in @binary_patterns.iter {
       if contains_binary_pattern(data, pattern.clone) {
-        return Option.Some('binary_pattern_' + pattern.size.to_string)
+        found.push('binary signature (' + pattern.size.to_string + ' bytes)')
       }
     }
 
-    Option.None
+    found
   }
 
   fn pub mut get_patterns_found -> Array[String] {
@@ -166,25 +175,24 @@ impl StreamHandler for ContentScanner {
     }
 
     for (name, value) in headers.iter {
-      match scan_text(value.clone) {
-        case Some(pattern) -> {
-          @patterns_found.push(pattern.clone)
+      let found = scan_text(value.clone)
 
-          let _ = Stderr.new.print(
-            "WARNING: Malicious pattern '"
-              + pattern
-              + "' found in header '"
-              + name
-              + "'",
+      for pattern in found.iter {
+        @patterns_found.push(pattern.clone)
+
+        let _ = Stderr.new.print(
+          "WARNING: Malicious pattern '"
+            + pattern
+            + "' found in header '"
+            + name
+            + "'",
+        )
+
+        if @fail_fast {
+          return Result.Error(
+            "Malicious content detected in header '" + name + "': " + pattern,
           )
-
-          if @fail_fast {
-            return Result.Error(
-              "Malicious content detected in header '" + name + "': " + pattern,
-            )
-          }
         }
-        case None -> {}
       }
     }
 
@@ -198,21 +206,20 @@ impl StreamHandler for ContentScanner {
       )
     }
 
-    match scan_text(chunk) {
-      case Some(pattern) -> {
-        @patterns_found.push(pattern.clone)
+    let found = scan_text(chunk)
 
-        let _ = Stderr.new.print(
-          "WARNING: Malicious pattern '" + pattern + "' found in text body",
+    for pattern in found.iter {
+      @patterns_found.push(pattern.clone)
+
+      let _ = Stderr.new.print(
+        "WARNING: Malicious pattern '" + pattern + "' found in text body",
+      )
+
+      if @fail_fast {
+        return Result.Error(
+          'Malicious content detected in text body: ' + pattern,
         )
-
-        if @fail_fast {
-          return Result.Error(
-            'Malicious content detected in text body: ' + pattern,
-          )
-        }
       }
-      case None -> {}
     }
 
     Result.Ok(0)
@@ -225,21 +232,20 @@ impl StreamHandler for ContentScanner {
       )
     }
 
-    match scan_text(chunk) {
-      case Some(pattern) -> {
-        @patterns_found.push(pattern.clone)
+    let found = scan_text(chunk)
 
-        let _ = Stderr.new.print(
-          "WARNING: Malicious pattern '" + pattern + "' found in HTML body",
+    for pattern in found.iter {
+      @patterns_found.push(pattern.clone)
+
+      let _ = Stderr.new.print(
+        "WARNING: Malicious pattern '" + pattern + "' found in HTML body",
+      )
+
+      if @fail_fast {
+        return Result.Error(
+          'Malicious content detected in HTML body: ' + pattern,
         )
-
-        if @fail_fast {
-          return Result.Error(
-            'Malicious content detected in HTML body: ' + pattern,
-          )
-        }
       }
-      case None -> {}
     }
 
     Result.Ok(0)
@@ -274,23 +280,20 @@ impl StreamHandler for ContentScanner {
       )
     }
 
-    match scan_binary(chunk) {
-      case Some(pattern) -> {
-        @patterns_found.push(pattern.clone)
+    let found = scan_binary(chunk)
 
-        let _ = Stderr.new.print(
-          "WARNING: Malicious binary pattern '"
-            + pattern
-            + "' found in attachment",
+    for pattern in found.iter {
+      @patterns_found.push(pattern.clone)
+
+      let _ = Stderr.new.print(
+        'WARNING: Malicious ' + pattern + ' found in attachment',
+      )
+
+      if @fail_fast {
+        return Result.Error(
+          'Malicious content detected in attachment: ' + pattern,
         )
-
-        if @fail_fast {
-          return Result.Error(
-            'Malicious content detected in attachment: ' + pattern,
-          )
-        }
       }
-      case None -> {}
     }
 
     Result.Ok(0)
@@ -462,7 +465,42 @@ type async Main {
     let _ = out.print('')
 
     let _ = out.print(
-      '--- Test 5: Non-fail-fast mode (detect all violations) ---',
+      '--- Test 5: Email with a malicious binary attachment ---',
+    )
+
+    let eicar_attachments = [
+      TestAttachment(
+        name: 'eicar.com',
+        content_type: 'application/octet-stream',
+        content: 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*',
+        encoding: 'base64',
+      ),
+    ]
+
+    let eicar_email = generator.generate_email_with_attachments(
+      eicar_attachments,
+    )
+
+    let mut scanner5 = ContentScanner.with_defaults(true)
+    let parser5 = StreamingParser.new
+
+    match parser5.parse_stream(eicar_email, scanner5) {
+      case Ok(result) -> {
+        let _ = out.print('Result: CLEAN - No malicious patterns detected')
+        let _ = out.print('Subject: ' + result.subject)
+      }
+      case Error(e) -> {
+        let _ = out.print('Result: BLOCKED - ' + e.to_message)
+        let _ = out.print(
+          'Patterns found: ' + scanner5.get_patterns_found.size.to_string,
+        )
+      }
+    }
+
+    let _ = out.print('')
+
+    let _ = out.print(
+      '--- Test 6: Non-fail-fast mode (detect all violations) ---',
     )
 
     let multi_malicious_email = generator.generate_text_email(
@@ -471,17 +509,19 @@ type async Main {
     )
 
     let custom_patterns = ['virus', 'malware', 'trojan']
-    let mut scanner5 = ContentScanner.new(custom_patterns, [], false, true)
-    let parser5 = StreamingParser.new
+    let mut scanner6 = ContentScanner.new(custom_patterns, [], false, true)
+    let parser6 = StreamingParser.new
 
-    match parser5.parse_stream(multi_malicious_email, scanner5) {
+    match parser6.parse_stream(multi_malicious_email, scanner6) {
       case Ok(_) -> {
         let _ = out.print('Result: SCAN COMPLETE (non-fail-fast mode)')
         let _ = out.print(
-          'Violations detected: ' + scanner5.get_patterns_found.size.to_string,
+          'Violations detected: ' + scanner6.get_patterns_found.size.to_string,
         )
 
-        for pattern in scanner5.get_patterns_found.iter {
+        let found = scanner6.get_patterns_found
+
+        for pattern in found.iter {
           let _ = out.print('  - ' + pattern)
         }
       }
