@@ -92,6 +92,24 @@ jobs:
       - name: Run Performance Benchmarks
         run: ./test/benchmark/benchmark.sh --json
 
+      # github-action-benchmark fetches the history branch with
+      # `git fetch origin <branch>:<branch>` and fails hard instead of creating
+      # it, so seed an empty orphan branch on first run (and after the branch
+      # is ever deleted). Idempotent: a no-op once the branch exists.
+      - name: Ensure benchmark data branch exists
+        if: github.event_name == 'push' && github.ref == 'refs/heads/trunk'
+        run: |
+          if git ls-remote --exit-code --heads origin benchmark-data > /dev/null 2>&1; then
+            echo "benchmark-data already exists"
+            exit 0
+          fi
+          echo "benchmark-data is missing, creating an orphan branch"
+          tree_id="$(git hash-object -t tree /dev/null)"
+          commit_id="$(git -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit-tree "$tree_id" -m 'chore(ci): initialize benchmark data branch')"
+          git push origin "$commit_id:refs/heads/benchmark-data"
+
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         if: github.event_name == 'push' && github.ref == 'refs/heads/trunk'
