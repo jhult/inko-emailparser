@@ -53,7 +53,7 @@ jobs:
     name: Check and Test
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/inko-lang/inko@sha256:fa5aad694709c95e7e9abe3fd290f71ec62f1b4e2b230fad8b56b6b64617052e
+      image: ghcr.io/inko-lang/inko@sha256:e36bd49b1bc37d580849e749ae5884864e30a750d1f870e418fafc629a87c49f
     needs: [license-check]
 
     steps:
@@ -73,7 +73,7 @@ jobs:
     permissions:
       contents: write
     container:
-      image: ghcr.io/inko-lang/inko@sha256:fa5aad694709c95e7e9abe3fd290f71ec62f1b4e2b230fad8b56b6b64617052e
+      image: ghcr.io/inko-lang/inko@sha256:e36bd49b1bc37d580849e749ae5884864e30a750d1f870e418fafc629a87c49f
     needs: [license-check, check-and-test]
 
     steps:
